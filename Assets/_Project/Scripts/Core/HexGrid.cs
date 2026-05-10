@@ -128,13 +128,14 @@ namespace HexBattle.Core
         public static HashSet<Vector2Int> FloodFill(
             Vector2Int origin,
             int moveRange,
-            ICollection<Vector2Int> validTiles,
+            IEnumerable<Vector2Int> validTiles,
             System.Func<Vector2Int, int> stepCost = null)
         {
             stepCost ??= _ => 1;
 
-            var visited = new HashSet<Vector2Int>();
-            var queue   = new Queue<(Vector2Int tile, int cost)>();
+            var validSet = new HashSet<Vector2Int>(validTiles);
+            var visited  = new HashSet<Vector2Int>();
+            var queue    = new Queue<(Vector2Int tile, int cost)>();
             queue.Enqueue((origin, 0));
             visited.Add(origin);
 
@@ -143,7 +144,7 @@ namespace HexBattle.Core
                 var (tile, cost) = queue.Dequeue();
                 foreach (var nb in GetNeighbors(tile))
                 {
-                    if (!validTiles.Contains(nb)) continue;
+                    if (!validSet.Contains(nb)) continue;
                     if (visited.Contains(nb))      continue;
                     int newCost = cost + stepCost(nb);
                     if (newCost > moveRange)        continue;

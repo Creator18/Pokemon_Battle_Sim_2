@@ -71,8 +71,8 @@ namespace HexBattle.Camera
             }
 
             // Mouse right-drag
-            if (Input.GetMouseButton(1))
-                axis += Input.GetAxis("Mouse X") * 0.5f;
+            if (UnityEngine.Input.GetMouseButton(1))
+                axis += UnityEngine.Input.GetAxis("Mouse X") * 0.5f;
 
             if (Mathf.Abs(axis) > 0.01f)
             {
@@ -96,7 +96,7 @@ namespace HexBattle.Camera
         // ── Zoom ──────────────────────────────────────────────────────────────
         private void HandleZoom()
         {
-            float scroll = Input.GetAxis("Mouse ScrollWheel");
+            float scroll = UnityEngine.Input.GetAxis("Mouse ScrollWheel");
             if (Mathf.Abs(scroll) > 0.001f)
             {
                 CurrentOrthoSize = Mathf.Clamp(

@@ -17,7 +17,7 @@ namespace HexBattle.Input
         public static TileInputHandler Instance { get; private set; }
 
         [Header("References")]
-        public new UnityEngine.Camera Camera;
+        public UnityEngine.Camera Camera;
 
         private HexTile  _hoveredTile;
         private int      _hexLayer;
