@@ -149,7 +149,6 @@ namespace HexBattle.Network
             => OnBattleLogEntry?.Invoke(line.ToString());
 
         // ── Server-side turn resolution ───────────────────────────────────────
-        [Server]
         private void ResolveTurn()
         {
             if (!IsServer) return;

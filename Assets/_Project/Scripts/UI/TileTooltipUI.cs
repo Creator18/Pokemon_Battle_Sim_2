@@ -22,9 +22,9 @@ namespace HexBattle.UI
         public float               HeightOffset = 1.8f;   // units above tile center
         public float               FadeSpeed    = 8f;
 
-        private HexTile _targetTile;
-        private Camera  _cam;
-        private bool    _visible;
+        private HexTile            _targetTile;
+        private UnityEngine.Camera _cam;
+        private bool               _visible;
 
         private void Awake()
         {
@@ -34,7 +34,7 @@ namespace HexBattle.UI
 
         private void Start()
         {
-            _cam = Camera.main;
+            _cam = UnityEngine.Camera.main;
             Hide();
         }
 
