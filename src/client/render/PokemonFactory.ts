@@ -13,6 +13,9 @@ import { Scene } from '@babylonjs/core/scene';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+// Side-effect import: registers MeshBuilder.CreateCapsule used by the stylized
+// primitive fallbacks below (rounder limbs/bodies than plain cylinders).
+import '@babylonjs/core/Meshes/Builders/capsuleBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -26,7 +29,9 @@ function solidMat(scene: Scene, name: string, hex: string, emissive?: string): S
   const m = new StandardMaterial(name, scene);
   const [r, g, b] = hexToRgb(hex);
   m.diffuseColor = new Color3(r, g, b);
-  m.specularColor = new Color3(0.15, 0.15, 0.15);
+  // Soft, slightly warm specular reads better on the rounded stylized shapes.
+  m.specularColor = new Color3(0.12, 0.12, 0.12);
+  m.specularPower = 48;
   if (emissive) {
     const [er, eg, eb] = hexToRgb(emissive);
     m.emissiveColor = new Color3(er, eg, eb);
@@ -172,42 +177,100 @@ export class PokemonFactory {
     return mesh;
   }
 
+  /**
+   * Create a charming eye: a dark pupil sphere plus a tiny white highlight,
+   * grouped under a TransformNode positioned at `pos`. Both meshes cast shadows
+   * via `add`. Returns the group node (parented under `parent`).
+   */
+  private addEye(
+    parent: TransformNode,
+    dark: StandardMaterial,
+    highlight: StandardMaterial,
+    pos: Vector3,
+    size: number,
+  ): TransformNode {
+    const g = new TransformNode('eye', this.scene);
+    g.parent = parent;
+    g.position = pos;
+    const pupil = MeshBuilder.CreateSphere('eye_pupil', { diameter: size, segments: 8 }, this.scene);
+    this.add(g, pupil, dark, Vector3.Zero());
+    const glint = MeshBuilder.CreateSphere('eye_glint', { diameter: size * 0.42, segments: 6 }, this.scene);
+    this.add(g, glint, highlight, new Vector3(size * 0.18, size * 0.18, size * 0.38));
+    return g;
+  }
+
   private buildPikachu(b: TransformNode, accent: string): void {
     const yellow = solidMat(this.scene, 'pk_y', '#F8D030');
     const black = solidMat(this.scene, 'pk_k', '#2A2A2A');
     const red = solidMat(this.scene, 'pk_r', '#E03030', '#802020');
     const brown = solidMat(this.scene, 'pk_b', '#7A4A20');
+    const white = solidMat(this.scene, 'pk_wt', '#FFFFFF');
+    const nose = solidMat(this.scene, 'pk_n', '#1E1E1E');
     void accent;
-    const body = MeshBuilder.CreateSphere('pk_body', { diameter: 0.85, segments: 12 }, this.scene);
+    // Rounded pear body via a scaled sphere.
+    const body = MeshBuilder.CreateSphere('pk_body', { diameter: 0.85, segments: 14 }, this.scene);
     body.scaling = new Vector3(1, 1.1, 0.95);
     this.add(b, body, yellow, new Vector3(0, 0.55, 0));
-    const head = MeshBuilder.CreateSphere('pk_head', { diameter: 0.62, segments: 12 }, this.scene);
-    this.add(b, head, yellow, new Vector3(0, 1.05, 0));
-    // Ears
+    // Two brown back stripes.
+    for (const y of [0.62, 0.82]) {
+      const stripe = MeshBuilder.CreateBox('pk_stripe', { width: 0.34, height: 0.06, depth: 0.05 }, this.scene);
+      this.add(b, stripe, brown, new Vector3(0, y, -0.38));
+    }
+    const head = MeshBuilder.CreateSphere('pk_head', { diameter: 0.66, segments: 14 }, this.scene);
+    head.scaling = new Vector3(1.05, 0.95, 1);
+    this.add(b, head, yellow, new Vector3(0, 1.08, 0));
+    // Defined snout + nose.
+    const snout = MeshBuilder.CreateSphere('pk_snout', { diameter: 0.26, segments: 10 }, this.scene);
+    snout.scaling = new Vector3(1.2, 0.8, 0.9);
+    this.add(b, snout, yellow, new Vector3(0, 0.98, 0.3));
+    const noseM = MeshBuilder.CreateSphere('pk_nose', { diameter: 0.07, segments: 6 }, this.scene);
+    this.add(b, noseM, nose, new Vector3(0, 1.03, 0.42));
+    // Ears: yellow taper with black tips.
     for (const s of [-1, 1]) {
-      const ear = MeshBuilder.CreateCylinder('pk_ear', { diameterTop: 0.03, diameterBottom: 0.16, height: 0.55, tessellation: 8 }, this.scene);
+      const ear = MeshBuilder.CreateCapsule('pk_ear', { radius: 0.08, height: 0.5, tessellation: 8 }, this.scene);
+      ear.scaling = new Vector3(0.75, 1, 0.5);
       ear.rotation.z = s * 0.35;
-      this.add(b, ear, yellow, new Vector3(s * 0.18, 1.5, 0));
-      const tip = MeshBuilder.CreateCylinder('pk_eartip', { diameterTop: 0.03, diameterBottom: 0.12, height: 0.18, tessellation: 8 }, this.scene);
+      this.add(b, ear, yellow, new Vector3(s * 0.2, 1.52, -0.02));
+      const tip = MeshBuilder.CreateCapsule('pk_eartip', { radius: 0.07, height: 0.2, tessellation: 8 }, this.scene);
+      tip.scaling = new Vector3(0.75, 1, 0.5);
       tip.rotation.z = s * 0.35;
-      this.add(b, tip, black, new Vector3(s * 0.22, 1.72, 0));
+      this.add(b, tip, black, new Vector3(s * 0.27, 1.74, -0.02));
     }
-    // Cheeks
+    // Big red cheeks.
     for (const s of [-1, 1]) {
-      const cheek = MeshBuilder.CreateSphere('pk_cheek', { diameter: 0.2 }, this.scene);
-      this.add(b, cheek, red, new Vector3(s * 0.26, 0.98, 0.22));
+      const cheek = MeshBuilder.CreateSphere('pk_cheek', { diameter: 0.24, segments: 10 }, this.scene);
+      cheek.scaling = new Vector3(1, 1, 0.6);
+      this.add(b, cheek, red, new Vector3(s * 0.28, 0.98, 0.26));
     }
-    // Eyes
+    // Eyes with pupil + highlight.
     for (const s of [-1, 1]) {
-      const eye = MeshBuilder.CreateSphere('pk_eye', { diameter: 0.1 }, this.scene);
-      this.add(b, eye, black, new Vector3(s * 0.15, 1.12, 0.28));
+      this.addEye(b, black, white, new Vector3(s * 0.16, 1.16, 0.3), 0.13);
     }
-    // Lightning tail (angular boxes)
-    const t1 = MeshBuilder.CreateBox('pk_tail1', { width: 0.12, height: 0.3, depth: 0.08 }, this.scene);
-    t1.rotation.z = 0.6;
-    this.add(b, t1, brown, new Vector3(-0.45, 0.6, -0.1));
-    const t2 = MeshBuilder.CreateBox('pk_tail2', { width: 0.28, height: 0.12, depth: 0.08 }, this.scene);
-    this.add(b, t2, yellow, new Vector3(-0.62, 0.85, -0.1));
+    // Arms (short capsules).
+    for (const s of [-1, 1]) {
+      const arm = MeshBuilder.CreateCapsule('pk_arm', { radius: 0.07, height: 0.28, tessellation: 8 }, this.scene);
+      arm.rotation.z = s * 0.7;
+      this.add(b, arm, yellow, new Vector3(s * 0.4, 0.6, 0.08));
+    }
+    // Feet.
+    for (const s of [-1, 1]) {
+      const foot = MeshBuilder.CreateSphere('pk_foot', { diameter: 0.22, segments: 8 }, this.scene);
+      foot.scaling = new Vector3(0.9, 0.6, 1.3);
+      this.add(b, foot, yellow, new Vector3(s * 0.22, 0.15, 0.12));
+    }
+    // Lightning-bolt tail: wider zigzag from angled segments.
+    const tail = new TransformNode('pk_tail', this.scene);
+    tail.parent = b;
+    tail.position = new Vector3(-0.42, 0.55, -0.15);
+    const seg = (name: string, w: number, h: number, x: number, y: number, rz: number, mat: StandardMaterial): void => {
+      const m = MeshBuilder.CreateBox(name, { width: w, height: h, depth: 0.07 }, this.scene);
+      m.rotation.z = rz;
+      this.add(tail, m, mat, new Vector3(x, y, 0));
+    };
+    seg('pk_tail1', 0.14, 0.24, 0, 0.02, 0.5, brown);
+    seg('pk_tail2', 0.34, 0.14, -0.14, 0.24, -0.35, yellow);
+    seg('pk_tail3', 0.16, 0.34, -0.02, 0.5, 0.55, yellow);
+    seg('pk_tail4', 0.34, 0.15, 0.16, 0.72, -0.3, yellow);
   }
 
   private buildCharizard(b: TransformNode, accent: string): void {
@@ -216,40 +279,96 @@ export class PokemonFactory {
     const wing = solidMat(this.scene, 'cz_w', '#2E7D6E');
     const flame = solidMat(this.scene, 'cz_f', '#FF6A00', '#FF3D00');
     const black = solidMat(this.scene, 'cz_k', '#222');
+    const white = solidMat(this.scene, 'cz_wt', '#FFFFFF');
+    const claw = solidMat(this.scene, 'cz_cl', '#EDE3C8');
     void accent;
-    const body = MeshBuilder.CreateSphere('cz_body', { diameter: 0.9, segments: 12 }, this.scene);
+    const body = MeshBuilder.CreateSphere('cz_body', { diameter: 0.9, segments: 14 }, this.scene);
     body.scaling = new Vector3(1, 1.3, 0.9);
     this.add(b, body, orange, new Vector3(0, 0.7, 0));
-    const belly = MeshBuilder.CreateSphere('cz_belly', { diameter: 0.6 }, this.scene);
+    const belly = MeshBuilder.CreateSphere('cz_belly', { diameter: 0.6, segments: 12 }, this.scene);
     belly.scaling = new Vector3(0.8, 1.2, 0.5);
     this.add(b, belly, cream, new Vector3(0, 0.65, 0.28));
-    const head = MeshBuilder.CreateSphere('cz_head', { diameter: 0.5 }, this.scene);
-    head.scaling = new Vector3(1, 0.9, 1.2);
-    this.add(b, head, orange, new Vector3(0, 1.35, 0.1));
-    // Horns
+    // Longer neck.
+    const neck = MeshBuilder.CreateCapsule('cz_neck', { radius: 0.16, height: 0.42, tessellation: 10 }, this.scene);
+    neck.rotation.x = 0.35;
+    this.add(b, neck, orange, new Vector3(0, 1.12, 0.05));
+    const head = MeshBuilder.CreateSphere('cz_head', { diameter: 0.5, segments: 12 }, this.scene);
+    head.scaling = new Vector3(1, 0.9, 1.15);
+    this.add(b, head, orange, new Vector3(0, 1.42, 0.12));
+    // Snout with nostrils.
+    const snout = MeshBuilder.CreateSphere('cz_snout', { diameter: 0.32, segments: 10 }, this.scene);
+    snout.scaling = new Vector3(0.9, 0.7, 1.2);
+    this.add(b, snout, orange, new Vector3(0, 1.36, 0.42));
     for (const s of [-1, 1]) {
-      const horn = MeshBuilder.CreateCylinder('cz_horn', { diameterTop: 0, diameterBottom: 0.08, height: 0.28 }, this.scene);
+      const nostril = MeshBuilder.CreateSphere('cz_nostril', { diameter: 0.045, segments: 6 }, this.scene);
+      this.add(b, nostril, black, new Vector3(s * 0.06, 1.38, 0.58));
+    }
+    // Small upper teeth.
+    for (const s of [-1, 1]) {
+      const tooth = MeshBuilder.CreateCylinder('cz_tooth', { diameterTop: 0, diameterBottom: 0.05, height: 0.08 }, this.scene);
+      tooth.rotation.x = Math.PI;
+      this.add(b, tooth, white, new Vector3(s * 0.08, 1.28, 0.5));
+    }
+    // Horns.
+    for (const s of [-1, 1]) {
+      const horn = MeshBuilder.CreateCylinder('cz_horn', { diameterTop: 0, diameterBottom: 0.08, height: 0.3 }, this.scene);
       horn.rotation.x = -0.4;
-      this.add(b, horn, cream, new Vector3(s * 0.12, 1.6, -0.05));
+      this.add(b, horn, cream, new Vector3(s * 0.13, 1.66, -0.04));
     }
     for (const s of [-1, 1]) {
-      const eye = MeshBuilder.CreateSphere('cz_eye', { diameter: 0.08 }, this.scene);
-      this.add(b, eye, black, new Vector3(s * 0.13, 1.4, 0.35));
+      this.addEye(b, black, white, new Vector3(s * 0.14, 1.46, 0.38), 0.09);
     }
-    // Wings
+    // Larger layered wings: membrane + a couple of finger struts.
     for (const s of [-1, 1]) {
-      const w = MeshBuilder.CreateBox('cz_wing', { width: 0.9, height: 0.55, depth: 0.04 }, this.scene);
-      w.rotation.y = s * 0.5;
-      w.rotation.z = s * 0.2;
-      this.add(b, w, wing, new Vector3(s * 0.7, 1.0, -0.35));
+      const wingGroup = new TransformNode('cz_winggrp', this.scene);
+      wingGroup.parent = b;
+      wingGroup.position = new Vector3(s * 0.4, 1.05, -0.32);
+      wingGroup.rotation.y = s * 0.6;
+      wingGroup.rotation.z = s * 0.15;
+      const membrane = MeshBuilder.CreateBox('cz_wing', { width: 0.95, height: 0.62, depth: 0.03 }, this.scene);
+      this.add(wingGroup, membrane, wing, new Vector3(s * 0.45, 0.02, 0));
+      const upper = MeshBuilder.CreateSphere('cz_wingtop', { diameter: 0.3, segments: 8 }, this.scene);
+      upper.scaling = new Vector3(2.4, 0.5, 0.3);
+      this.add(wingGroup, upper, wing, new Vector3(s * 0.45, 0.34, 0));
+      for (const fx of [0.25, 0.55, 0.85]) {
+        const strut = MeshBuilder.CreateCylinder('cz_strut', { diameter: 0.045, height: 0.6 }, this.scene);
+        this.add(wingGroup, strut, orange, new Vector3(s * fx, 0.0, 0));
+      }
     }
-    // Tail + flame
-    const tail = MeshBuilder.CreateCylinder('cz_tail', { diameterTop: 0.12, diameterBottom: 0.22, height: 0.7 }, this.scene);
-    tail.rotation.x = 0.9;
-    this.add(b, tail, orange, new Vector3(0, 0.45, -0.5));
-    const fl = MeshBuilder.CreateSphere('cz_flame', { diameter: 0.28 }, this.scene);
+    // Arms with claws.
+    for (const s of [-1, 1]) {
+      const arm = MeshBuilder.CreateCapsule('cz_arm', { radius: 0.08, height: 0.32, tessellation: 8 }, this.scene);
+      arm.rotation.z = s * 0.6;
+      this.add(b, arm, orange, new Vector3(s * 0.42, 0.75, 0.12));
+      for (const c of [-1, 0, 1]) {
+        const cl = MeshBuilder.CreateCylinder('cz_claw', { diameterTop: 0, diameterBottom: 0.03, height: 0.1 }, this.scene);
+        cl.rotation.x = -Math.PI / 2;
+        this.add(b, cl, claw, new Vector3(s * 0.5 + c * 0.03, 0.6, 0.22));
+      }
+    }
+    // Legs with claws.
+    for (const s of [-1, 1]) {
+      const leg = MeshBuilder.CreateCapsule('cz_leg', { radius: 0.11, height: 0.34, tessellation: 8 }, this.scene);
+      this.add(b, leg, orange, new Vector3(s * 0.24, 0.28, 0.05));
+      const foot = MeshBuilder.CreateSphere('cz_footpad', { diameter: 0.2, segments: 8 }, this.scene);
+      foot.scaling = new Vector3(1, 0.6, 1.3);
+      this.add(b, foot, orange, new Vector3(s * 0.24, 0.1, 0.14));
+      for (const c of [-1, 0, 1]) {
+        const cl = MeshBuilder.CreateCylinder('cz_toeclaw', { diameterTop: 0, diameterBottom: 0.03, height: 0.09 }, this.scene);
+        cl.rotation.x = -Math.PI / 2;
+        this.add(b, cl, claw, new Vector3(s * 0.24 + c * 0.06, 0.07, 0.26));
+      }
+    }
+    // Longer curved tail ending in glowing flame.
+    const tail1 = MeshBuilder.CreateCapsule('cz_tail1', { radius: 0.14, height: 0.5, tessellation: 8 }, this.scene);
+    tail1.rotation.x = 1.0;
+    this.add(b, tail1, orange, new Vector3(0, 0.5, -0.45));
+    const tail2 = MeshBuilder.CreateCapsule('cz_tail2', { radius: 0.1, height: 0.4, tessellation: 8 }, this.scene);
+    tail2.rotation.x = 0.3;
+    this.add(b, tail2, orange, new Vector3(0, 0.35, -0.78));
+    const fl = MeshBuilder.CreateSphere('cz_flame', { diameter: 0.3, segments: 10 }, this.scene);
     fl.scaling = new Vector3(1, 1.6, 1);
-    this.add(b, fl, flame, new Vector3(0, 0.6, -0.85));
+    this.add(b, fl, flame, new Vector3(0, 0.55, -0.95));
     fl.metadata = { flame: true };
   }
 
@@ -257,97 +376,206 @@ export class PokemonFactory {
     const white = solidMat(this.scene, 'gv_w', '#F0F0F5');
     const green = solidMat(this.scene, 'gv_g', '#4CAF7D');
     const red = solidMat(this.scene, 'gv_r', '#D03050', '#701828');
+    const dark = solidMat(this.scene, 'gv_k', '#3A2530');
+    const glint = solidMat(this.scene, 'gv_wt', '#FFFFFF');
     void accent;
-    // Gown (cone skirt)
-    const gown = MeshBuilder.CreateCylinder('gv_gown', { diameterTop: 0.25, diameterBottom: 1.0, height: 1.0, tessellation: 16 }, this.scene);
-    this.add(b, gown, white, new Vector3(0, 0.5, 0));
-    const torso = MeshBuilder.CreateSphere('gv_torso', { diameter: 0.4 }, this.scene);
-    this.add(b, torso, white, new Vector3(0, 1.05, 0));
-    // Green hair-helmet
-    const hair = MeshBuilder.CreateSphere('gv_hair', { diameter: 0.5 }, this.scene);
-    hair.scaling = new Vector3(1, 1, 1.15);
-    this.add(b, hair, green, new Vector3(0, 1.35, 0));
-    const face = MeshBuilder.CreateSphere('gv_face', { diameter: 0.34 }, this.scene);
-    this.add(b, face, white, new Vector3(0, 1.32, 0.14));
-    // Red chest fin
-    const fin = MeshBuilder.CreateCylinder('gv_fin', { diameterTop: 0, diameterBottom: 0.4, height: 0.5, tessellation: 3 }, this.scene);
-    fin.rotation.x = Math.PI;
-    this.add(b, fin, red, new Vector3(0, 0.95, 0.22));
-    // Arm-hair sweeps
+    // Flowing floor-length gown: layered cones for a smoother, tiered skirt.
+    const skirt1 = MeshBuilder.CreateCylinder('gv_gown1', { diameterTop: 0.28, diameterBottom: 1.02, height: 0.7, tessellation: 16 }, this.scene);
+    this.add(b, skirt1, white, new Vector3(0, 0.35, 0));
+    const skirt2 = MeshBuilder.CreateCylinder('gv_gown2', { diameterTop: 0.32, diameterBottom: 0.78, height: 0.55, tessellation: 16 }, this.scene);
+    this.add(b, skirt2, white, new Vector3(0, 0.72, 0));
+    // Rounded skirt hem.
+    const hem = MeshBuilder.CreateTorus('gv_hem', { diameter: 0.95, thickness: 0.12, tessellation: 16 }, this.scene);
+    hem.scaling = new Vector3(1, 0.5, 1);
+    this.add(b, hem, white, new Vector3(0, 0.06, 0));
+    const torso = MeshBuilder.CreateSphere('gv_torso', { diameter: 0.4, segments: 12 }, this.scene);
+    torso.scaling = new Vector3(0.9, 1.1, 0.85);
+    this.add(b, torso, white, new Vector3(0, 1.02, 0));
+    // Slender arms.
     for (const s of [-1, 1]) {
-      const sweep = MeshBuilder.CreateCylinder('gv_sweep', { diameterTop: 0, diameterBottom: 0.18, height: 0.7 }, this.scene);
-      sweep.rotation.z = s * 0.4;
-      this.add(b, sweep, green, new Vector3(s * 0.32, 1.0, 0));
+      const arm = MeshBuilder.CreateCapsule('gv_arm', { radius: 0.05, height: 0.5, tessellation: 8 }, this.scene);
+      arm.rotation.z = s * 0.35;
+      this.add(b, arm, white, new Vector3(s * 0.24, 0.9, 0.05));
     }
+    // Smoother head.
+    const head = MeshBuilder.CreateSphere('gv_head', { diameter: 0.36, segments: 14 }, this.scene);
+    this.add(b, head, white, new Vector3(0, 1.36, 0.02));
+    // Green hair framing the face (back helmet).
+    const hair = MeshBuilder.CreateSphere('gv_hair', { diameter: 0.46, segments: 14 }, this.scene);
+    hair.scaling = new Vector3(1.05, 1, 1.1);
+    this.add(b, hair, green, new Vector3(0, 1.38, -0.06));
+    // Two flowing side locks framing the face.
+    for (const s of [-1, 1]) {
+      const lock = MeshBuilder.CreateCapsule('gv_lock', { radius: 0.06, height: 0.5, tessellation: 8 }, this.scene);
+      lock.rotation.z = s * 0.15;
+      this.add(b, lock, green, new Vector3(s * 0.2, 1.18, 0.14));
+    }
+    // Bangs sweeping over the face.
+    const bang = MeshBuilder.CreateSphere('gv_bang', { diameter: 0.34, segments: 10 }, this.scene);
+    bang.scaling = new Vector3(1.1, 0.55, 0.8);
+    this.add(b, bang, green, new Vector3(0, 1.48, 0.12));
+    // Calm eyes.
+    for (const s of [-1, 1]) {
+      this.addEye(b, dark, glint, new Vector3(s * 0.1, 1.34, 0.19), 0.07);
+    }
+    // Red chest fin (front) and back fin.
+    const finF = MeshBuilder.CreateCylinder('gv_finf', { diameterTop: 0, diameterBottom: 0.42, height: 0.55, tessellation: 3 }, this.scene);
+    finF.rotation.x = Math.PI;
+    this.add(b, finF, red, new Vector3(0, 0.92, 0.24));
+    const finB = MeshBuilder.CreateCylinder('gv_finb', { diameterTop: 0, diameterBottom: 0.36, height: 0.48, tessellation: 3 }, this.scene);
+    finB.rotation.x = Math.PI;
+    this.add(b, finB, red, new Vector3(0, 0.92, -0.24));
   }
 
   private buildLucario(b: TransformNode, accent: string): void {
     const blue = solidMat(this.scene, 'lc_b', '#3A6FD0');
     const black = solidMat(this.scene, 'lc_k', '#2A2A38');
     const cream = solidMat(this.scene, 'lc_c', '#E8D8B0');
+    const yellow = solidMat(this.scene, 'lc_y', '#F0C040');
+    const red = solidMat(this.scene, 'lc_r', '#C03040', '#601018');
+    const glint = solidMat(this.scene, 'lc_wt', '#FFFFFF');
     void accent;
-    const body = MeshBuilder.CreateSphere('lc_body', { diameter: 0.7 }, this.scene);
-    body.scaling = new Vector3(0.85, 1.3, 0.7);
-    this.add(b, body, blue, new Vector3(0, 0.75, 0));
-    const chest = MeshBuilder.CreateSphere('lc_chest', { diameter: 0.45 }, this.scene);
-    chest.scaling = new Vector3(0.8, 1, 0.5);
-    this.add(b, chest, cream, new Vector3(0, 0.85, 0.22));
-    const head = MeshBuilder.CreateSphere('lc_head', { diameter: 0.44 }, this.scene);
-    head.scaling = new Vector3(1, 1, 1.25);
-    this.add(b, head, blue, new Vector3(0, 1.4, 0.08));
-    const muzzle = MeshBuilder.CreateCylinder('lc_muzzle', { diameterTop: 0.1, diameterBottom: 0.22, height: 0.24 }, this.scene);
+    const body = MeshBuilder.CreateCapsule('lc_body', { radius: 0.28, height: 0.85, tessellation: 12 }, this.scene);
+    body.scaling = new Vector3(0.95, 1, 0.8);
+    this.add(b, body, blue, new Vector3(0, 0.85, 0));
+    const chest = MeshBuilder.CreateSphere('lc_chest', { diameter: 0.42, segments: 12 }, this.scene);
+    chest.scaling = new Vector3(0.85, 1.1, 0.5);
+    this.add(b, chest, cream, new Vector3(0, 0.92, 0.22));
+    // Chest spike.
+    const chestSpike = MeshBuilder.CreateCylinder('lc_cspike', { diameterTop: 0, diameterBottom: 0.12, height: 0.22 }, this.scene);
+    chestSpike.rotation.x = Math.PI / 2;
+    this.add(b, chestSpike, black, new Vector3(0, 0.95, 0.4));
+    const head = MeshBuilder.CreateSphere('lc_head', { diameter: 0.44, segments: 14 }, this.scene);
+    head.scaling = new Vector3(1, 1, 1.2);
+    this.add(b, head, blue, new Vector3(0, 1.42, 0.08));
+    // Muzzle with nose.
+    const muzzle = MeshBuilder.CreateCapsule('lc_muzzle', { radius: 0.1, height: 0.26, tessellation: 8 }, this.scene);
     muzzle.rotation.x = Math.PI / 2;
-    this.add(b, muzzle, black, new Vector3(0, 1.38, 0.32));
-    // Ear appendages
+    this.add(b, muzzle, blue, new Vector3(0, 1.38, 0.34));
+    const nose = MeshBuilder.CreateSphere('lc_nose', { diameter: 0.09, segments: 8 }, this.scene);
+    this.add(b, nose, black, new Vector3(0, 1.4, 0.48));
+    // Eyes.
     for (const s of [-1, 1]) {
-      const ear = MeshBuilder.CreateCylinder('lc_ear', { diameterTop: 0.02, diameterBottom: 0.12, height: 0.4 }, this.scene);
-      ear.rotation.z = s * 0.3;
-      this.add(b, ear, black, new Vector3(s * 0.16, 1.7, 0));
+      this.addEye(b, red, glint, new Vector3(s * 0.14, 1.48, 0.28), 0.08);
     }
-    // Back spikes + hand spikes
-    const backSpike = MeshBuilder.CreateCylinder('lc_bspike', { diameterTop: 0, diameterBottom: 0.12, height: 0.3 }, this.scene);
+    // Four black dreadlock sensors on the head.
+    const dreads: Array<[number, number, number]> = [
+      [-0.14, 1.66, -0.02],
+      [0.14, 1.66, -0.02],
+      [-0.16, 1.5, -0.18],
+      [0.16, 1.5, -0.18],
+    ];
+    for (const [x, y, z] of dreads) {
+      const dread = MeshBuilder.CreateCapsule('lc_dread', { radius: 0.05, height: 0.34, tessellation: 8 }, this.scene);
+      dread.rotation.x = -0.6;
+      dread.rotation.z = x < 0 ? 0.2 : -0.2;
+      this.add(b, dread, black, new Vector3(x, y, z));
+    }
+    // Back spike.
+    const backSpike = MeshBuilder.CreateCylinder('lc_bspike', { diameterTop: 0, diameterBottom: 0.13, height: 0.3 }, this.scene);
     backSpike.rotation.x = -Math.PI / 2;
-    this.add(b, backSpike, black, new Vector3(0, 0.9, -0.35));
+    this.add(b, backSpike, black, new Vector3(0, 0.95, -0.32));
+    // Digitigrade legs (thigh + shin capsules) + paws.
     for (const s of [-1, 1]) {
-      const hand = MeshBuilder.CreateCylinder('lc_hspike', { diameterTop: 0, diameterBottom: 0.09, height: 0.22 }, this.scene);
-      hand.rotation.x = Math.PI / 2;
-      this.add(b, hand, black, new Vector3(s * 0.32, 0.7, 0.15));
+      const thigh = MeshBuilder.CreateCapsule('lc_thigh', { radius: 0.1, height: 0.32, tessellation: 8 }, this.scene);
+      thigh.rotation.x = 0.5;
+      this.add(b, thigh, blue, new Vector3(s * 0.18, 0.5, -0.02));
+      const shin = MeshBuilder.CreateCapsule('lc_shin', { radius: 0.08, height: 0.3, tessellation: 8 }, this.scene);
+      shin.rotation.x = -0.3;
+      this.add(b, shin, blue, new Vector3(s * 0.18, 0.26, 0.08));
+      const paw = MeshBuilder.CreateSphere('lc_paw', { diameter: 0.2, segments: 8 }, this.scene);
+      paw.scaling = new Vector3(1, 0.6, 1.4);
+      this.add(b, paw, black, new Vector3(s * 0.18, 0.09, 0.18));
     }
+    // Arms + paw spikes.
+    for (const s of [-1, 1]) {
+      const arm = MeshBuilder.CreateCapsule('lc_arm', { radius: 0.08, height: 0.42, tessellation: 8 }, this.scene);
+      arm.rotation.z = s * 0.35;
+      this.add(b, arm, blue, new Vector3(s * 0.33, 0.82, 0.08));
+      const paw = MeshBuilder.CreateSphere('lc_hand', { diameter: 0.16, segments: 8 }, this.scene);
+      this.add(b, paw, black, new Vector3(s * 0.42, 0.62, 0.12));
+      // Paw spike (back of hand).
+      const spike = MeshBuilder.CreateCylinder('lc_hspike', { diameterTop: 0, diameterBottom: 0.08, height: 0.2 }, this.scene);
+      spike.rotation.x = Math.PI / 2;
+      this.add(b, spike, yellow, new Vector3(s * 0.42, 0.64, 0.24));
+    }
+    // Tail.
+    const tail = MeshBuilder.CreateCapsule('lc_tail', { radius: 0.09, height: 0.4, tessellation: 8 }, this.scene);
+    tail.rotation.x = -0.7;
+    this.add(b, tail, blue, new Vector3(0, 0.55, -0.28));
   }
 
   private buildAbsol(b: TransformNode, accent: string): void {
     const white = solidMat(this.scene, 'ab_w', '#EDEDF0');
     const dark = solidMat(this.scene, 'ab_k', '#33333F');
     const red = solidMat(this.scene, 'ab_r', '#C02030', '#600810');
+    const blade = solidMat(this.scene, 'ab_bl', '#3A3A46');
+    const glint = solidMat(this.scene, 'ab_wt', '#FFFFFF');
     void accent;
-    // Quadruped body
-    const body = MeshBuilder.CreateSphere('ab_body', { diameter: 0.6 }, this.scene);
-    body.scaling = new Vector3(1.6, 0.9, 0.8);
-    this.add(b, body, white, new Vector3(0, 0.55, 0));
-    // Legs
+    // Head faces +Z (forward); body extends back along -Z. Quadruped stance.
+    const body = MeshBuilder.CreateCapsule('ab_body', { radius: 0.26, height: 0.85, tessellation: 12 }, this.scene);
+    body.rotation.x = Math.PI / 2;
+    body.scaling = new Vector3(1, 1, 0.85);
+    this.add(b, body, white, new Vector3(0, 0.6, -0.2));
+    // Four legs + paws.
     for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) {
-        const leg = MeshBuilder.CreateCylinder('ab_leg', { diameter: 0.12, height: 0.4 }, this.scene);
-        this.add(b, leg, dark, new Vector3(sx * 0.35, 0.2, sz * 0.22));
+      for (const sz of [0.18, -0.55] as const) {
+        const leg = MeshBuilder.CreateCapsule('ab_leg', { radius: 0.06, height: 0.42, tessellation: 8 }, this.scene);
+        this.add(b, leg, dark, new Vector3(sx * 0.22, 0.24, sz));
+        const paw = MeshBuilder.CreateSphere('ab_paw', { diameter: 0.14, segments: 8 }, this.scene);
+        paw.scaling = new Vector3(1, 0.7, 1.2);
+        this.add(b, paw, dark, new Vector3(sx * 0.22, 0.06, sz + 0.03));
       }
     }
-    const head = MeshBuilder.CreateSphere('ab_head', { diameter: 0.42 }, this.scene);
+    // Neck + head at front.
+    const neck = MeshBuilder.CreateCapsule('ab_neck', { radius: 0.13, height: 0.3, tessellation: 8 }, this.scene);
+    neck.rotation.x = 0.7;
+    this.add(b, neck, white, new Vector3(0, 0.72, 0.28));
+    const head = MeshBuilder.CreateSphere('ab_head', { diameter: 0.4, segments: 12 }, this.scene);
     head.scaling = new Vector3(1, 1, 1.2);
-    this.add(b, head, dark, new Vector3(0.55, 0.75, 0));
-    const faceWhite = MeshBuilder.CreateSphere('ab_facew', { diameter: 0.3 }, this.scene);
-    this.add(b, faceWhite, white, new Vector3(0.62, 0.8, 0));
-    // Curved scythe-horn
-    const horn = MeshBuilder.CreateTorus('ab_horn', { diameter: 0.55, thickness: 0.09, tessellation: 12 }, this.scene);
-    horn.scaling = new Vector3(1, 1, 0.4);
-    horn.rotation.z = Math.PI / 2;
-    this.add(b, horn, white, new Vector3(0.55, 1.05, -0.2));
-    // Red eye
-    const eye = MeshBuilder.CreateSphere('ab_eye', { diameter: 0.1 }, this.scene);
-    this.add(b, eye, red, new Vector3(0.72, 0.82, 0.18));
-    // Tail
-    const tail = MeshBuilder.CreateCylinder('ab_tail', { diameterTop: 0, diameterBottom: 0.14, height: 0.5 }, this.scene);
-    tail.rotation.z = Math.PI / 2.5;
-    this.add(b, tail, white, new Vector3(-0.55, 0.6, 0));
+    this.add(b, head, white, new Vector3(0, 0.92, 0.48));
+    // Snout.
+    const snout = MeshBuilder.CreateSphere('ab_snout', { diameter: 0.2, segments: 8 }, this.scene);
+    snout.scaling = new Vector3(0.9, 0.8, 1.3);
+    this.add(b, snout, white, new Vector3(0, 0.86, 0.68));
+    const nose = MeshBuilder.CreateSphere('ab_nose', { diameter: 0.06, segments: 6 }, this.scene);
+    this.add(b, nose, dark, new Vector3(0, 0.88, 0.78));
+    // Dark face-fur mane framing the head.
+    const mane = MeshBuilder.CreateSphere('ab_mane', { diameter: 0.34, segments: 10 }, this.scene);
+    mane.scaling = new Vector3(1.2, 1.1, 0.7);
+    this.add(b, mane, dark, new Vector3(0, 0.98, 0.36));
+    // Red eyes with pupil.
+    for (const s of [-1, 1]) {
+      this.addEye(b, red, glint, new Vector3(s * 0.13, 0.96, 0.6), 0.09);
+    }
+    // Signature single curved scythe-blade on the side of the head.
+    const bladeGroup = new TransformNode('ab_bladegrp', this.scene);
+    bladeGroup.parent = b;
+    bladeGroup.position = new Vector3(0.16, 1.12, 0.4);
+    bladeGroup.rotation.z = -0.5;
+    // Built from tapered segments that arc, reading as a blade.
+    const segs: Array<[number, number, number, number, number]> = [
+      // x, y, z, len, rotZ
+      [0.0, 0.0, 0, 0.3, 0.2],
+      [0.14, 0.24, 0, 0.28, 0.6],
+      [0.36, 0.38, 0, 0.26, 1.1],
+    ];
+    for (let i = 0; i < segs.length; i++) {
+      const [x, y, z, len, rz] = segs[i];
+      const s = MeshBuilder.CreateCylinder('ab_blade', { diameterTop: i === segs.length - 1 ? 0 : 0.1, diameterBottom: 0.14 - i * 0.03, height: len, tessellation: 6 }, this.scene);
+      s.scaling = new Vector3(1, 1, 0.35);
+      s.rotation.z = rz;
+      this.add(bladeGroup, s, blade, new Vector3(x, y, z));
+    }
+    // Small back-of-head counter fin.
+    const fin = MeshBuilder.CreateCylinder('ab_fin', { diameterTop: 0, diameterBottom: 0.14, height: 0.3, tessellation: 6 }, this.scene);
+    fin.rotation.x = 2.4;
+    this.add(b, fin, dark, new Vector3(0, 1.05, 0.2));
+    // Tuft tail (fanned scythe-like tail).
+    const tail = MeshBuilder.CreateCylinder('ab_tail', { diameterTop: 0, diameterBottom: 0.16, height: 0.55, tessellation: 6 }, this.scene);
+    tail.scaling = new Vector3(1, 1, 0.4);
+    tail.rotation.x = -1.0;
+    this.add(b, tail, white, new Vector3(0, 0.75, -0.62));
   }
 
   private buildGengar(b: TransformNode, accent: string): void {
@@ -355,38 +583,87 @@ export class PokemonFactory {
     const dark = solidMat(this.scene, 'gg_k', '#2A2038');
     const white = solidMat(this.scene, 'gg_w', '#F0F0F0');
     const red = solidMat(this.scene, 'gg_r', '#B01020', '#500810');
+    const pupil = solidMat(this.scene, 'gg_pu', '#1A0812');
     void accent;
-    const body = MeshBuilder.CreateSphere('gg_body', { diameter: 0.95, segments: 14 }, this.scene);
-    body.scaling = new Vector3(1.1, 0.95, 1);
-    this.add(b, body, purple, new Vector3(0, 0.75, 0));
-    // Spiky back cones
-    for (let i = 0; i < 6; i++) {
-      const ang = (i / 6) * Math.PI - Math.PI / 2;
-      const spike = MeshBuilder.CreateCylinder('gg_spike', { diameterTop: 0, diameterBottom: 0.14, height: 0.3 }, this.scene);
-      spike.rotation.x = -Math.PI / 2 + Math.sin(ang) * 0.3;
-      this.add(b, spike, dark, new Vector3(Math.cos(ang) * 0.35, 1.0 + Math.abs(Math.sin(ang)) * 0.1, -0.35));
+    // Rounder crouched body.
+    const body = MeshBuilder.CreateSphere('gg_body', { diameter: 1.0, segments: 16 }, this.scene);
+    body.scaling = new Vector3(1.15, 0.85, 1);
+    this.add(b, body, purple, new Vector3(0, 0.68, 0));
+    // Head blends into body but slightly domed on top.
+    const head = MeshBuilder.CreateSphere('gg_head', { diameter: 0.7, segments: 14 }, this.scene);
+    head.scaling = new Vector3(1.1, 0.9, 1);
+    this.add(b, head, purple, new Vector3(0, 0.92, 0.04));
+    // Full row of back spikes (arched across the back).
+    for (let i = 0; i < 7; i++) {
+      const t = (i / 6) * 2 - 1; // -1..1
+      const spike = MeshBuilder.CreateCylinder('gg_spike', { diameterTop: 0, diameterBottom: 0.16, height: 0.34, tessellation: 6 }, this.scene);
+      spike.rotation.x = -Math.PI / 2 - 0.2;
+      spike.rotation.z = -t * 0.4;
+      this.add(b, spike, dark, new Vector3(t * 0.42, 1.05 - Math.abs(t) * 0.18, -0.4));
     }
-    // Wide grin
-    const grin = MeshBuilder.CreateTorus('gg_grin', { diameter: 0.4, thickness: 0.06, tessellation: 16 }, this.scene);
-    grin.scaling = new Vector3(1, 0.5, 0.3);
-    this.add(b, grin, white, new Vector3(0, 0.62, 0.42));
+    // Ear-like top spikes.
     for (const s of [-1, 1]) {
-      const eye = MeshBuilder.CreateSphere('gg_eye', { diameter: 0.16 }, this.scene);
-      this.add(b, eye, red, new Vector3(s * 0.22, 0.9, 0.38));
+      const earSpike = MeshBuilder.CreateCylinder('gg_earspike', { diameterTop: 0, diameterBottom: 0.14, height: 0.3, tessellation: 6 }, this.scene);
+      earSpike.rotation.z = s * 0.4;
+      this.add(b, earSpike, purple, new Vector3(s * 0.3, 1.24, 0));
     }
-    // Legs stubs
+    // Big toothy grin: upper + lower mouth with a few teeth.
+    const mouth = MeshBuilder.CreateSphere('gg_mouth', { diameter: 0.42, segments: 12 }, this.scene);
+    mouth.scaling = new Vector3(1.1, 0.5, 0.4);
+    this.add(b, mouth, dark, new Vector3(0, 0.66, 0.44));
+    for (const [row, yBase, dir] of [['up', 0.74, 1], ['lo', 0.58, -1]] as const) {
+      for (const tx of [-0.14, -0.05, 0.05, 0.14]) {
+        const tooth = MeshBuilder.CreateCylinder(`gg_tooth_${row}`, { diameterTop: 0, diameterBottom: 0.07, height: 0.12, tessellation: 4 }, this.scene);
+        tooth.rotation.x = dir > 0 ? Math.PI : 0;
+        this.add(b, tooth, white, new Vector3(tx, yBase, 0.5));
+      }
+    }
+    // Red eyes with pupils.
     for (const s of [-1, 1]) {
-      const foot = MeshBuilder.CreateSphere('gg_foot', { diameter: 0.2 }, this.scene);
-      this.add(b, foot, purple, new Vector3(s * 0.25, 0.3, 0.1));
+      const eyeWhite = MeshBuilder.CreateSphere('gg_eyew', { diameter: 0.18, segments: 10 }, this.scene);
+      this.add(b, eyeWhite, red, new Vector3(s * 0.22, 0.98, 0.36));
+      const p = MeshBuilder.CreateSphere('gg_pupil', { diameter: 0.08, segments: 6 }, this.scene);
+      this.add(b, p, pupil, new Vector3(s * 0.24, 0.96, 0.46));
     }
-    // Float higher (Gengar hovers)
+    // Stubby arms.
+    for (const s of [-1, 1]) {
+      const arm = MeshBuilder.CreateCapsule('gg_arm', { radius: 0.1, height: 0.24, tessellation: 8 }, this.scene);
+      arm.rotation.z = s * 0.9;
+      this.add(b, arm, purple, new Vector3(s * 0.5, 0.6, 0.05));
+      const hand = MeshBuilder.CreateSphere('gg_hand', { diameter: 0.16, segments: 8 }, this.scene);
+      this.add(b, hand, purple, new Vector3(s * 0.62, 0.5, 0.08));
+    }
+    // Stubby legs + feet.
+    for (const s of [-1, 1]) {
+      const leg = MeshBuilder.CreateCapsule('gg_leg', { radius: 0.11, height: 0.2, tessellation: 8 }, this.scene);
+      this.add(b, leg, purple, new Vector3(s * 0.26, 0.32, 0.08));
+      const foot = MeshBuilder.CreateSphere('gg_foot', { diameter: 0.22, segments: 8 }, this.scene);
+      foot.scaling = new Vector3(1, 0.6, 1.3);
+      this.add(b, foot, purple, new Vector3(s * 0.26, 0.2, 0.16));
+    }
+    // Float higher (Gengar hovers).
     b.position.y = 0.15;
   }
 
   private buildGeneric(b: TransformNode, accent: string): void {
     const m = solidMat(this.scene, 'gn_m', accent);
-    const body = MeshBuilder.CreateSphere('gn_body', { diameter: 0.8 }, this.scene);
+    const dark = solidMat(this.scene, 'gn_k', '#20202A');
+    const white = solidMat(this.scene, 'gn_w', '#FFFFFF');
+    // Rounded body + head so unknown species still read as a creature.
+    const body = MeshBuilder.CreateSphere('gn_body', { diameter: 0.75, segments: 14 }, this.scene);
+    body.scaling = new Vector3(1, 1.1, 0.95);
     this.add(b, body, m, new Vector3(0, 0.6, 0));
+    const head = MeshBuilder.CreateSphere('gn_head', { diameter: 0.5, segments: 12 }, this.scene);
+    this.add(b, head, m, new Vector3(0, 1.1, 0.02));
+    for (const s of [-1, 1]) {
+      this.addEye(b, dark, white, new Vector3(s * 0.13, 1.14, 0.22), 0.1);
+      const arm = MeshBuilder.CreateCapsule('gn_arm', { radius: 0.07, height: 0.3, tessellation: 8 }, this.scene);
+      arm.rotation.z = s * 0.6;
+      this.add(b, arm, m, new Vector3(s * 0.34, 0.6, 0.05));
+      const foot = MeshBuilder.CreateSphere('gn_foot', { diameter: 0.2, segments: 8 }, this.scene);
+      foot.scaling = new Vector3(0.9, 0.6, 1.3);
+      this.add(b, foot, m, new Vector3(s * 0.2, 0.14, 0.1));
+    }
   }
 
   // ── Animation helpers ─────────────────────
