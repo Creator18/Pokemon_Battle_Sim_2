@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pokemon Hex Battle</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #0D0D1A;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+    }
+    #renderCanvas {
+      width: 100%; height: 100%;
+      touch-action: none;
+      display: block;
+    }
+    #ui-root {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+    #ui-root * { pointer-events: auto; }
+  </style>
+</head>
+<body>
+  <canvas id="renderCanvas"></canvas>
+  <div id="ui-root"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

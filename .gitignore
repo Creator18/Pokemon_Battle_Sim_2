@@ -55,3 +55,8 @@ crashlytics-build.properties
 
 # Claude Code memory (local only)
 .claude/
+
+# Node / Vite
+node_modules/
+dist/
+*.local
