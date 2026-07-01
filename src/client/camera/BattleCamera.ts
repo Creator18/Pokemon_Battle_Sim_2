@@ -13,17 +13,26 @@ import { DirectionalLight } from '@babylonjs/core/Lights/directionalLight';
 import { HemisphericLight } from '@babylonjs/core/Lights/hemisphericLight';
 import { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { DefaultRenderingPipeline } from '@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline';
 import { Engine } from '@babylonjs/core/Engines/engine';
 import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
 import '@babylonjs/core/Rendering/depthRendererSceneComponent';
 
+import { ImageProcessingConfiguration } from '@babylonjs/core/Materials/imageProcessingConfiguration';
+
 import { axialToWorld } from '../hexWorld.ts';
+import { ENV, hexToRgb } from '../theme.ts';
+
+function c3(hex: string): Color3 {
+  const [r, g, b] = hexToRgb(hex);
+  return new Color3(r, g, b);
+}
 
 const ELEVATION = Math.PI / 2 - (57 * Math.PI) / 180; // beta from 57° above horizon
-const MIN_RADIUS = 8;
-const MAX_RADIUS = 26;
+const MIN_RADIUS = 12;
+const MAX_RADIUS = 34;
+const DEFAULT_RADIUS = 25;
 const ROTATE_STEP = Math.PI / 12;
 
 export class BattleCamera {
@@ -38,7 +47,7 @@ export class BattleCamera {
       'battleCam',
       -Math.PI / 2,
       ELEVATION,
-      16,
+      DEFAULT_RADIUS,
       Vector3.Zero(),
       scene,
     );
@@ -53,32 +62,42 @@ export class BattleCamera {
     this.camera.inputs.attached.pointers &&
       ((this.camera.inputs.attached.pointers as unknown as { buttons: number[] }).buttons = [2]);
 
-    // Warm key light (casts shadows).
-    this.keyLight = new DirectionalLight('key', new Vector3(-0.6, -1.1, -0.4), scene);
-    this.keyLight.position = new Vector3(12, 22, 10);
-    this.keyLight.intensity = 1.35;
-    this.keyLight.diffuse = new Color3(1.0, 0.95, 0.85);
-    this.keyLight.specular = new Color3(1.0, 0.9, 0.75);
+    // Warm golden-hour key light from a low-ish angle (casts soft shadows).
+    this.keyLight = new DirectionalLight('key', new Vector3(-0.55, -0.85, -0.5), scene);
+    this.keyLight.position = new Vector3(16, 20, 14);
+    this.keyLight.intensity = 1.5;
+    this.keyLight.diffuse = c3(ENV.keyLight);
+    this.keyLight.specular = c3(ENV.keySpec);
 
-    // Cool hemispheric fill.
-    this.fill = new HemisphericLight('fill', new Vector3(0, 1, 0), scene);
-    this.fill.intensity = 0.55;
-    this.fill.diffuse = new Color3(0.7, 0.75, 0.95);
-    this.fill.groundColor = new Color3(0.15, 0.15, 0.28);
+    // Warm hemispheric fill: cream sky, mossy-green ground bounce.
+    this.fill = new HemisphericLight('fill', new Vector3(0.2, 1, 0.1), scene);
+    this.fill.intensity = 0.7;
+    this.fill.diffuse = c3(ENV.skyFill);
+    this.fill.groundColor = c3(ENV.groundFill);
 
     this.shadows = new ShadowGenerator(2048, this.keyLight);
     this.shadows.useBlurExponentialShadowMap = true;
-    this.shadows.blurKernel = 32;
-    this.shadows.darkness = 0.55;
+    this.shadows.blurKernel = 48;
+    this.shadows.darkness = 0.32; // soft, not murky
+    this.keyLight.shadowMinZ = 1;
+    this.keyLight.shadowMaxZ = 80;
 
     const pipeline = new DefaultRenderingPipeline('default', true, scene, [this.camera]);
     pipeline.bloomEnabled = true;
-    pipeline.bloomThreshold = 0.75;
-    pipeline.bloomWeight = 0.45;
+    pipeline.bloomThreshold = 0.8;
+    pipeline.bloomWeight = 0.35;
     pipeline.bloomKernel = 48;
     pipeline.fxaaEnabled = true;
-    pipeline.imageProcessing.contrast = 1.15;
-    pipeline.imageProcessing.exposure = 1.05;
+    // Mild ACES tone mapping + warm, bright, inviting grade.
+    pipeline.imageProcessing.toneMappingEnabled = true;
+    pipeline.imageProcessing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
+    pipeline.imageProcessing.contrast = 1.1;
+    pipeline.imageProcessing.exposure = 1.25;
+    // Soft vignette.
+    pipeline.imageProcessing.vignetteEnabled = true;
+    pipeline.imageProcessing.vignetteWeight = 2.2;
+    pipeline.imageProcessing.vignetteColor = new Color4(0.05, 0.03, 0.0, 0);
+    pipeline.imageProcessing.vignetteCameraFov = 0.7;
 
     scene.onBeforeRenderObservable.add(() => this.tick(scene));
   }

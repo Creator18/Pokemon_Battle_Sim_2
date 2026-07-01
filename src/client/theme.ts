@@ -53,6 +53,46 @@ export function hexToRgb(hex: string): [number, number, number] {
   return [r, g, b];
 }
 
+/**
+ * Warm painterly environment palette (AFK-Journey-style autumn clearing).
+ * Consumed by Environment.ts, BattleCamera.ts and HexBoard tile styling.
+ */
+export const ENV = {
+  // Sky / atmosphere
+  skyHorizon: '#F4D9B0', // warm cream/peach at horizon
+  skyTop: '#8FB8D8', // soft blue overhead
+  fog: '#E7D2A8', // warm haze
+  clear: '#EAD6AE', // fallback clear color
+
+  // Ground
+  grass: '#7C8A4E', // sage/olive meadow
+  grassAlt: '#8E9A5A', // lighter patch
+  grassDark: '#657043', // shaded patch
+  dirtCenter: '#C9A36B', // warm sandy arena center
+  dirtEdge: '#A98450', // arena rim
+
+  // Tiles (grassy/earthy tops)
+  tileGrass: '#88924F',
+  tileGrassAlt: '#7B854A',
+  tileEarth: '#A88B58',
+
+  // Scenery
+  trunk: '#6B4A2E',
+  rock: '#8A8880',
+  rockMoss: '#6E7A4A',
+  log: '#5E4028',
+  bush: '#6E8340',
+
+  // Autumn canopy palette (pick randomly per tree)
+  canopy: ['#C9902F', '#E0A83C', '#B9C24B', '#8DA24A', '#D9772E', '#A8B24A'],
+
+  // Lights
+  keyLight: '#FFE6BE', // warm golden key
+  keySpec: '#FFD9A0',
+  skyFill: '#FFE9CC', // warm cream sky bounce
+  groundFill: '#5C6B3E', // mossy green ground bounce
+} as const;
+
 /** Highlight colors used by HexBoard.highlightTiles. */
 export const HIGHLIGHT_COLORS = {
   move: '#3B82F6', // blue

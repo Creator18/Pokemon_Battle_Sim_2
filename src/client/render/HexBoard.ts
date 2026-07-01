@@ -24,7 +24,7 @@ import {
   type TerrainEntityJSON,
 } from '../../shared/index.ts';
 import { axialToWorld, HEX_SIZE } from '../hexWorld.ts';
-import { HIGHLIGHT_COLORS, hexToRgb, type HighlightType } from '../theme.ts';
+import { HIGHLIGHT_COLORS, hexToRgb, ENV, type HighlightType } from '../theme.ts';
 
 const TILE_HEIGHT = 0.4;
 
@@ -57,8 +57,7 @@ export class HexBoard {
   private weatherParticles: ParticleSystem | null = null;
 
   private mats: {
-    normal: StandardMaterial;
-    normalAlt: StandardMaterial;
+    tiles: StandardMaterial[]; // shared grassy/earthy tile tints (per-tile jitter)
     rock: StandardMaterial;
     trunk: StandardMaterial;
     canopy: StandardMaterial;
@@ -73,13 +72,25 @@ export class HexBoard {
     this.scene = scene;
     this.root = new TransformNode('board', scene);
 
+    // A small palette of shared grassy/earthy tile tints. Per-tile jitter is
+    // achieved by deterministically picking + micro-perturbing one of these,
+    // so we keep a handful of materials rather than 61 unique ones.
+    const tileHexes = [ENV.tileGrass, ENV.tileGrassAlt, ENV.tileGrass, ENV.tileEarth, ENV.tileGrassAlt];
+    const tileMats = tileHexes.map((hex, i) => {
+      const m = mat(scene, `tile${i}`, hex, { specular: 0.03 });
+      // gentle per-material green/tan jitter to avoid a uniform look
+      const j = (i * 0.017) % 0.05;
+      m.diffuseColor.g = Math.min(1, m.diffuseColor.g + j);
+      m.diffuseColor.r = Math.max(0, m.diffuseColor.r - j * 0.5);
+      return m;
+    });
+
     this.mats = {
-      normal: mat(scene, 'tile', '#3A3A5C', { specular: 0.05 }),
-      normalAlt: mat(scene, 'tileAlt', '#33334F', { specular: 0.05 }),
-      rock: mat(scene, 'rock', '#6B6B72', { specular: 0.2 }),
-      trunk: mat(scene, 'trunk', '#5A3A22'),
-      canopy: mat(scene, 'canopy', '#2E7D32', { emissive: '#0A1F0C' }),
-      edge: mat(scene, 'edge', '#0D0D1A'),
+      tiles: tileMats,
+      rock: mat(scene, 'rock', ENV.rock, { specular: 0.15 }),
+      trunk: mat(scene, 'trunk', ENV.trunk),
+      canopy: mat(scene, 'canopy', ENV.canopy[3], { emissive: '#152608' }),
+      edge: mat(scene, 'edge', ENV.dirtEdge),
     };
 
     this.buildTiles();
@@ -87,23 +98,30 @@ export class HexBoard {
   }
 
   private buildTiles(): void {
-    let i = 0;
     for (const key of HEX_GRID) {
       const [q, r] = keyToTile(key);
       const pos = axialToWorld(q, r, 0);
+      // Deterministic per-tile hash for stable material + tiny thickness jitter.
+      const h = ((q * 73856093) ^ (r * 19349663)) >>> 0;
+      const matIdx = h % this.mats.tiles.length;
+      // Tiny thickness jitter for a natural, hand-placed feel. We keep the TOP
+      // surface fixed at TILE_HEIGHT (so tileTop world coords are unchanged and
+      // pokémon still land on centers); only the bottom sinks a hair.
+      const extra = ((h >> 8) % 100) / 100 * 0.08; // 0..0.08
+      const height = TILE_HEIGHT + extra;
       const tile = MeshBuilder.CreateCylinder(
         `tile_${key}`,
-        { diameter: HEX_SIZE * 2, height: TILE_HEIGHT, tessellation: 6 },
+        { diameter: HEX_SIZE * 2, height, tessellation: 6 },
         this.scene,
       );
       tile.rotation.y = Math.PI / 6; // flat-top orientation
-      tile.position = new Vector3(pos.x, TILE_HEIGHT / 2, pos.z);
-      tile.material = i % 2 === 0 ? this.mats.normal : this.mats.normalAlt;
+      // Center so the top surface stays exactly at TILE_HEIGHT.
+      tile.position = new Vector3(pos.x, TILE_HEIGHT - height / 2, pos.z);
+      tile.material = this.mats.tiles[matIdx];
       tile.receiveShadows = true;
       tile.parent = this.root;
       tile.metadata = { q, r, key };
       this.tiles.set(key, tile);
-      i++;
     }
   }
 
@@ -310,8 +328,11 @@ export class HexBoard {
       ring.position = new Vector3(p.x, TILE_HEIGHT + 0.03 + this.highlightLayer(type), p.z);
       const m = new StandardMaterial(`hlm_${type}_${key}`, this.scene);
       m.diffuseColor = new Color3(r, g, b);
-      m.emissiveColor = new Color3(r * 0.8, g * 0.8, b * 0.8);
-      m.alpha = type === 'target' ? 0.75 : 0.5;
+      // Strong emissive so the colored overlay glows and pops against the warm
+      // earthy tiles (feeds bloom). Full-emissive keeps hue readable in shadow.
+      m.emissiveColor = new Color3(r, g, b);
+      m.disableLighting = true;
+      m.alpha = type === 'target' ? 0.8 : 0.55;
       m.specularColor = new Color3(0, 0, 0);
       ring.material = m;
       ring.isPickable = false;
