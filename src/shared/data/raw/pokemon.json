@@ -1,0 +1,213 @@
+{
+  "_meta": {
+    "version": 1,
+    "description": "Pok\u00e9mon species definitions for Hex Battle Simulator. HP values are inflated for spatial format survivability. Move pools list 8 valid moves per species in priority order: terrain \u2192 status \u2192 ranged \u2192 physical. Players choose 4 from the 8 during the selection phase.",
+    "species_count": 6,
+    "moves_per_pool": 8,
+    "moves_to_pick": 4
+  },
+  "pokemon": [
+    {
+      "name": "Pikachu",
+      "types": [
+        "Electric"
+      ],
+      "hp": 35,
+      "inflated_hp": 100,
+      "attack": 55,
+      "defense": 40,
+      "sp_atk": 50,
+      "sp_def": 50,
+      "speed": 90,
+      "level": 50,
+      "can_pass_through": false,
+      "sprite_id": 25,
+      "description": "The Electric Mouse Pok\u00e9mon. Fast and versatile with a powerful special attack and reliable terrain control through Electro Web. Low bulk but excellent Speed tier.",
+      "compatible_terrain": [
+        "Electro Web",
+        "Rain Dance"
+      ],
+      "compatible_status": [
+        "Nasty Plot",
+        "Thunder Wave"
+      ],
+      "compatible_ranged": [
+        "Thunderbolt",
+        "Discharge"
+      ],
+      "compatible_physical": [
+        "Quick Attack",
+        "Volt Tackle"
+      ]
+    },
+    {
+      "name": "Charizard",
+      "types": [
+        "Fire",
+        "Flying"
+      ],
+      "hp": 78,
+      "inflated_hp": 130,
+      "attack": 84,
+      "defense": 78,
+      "sp_atk": 109,
+      "sp_def": 85,
+      "speed": 100,
+      "level": 50,
+      "can_pass_through": false,
+      "sprite_id": 6,
+      "description": "The Flame Pok\u00e9mon. Highest Sp. Atk and Speed in the roster. Excels at denying tiles with Will-O-Wisp and boosting own Fire moves with Sunny Day. Air Slash bypasses terrain for reliable ranged coverage.",
+      "compatible_terrain": [
+        "Will-O-Wisp",
+        "Sunny Day"
+      ],
+      "compatible_status": [
+        "Swords Dance",
+        "Taunt"
+      ],
+      "compatible_ranged": [
+        "Flamethrower",
+        "Air Slash"
+      ],
+      "compatible_physical": [
+        "Fire Fang",
+        "Dragon Claw"
+      ]
+    },
+    {
+      "name": "Gardevoir",
+      "types": [
+        "Psychic",
+        "Fairy"
+      ],
+      "hp": 68,
+      "inflated_hp": 120,
+      "attack": 65,
+      "defense": 65,
+      "sp_atk": 125,
+      "sp_def": 115,
+      "speed": 80,
+      "level": 50,
+      "can_pass_through": false,
+      "sprite_id": 282,
+      "description": "The Embrace Pok\u00e9mon. Highest Sp. Atk in the roster alongside enormous Sp. Def bulk. Misty Terrain protects allies from stat drops. Calm Mind turns Gardevoir into a late-game sweeper. Average Speed is the main limitation.",
+      "compatible_terrain": [
+        "Misty Terrain",
+        "Will-O-Wisp"
+      ],
+      "compatible_status": [
+        "Calm Mind",
+        "Hypnosis"
+      ],
+      "compatible_ranged": [
+        "Psychic",
+        "Moonblast",
+        "Focus Blast"
+      ],
+      "compatible_physical": [
+        "Psycho Cut"
+      ]
+    },
+    {
+      "name": "Lucario",
+      "types": [
+        "Fighting",
+        "Steel"
+      ],
+      "hp": 70,
+      "inflated_hp": 120,
+      "attack": 110,
+      "defense": 70,
+      "sp_atk": 115,
+      "sp_def": 70,
+      "speed": 90,
+      "level": 50,
+      "can_pass_through": false,
+      "sprite_id": 448,
+      "description": "The Aura Pok\u00e9mon. Exceptional mixed attacker with high ATK and Sp. Atk. Extreme Speed provides reliable priority. Aura Sphere never misses and bypasses fog. Metal Sound Field drains enemy Sp. Def over time for setup synergy.",
+      "compatible_terrain": [
+        "Metal Sound Field",
+        "Smokescreen Field"
+      ],
+      "compatible_status": [
+        "Swords Dance",
+        "Taunt"
+      ],
+      "compatible_ranged": [
+        "Aura Sphere",
+        "Focus Blast"
+      ],
+      "compatible_physical": [
+        "Close Combat",
+        "Extreme Speed"
+      ]
+    },
+    {
+      "name": "Absol",
+      "types": [
+        "Dark"
+      ],
+      "hp": 65,
+      "inflated_hp": 115,
+      "attack": 130,
+      "defense": 60,
+      "sp_atk": 75,
+      "sp_def": 60,
+      "speed": 75,
+      "level": 50,
+      "can_pass_through": false,
+      "sprite_id": 359,
+      "description": "The Disaster Pok\u00e9mon. Highest Attack in the roster. A high-risk high-reward Pok\u00e9mon with fragile defenses. Night Slash and Sucker Punch hit extremely hard. Perish Trap creates powerful late-game pressure. Hail chips away at non-Ice types every turn.",
+      "compatible_terrain": [
+        "Perish Trap",
+        "Hail"
+      ],
+      "compatible_status": [
+        "Nasty Plot",
+        "Swords Dance"
+      ],
+      "compatible_ranged": [
+        "Dark Pulse",
+        "Shadow Ball"
+      ],
+      "compatible_physical": [
+        "Sucker Punch",
+        "Night Slash"
+      ]
+    },
+    {
+      "name": "Gengar",
+      "types": [
+        "Ghost",
+        "Poison"
+      ],
+      "hp": 60,
+      "inflated_hp": 110,
+      "attack": 65,
+      "defense": 60,
+      "sp_atk": 130,
+      "sp_def": 75,
+      "speed": 110,
+      "level": 50,
+      "can_pass_through": false,
+      "sprite_id": 94,
+      "description": "The Shadow Pok\u00e9mon. Highest Speed in the roster. The synergy king: Will-O-Wisp + Hex deals devastating doubled damage. Toxic Spikes drains Sp. Def every turn. Destiny Bond punishes aggressive opponents. Lowest HP \u2014 needs careful positioning.",
+      "compatible_terrain": [
+        "Will-O-Wisp",
+        "Toxic Spikes"
+      ],
+      "compatible_status": [
+        "Pain Split",
+        "Destiny Bond"
+      ],
+      "compatible_ranged": [
+        "Shadow Ball",
+        "Hex"
+      ],
+      "compatible_physical": [
+        "Shadow Sneak",
+        "Sucker Punch"
+      ]
+    }
+  ]
+}

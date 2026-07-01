@@ -1,0 +1,181 @@
+{
+  "_meta": {
+    "version": 1,
+    "description": "Status, buff, debuff, and utility moves for Hex Battle Simulator. All moves have base_power 0. Effects are applied by the TurnEngine at resolution. Status moves count toward the terrain compulsion rule only if they are terrain moves \u2014 pure status moves do not satisfy the terrain requirement.",
+    "move_count": 8
+  },
+  "moves": {
+    "Calm Mind": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Psychic",
+      "is_ranged": false,
+      "requires_los": false,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": true,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "self",
+      "effect_type": "stat_boost",
+      "stat_changes": [
+        {
+          "stat": "sp_atk",
+          "delta": 1,
+          "target": "self"
+        },
+        {
+          "stat": "sp_def",
+          "delta": 1,
+          "target": "self"
+        }
+      ],
+      "status_applied": null,
+      "duration_turns": 0,
+      "description": "The user focuses and calms its mind. Raises both Sp. Atk and Sp. Def by 1 stage. Gardevoir's core setup move \u2014 a few turns of Calm Mind turns her 125 Sp. Atk into an overwhelming force while her 115 Sp. Def becomes nearly unbreakable."
+    },
+    "Swords Dance": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Normal",
+      "is_ranged": false,
+      "requires_los": false,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": true,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "self",
+      "effect_type": "stat_boost",
+      "stat_changes": [
+        {
+          "stat": "attack",
+          "delta": 2,
+          "target": "self"
+        }
+      ],
+      "status_applied": null,
+      "duration_turns": 0,
+      "description": "The user performs an intense, rhythmic dance that sharply raises Attack by 2 stages. Used by Charizard (Fire Fang / Dragon Claw), Lucario (Close Combat / Extreme Speed), and Absol (Sucker Punch / Night Slash). Transforms already-powerful physical attackers into one-hit threats."
+    },
+    "Nasty Plot": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Dark",
+      "is_ranged": false,
+      "requires_los": false,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": true,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "self",
+      "effect_type": "stat_boost",
+      "stat_changes": [
+        {
+          "stat": "sp_atk",
+          "delta": 2,
+          "target": "self"
+        }
+      ],
+      "status_applied": null,
+      "duration_turns": 0,
+      "description": "The user stimulates its brain by thinking devious thoughts, sharply raising Sp. Atk by 2 stages. Used by Pikachu (Thunderbolt / Discharge) and Absol (Dark Pulse / Shadow Ball). Pikachu's 50 Sp. Atk at +2 reaches the equivalent of 100 \u2014 threatening KOs that would otherwise be impossible."
+    },
+    "Hypnosis": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Psychic",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "opponent",
+      "effect_type": "skip_movement",
+      "stat_changes": [],
+      "status_applied": "hypnotized",
+      "duration_turns": 1,
+      "accuracy": 60,
+      "range": 3,
+      "description": "A hypnotic gaze that puts the target to sleep. Single target, range 3. Requires line of sight. 60% accuracy \u2014 high risk, massive reward. If it lands, the target's movement phase is skipped entirely next turn, leaving them unable to reposition or close distance. Gardevoir's only offensive status move \u2014 creates the breathing room needed for Calm Mind."
+    },
+    "Pain Split": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Normal",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": true,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "both",
+      "effect_type": "hp_average",
+      "stat_changes": [],
+      "status_applied": null,
+      "duration_turns": 0,
+      "range": 2,
+      "description": "The user adds its HP to the target's HP, then equally splits the combined total. Single target, range 2. Always hits. Requires line of sight. Gengar's survival tool \u2014 with only 110 HP, Pain Split against a healthier opponent simultaneously heals Gengar and drains the target. Most effective when Gengar is low HP and the opponent is high HP."
+    },
+    "Destiny Bond": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Ghost",
+      "is_ranged": false,
+      "requires_los": false,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": true,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "self",
+      "effect_type": "destiny_bond",
+      "stat_changes": [],
+      "status_applied": "destiny_bond",
+      "duration_turns": 1,
+      "description": "The user binds its life force to the opponent's. Always hits. No target needed \u2014 self-activation. If the user faints during the same turn this move is declared, the opponent also faints immediately (regardless of their remaining HP). Shared by Gengar and Absol \u2014 the ultimate deterrent against aggressive plays. Declaring Destiny Bond forces the opponent to either back off or risk mutual destruction."
+    },
+    "Taunt": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Dark",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": true,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "opponent",
+      "effect_type": "force_attack_moves",
+      "stat_changes": [],
+      "status_applied": "taunted",
+      "duration_turns": 2,
+      "range": 3,
+      "description": "The user taunts the target into a rage. Single target, range 3. Always hits. Requires line of sight. The taunted Pok\u00e9mon can only use physical or special attack moves for 2 turns \u2014 terrain, status, and buff moves are blocked. Used by Charizard and Lucario to shut down setup-heavy opponents like Gardevoir (Calm Mind) or Pikachu (Nasty Plot)."
+    },
+    "Thunder Wave": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Electric",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": true,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "opponent",
+      "effect_type": "apply_status",
+      "stat_changes": [],
+      "status_applied": "paralyzed",
+      "duration_turns": 0,
+      "range": 3,
+      "description": "A jolt of electricity that paralyzes the target. Single target, range 3. Always hits. Requires line of sight. Halves the target's effective Speed \u2014 reducing their movement range each turn. Does not affect Electric-types. Pikachu's signature status move \u2014 crippling fast opponents like Gengar (110 SPE) or Charizard (100 SPE) and denying their speed advantage."
+    }
+  }
+}
