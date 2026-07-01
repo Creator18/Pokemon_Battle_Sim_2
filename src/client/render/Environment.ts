@@ -57,7 +57,7 @@ export class Environment {
    * @param playRadius  world-space circumradius that encloses the 61 tiles.
    *                    Scenery is kept OUTSIDE this so it never overlaps tiles.
    */
-  constructor(scene: Scene, playRadius = 12) {
+  constructor(scene: Scene, playRadius = 10) {
     this.scene = scene;
     this.root = new TransformNode('environment', scene);
     const rng = makeRng(0x5eed1234);
@@ -91,8 +91,8 @@ export class Environment {
     // Warm depth haze: crisp arena, softly fading tree ring.
     this.scene.fogMode = Scene.FOGMODE_LINEAR;
     this.scene.fogColor = c3(ENV.fog);
-    this.scene.fogStart = 22;
-    this.scene.fogEnd = 80;
+    this.scene.fogStart = 16;
+    this.scene.fogEnd = 52;
   }
 
   // ── Meadow ground ───────────────────────────
@@ -265,8 +265,8 @@ export class Environment {
     // Two loose rings; outer ring denser + larger + a touch darker (uses later
     // colors in the palette which are the deeper greens) to frame the scene.
     const rings = [
-      { r0: playRadius + 3.5, r1: playRadius + 7, count: 26, scale: [0.9, 1.3] as [number, number] },
-      { r0: playRadius + 7, r1: playRadius + 13, count: 34, scale: [1.1, 1.8] as [number, number] },
+      { r0: playRadius + 1.5, r1: playRadius + 4, count: 26, scale: [0.85, 1.25] as [number, number] },
+      { r0: playRadius + 4, r1: playRadius + 8.5, count: 34, scale: [1.05, 1.7] as [number, number] },
     ];
 
     for (const ring of rings) {
@@ -347,8 +347,8 @@ export class Environment {
 
     // Scatter within an annulus [playRadius+1.5, playRadius+12], plus a handful
     // right at the arena edge.
-    const inner = playRadius + 1.5;
-    const outer = playRadius + 12;
+    const inner = playRadius + 1.0;
+    const outer = playRadius + 8;
     const scatter = (n: number, fn: (x: number, z: number) => void, near = false) => {
       for (let i = 0; i < n; i++) {
         const ang = rng() * Math.PI * 2;

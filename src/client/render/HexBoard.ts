@@ -114,7 +114,7 @@ export class HexBoard {
         { diameter: HEX_SIZE * 2, height, tessellation: 6 },
         this.scene,
       );
-      tile.rotation.y = Math.PI / 6; // flat-top orientation
+      tile.rotation.y = 0; // flat-top: edges meet neighbors (share sides, not vertices)
       // Center so the top surface stays exactly at TILE_HEIGHT.
       tile.position = new Vector3(pos.x, TILE_HEIGHT - height / 2, pos.z);
       tile.material = this.mats.tiles[matIdx];
@@ -323,7 +323,7 @@ export class HexBoard {
       const existing = this.highlights.get(key + ':' + type);
       if (existing) continue;
       const ring = MeshBuilder.CreateCylinder(`hl_${type}_${key}`, { diameter: HEX_SIZE * 1.9, height: 0.06, tessellation: 6 }, this.scene);
-      ring.rotation.y = Math.PI / 6;
+      ring.rotation.y = 0; // match tile orientation
       const p = base.position;
       ring.position = new Vector3(p.x, TILE_HEIGHT + 0.03 + this.highlightLayer(type), p.z);
       const m = new StandardMaterial(`hlm_${type}_${key}`, this.scene);

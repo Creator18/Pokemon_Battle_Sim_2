@@ -274,102 +274,162 @@ export class PokemonFactory {
   }
 
   private buildCharizard(b: TransformNode, accent: string): void {
-    const orange = solidMat(this.scene, 'cz_o', '#F08030');
-    const cream = solidMat(this.scene, 'cz_c', '#F5DEB3');
-    const wing = solidMat(this.scene, 'cz_w', '#2E7D6E');
-    const flame = solidMat(this.scene, 'cz_f', '#FF6A00', '#FF3D00');
+    // Official palette: warm orange skin, cream underside, signature teal wing
+    // membranes, off-white claws/horns, orange→yellow emissive tail flame.
+    const orange = solidMat(this.scene, 'cz_o', '#E88A2D');
+    const orangeDk = solidMat(this.scene, 'cz_od', '#D5761F');
+    const cream = solidMat(this.scene, 'cz_c', '#F5E0B0');
+    const wing = solidMat(this.scene, 'cz_w', '#2E8B84');
+    const wingDk = solidMat(this.scene, 'cz_wd', '#2F7D75');
+    const flame = solidMat(this.scene, 'cz_f', '#FF7A18', '#FF4400');
+    const flameTip = solidMat(this.scene, 'cz_ft', '#FFD24A', '#FFB000');
     const black = solidMat(this.scene, 'cz_k', '#222');
     const white = solidMat(this.scene, 'cz_wt', '#FFFFFF');
-    const claw = solidMat(this.scene, 'cz_cl', '#EDE3C8');
+    const claw = solidMat(this.scene, 'cz_cl', '#F2ECDC');
     void accent;
-    const body = MeshBuilder.CreateSphere('cz_body', { diameter: 0.9, segments: 14 }, this.scene);
-    body.scaling = new Vector3(1, 1.3, 0.9);
-    this.add(b, body, orange, new Vector3(0, 0.7, 0));
-    const belly = MeshBuilder.CreateSphere('cz_belly', { diameter: 0.6, segments: 12 }, this.scene);
-    belly.scaling = new Vector3(0.8, 1.2, 0.5);
-    this.add(b, belly, cream, new Vector3(0, 0.65, 0.28));
-    // Longer neck.
-    const neck = MeshBuilder.CreateCapsule('cz_neck', { radius: 0.16, height: 0.42, tessellation: 10 }, this.scene);
-    neck.rotation.x = 0.35;
-    this.add(b, neck, orange, new Vector3(0, 1.12, 0.05));
-    const head = MeshBuilder.CreateSphere('cz_head', { diameter: 0.5, segments: 12 }, this.scene);
-    head.scaling = new Vector3(1, 0.9, 1.15);
-    this.add(b, head, orange, new Vector3(0, 1.42, 0.12));
-    // Snout with nostrils.
-    const snout = MeshBuilder.CreateSphere('cz_snout', { diameter: 0.32, segments: 10 }, this.scene);
-    snout.scaling = new Vector3(0.9, 0.7, 1.2);
-    this.add(b, snout, orange, new Vector3(0, 1.36, 0.42));
+
+    // ── Torso: barrel chest, orange with a layered cream front panel ──
+    const body = MeshBuilder.CreateSphere('cz_body', { diameter: 0.92, segments: 16 }, this.scene);
+    body.scaling = new Vector3(1, 1.32, 0.92);
+    this.add(b, body, orange, new Vector3(0, 0.78, 0));
+    // Cream belly/chest panel — tall, sits proud of the orange so it reads
+    // clearly from throat down to the lower belly.
+    const belly = MeshBuilder.CreateSphere('cz_belly', { diameter: 0.62, segments: 14 }, this.scene);
+    belly.scaling = new Vector3(0.84, 1.5, 0.62);
+    this.add(b, belly, cream, new Vector3(0, 0.8, 0.27));
+
+    // ── Neck: moderately long, orange, angled forward ──
+    const neck = MeshBuilder.CreateCapsule('cz_neck', { radius: 0.16, height: 0.46, tessellation: 12 }, this.scene);
+    neck.rotation.x = 0.4;
+    this.add(b, neck, orange, new Vector3(0, 1.2, 0.06));
+
+    // ── Head ──
+    this.buildCharizardHead(b, { orange, cream, black, white });
+
+    // ── Wings: large membranous focal point ──
+    for (const s of [-1, 1]) this.buildCharizardWing(b, s, { orange, orangeDk, wing, wingDk, claw });
+
+    // ── Arms: short, held forward, three white claws each ──
     for (const s of [-1, 1]) {
-      const nostril = MeshBuilder.CreateSphere('cz_nostril', { diameter: 0.045, segments: 6 }, this.scene);
-      this.add(b, nostril, black, new Vector3(s * 0.06, 1.38, 0.58));
-    }
-    // Small upper teeth.
-    for (const s of [-1, 1]) {
-      const tooth = MeshBuilder.CreateCylinder('cz_tooth', { diameterTop: 0, diameterBottom: 0.05, height: 0.08 }, this.scene);
-      tooth.rotation.x = Math.PI;
-      this.add(b, tooth, white, new Vector3(s * 0.08, 1.28, 0.5));
-    }
-    // Horns.
-    for (const s of [-1, 1]) {
-      const horn = MeshBuilder.CreateCylinder('cz_horn', { diameterTop: 0, diameterBottom: 0.08, height: 0.3 }, this.scene);
-      horn.rotation.x = -0.4;
-      this.add(b, horn, cream, new Vector3(s * 0.13, 1.66, -0.04));
-    }
-    for (const s of [-1, 1]) {
-      this.addEye(b, black, white, new Vector3(s * 0.14, 1.46, 0.38), 0.09);
-    }
-    // Larger layered wings: membrane + a couple of finger struts.
-    for (const s of [-1, 1]) {
-      const wingGroup = new TransformNode('cz_winggrp', this.scene);
-      wingGroup.parent = b;
-      wingGroup.position = new Vector3(s * 0.4, 1.05, -0.32);
-      wingGroup.rotation.y = s * 0.6;
-      wingGroup.rotation.z = s * 0.15;
-      const membrane = MeshBuilder.CreateBox('cz_wing', { width: 0.95, height: 0.62, depth: 0.03 }, this.scene);
-      this.add(wingGroup, membrane, wing, new Vector3(s * 0.45, 0.02, 0));
-      const upper = MeshBuilder.CreateSphere('cz_wingtop', { diameter: 0.3, segments: 8 }, this.scene);
-      upper.scaling = new Vector3(2.4, 0.5, 0.3);
-      this.add(wingGroup, upper, wing, new Vector3(s * 0.45, 0.34, 0));
-      for (const fx of [0.25, 0.55, 0.85]) {
-        const strut = MeshBuilder.CreateCylinder('cz_strut', { diameter: 0.045, height: 0.6 }, this.scene);
-        this.add(wingGroup, strut, orange, new Vector3(s * fx, 0.0, 0));
-      }
-    }
-    // Arms with claws.
-    for (const s of [-1, 1]) {
-      const arm = MeshBuilder.CreateCapsule('cz_arm', { radius: 0.08, height: 0.32, tessellation: 8 }, this.scene);
-      arm.rotation.z = s * 0.6;
-      this.add(b, arm, orange, new Vector3(s * 0.42, 0.75, 0.12));
+      const arm = MeshBuilder.CreateCapsule('cz_arm', { radius: 0.09, height: 0.34, tessellation: 8 }, this.scene);
+      arm.rotation.z = s * 0.7;
+      arm.rotation.x = -0.5;
+      this.add(b, arm, orange, new Vector3(s * 0.4, 0.86, 0.18));
       for (const c of [-1, 0, 1]) {
-        const cl = MeshBuilder.CreateCylinder('cz_claw', { diameterTop: 0, diameterBottom: 0.03, height: 0.1 }, this.scene);
-        cl.rotation.x = -Math.PI / 2;
-        this.add(b, cl, claw, new Vector3(s * 0.5 + c * 0.03, 0.6, 0.22));
+        const cl = MeshBuilder.CreateCylinder('cz_claw', { diameterTop: 0, diameterBottom: 0.035, height: 0.12, tessellation: 6 }, this.scene);
+        cl.rotation.x = -1.2;
+        this.add(b, cl, claw, new Vector3(s * 0.46 + c * 0.05, 0.66, 0.42));
       }
     }
-    // Legs with claws.
+
+    // ── Legs: strong digitigrade hind legs, feet with three white toe-claws ──
     for (const s of [-1, 1]) {
-      const leg = MeshBuilder.CreateCapsule('cz_leg', { radius: 0.11, height: 0.34, tessellation: 8 }, this.scene);
-      this.add(b, leg, orange, new Vector3(s * 0.24, 0.28, 0.05));
-      const foot = MeshBuilder.CreateSphere('cz_footpad', { diameter: 0.2, segments: 8 }, this.scene);
-      foot.scaling = new Vector3(1, 0.6, 1.3);
-      this.add(b, foot, orange, new Vector3(s * 0.24, 0.1, 0.14));
+      const thigh = MeshBuilder.CreateCapsule('cz_thigh', { radius: 0.15, height: 0.4, tessellation: 10 }, this.scene);
+      thigh.scaling = new Vector3(1, 1, 0.9);
+      this.add(b, thigh, orange, new Vector3(s * 0.26, 0.44, -0.02));
+      const shin = MeshBuilder.CreateCapsule('cz_shin', { radius: 0.11, height: 0.32, tessellation: 8 }, this.scene);
+      shin.rotation.x = 0.25;
+      this.add(b, shin, orange, new Vector3(s * 0.26, 0.22, 0.08));
+      const foot = MeshBuilder.CreateSphere('cz_footpad', { diameter: 0.22, segments: 8 }, this.scene);
+      foot.scaling = new Vector3(1, 0.55, 1.4);
+      this.add(b, foot, orange, new Vector3(s * 0.26, 0.09, 0.18));
       for (const c of [-1, 0, 1]) {
-        const cl = MeshBuilder.CreateCylinder('cz_toeclaw', { diameterTop: 0, diameterBottom: 0.03, height: 0.09 }, this.scene);
+        const cl = MeshBuilder.CreateCylinder('cz_toeclaw', { diameterTop: 0, diameterBottom: 0.04, height: 0.11, tessellation: 6 }, this.scene);
         cl.rotation.x = -Math.PI / 2;
-        this.add(b, cl, claw, new Vector3(s * 0.24 + c * 0.06, 0.07, 0.26));
+        this.add(b, cl, claw, new Vector3(s * 0.26 + c * 0.07, 0.06, 0.32));
       }
     }
-    // Longer curved tail ending in glowing flame.
-    const tail1 = MeshBuilder.CreateCapsule('cz_tail1', { radius: 0.14, height: 0.5, tessellation: 8 }, this.scene);
-    tail1.rotation.x = 1.0;
-    this.add(b, tail1, orange, new Vector3(0, 0.5, -0.45));
-    const tail2 = MeshBuilder.CreateCapsule('cz_tail2', { radius: 0.1, height: 0.4, tessellation: 8 }, this.scene);
-    tail2.rotation.x = 0.3;
-    this.add(b, tail2, orange, new Vector3(0, 0.35, -0.78));
-    const fl = MeshBuilder.CreateSphere('cz_flame', { diameter: 0.3, segments: 10 }, this.scene);
-    fl.scaling = new Vector3(1, 1.6, 1);
-    this.add(b, fl, flame, new Vector3(0, 0.55, -0.95));
+
+    // ── Tail: thick base, tapering, curving up/back, flame at tip ──
+    const tail1 = MeshBuilder.CreateCapsule('cz_tail1', { radius: 0.16, height: 0.5, tessellation: 10 }, this.scene);
+    tail1.rotation.x = 1.15;
+    this.add(b, tail1, orange, new Vector3(0, 0.5, -0.44));
+    const tail2 = MeshBuilder.CreateCapsule('cz_tail2', { radius: 0.11, height: 0.5, tessellation: 8 }, this.scene);
+    tail2.rotation.x = 0.15;
+    this.add(b, tail2, orange, new Vector3(0, 0.42, -0.86));
+    // Burning flame (orange base + yellow tip), tagged for the animation system.
+    const fl = MeshBuilder.CreateSphere('cz_flame', { diameter: 0.34, segments: 10 }, this.scene);
+    fl.scaling = new Vector3(1, 1.7, 1);
+    this.add(b, fl, flame, new Vector3(0, 0.68, -1.06));
     fl.metadata = { flame: true };
+    const flTip = MeshBuilder.CreateSphere('cz_flametip', { diameter: 0.17, segments: 8 }, this.scene);
+    flTip.scaling = new Vector3(1, 1.9, 1);
+    this.add(b, flTip, flameTip, new Vector3(0, 0.88, -1.06));
+  }
+
+  /** Charizard head group: rounded muzzle, nostrils, eyes, back-swept horns. */
+  private buildCharizardHead(
+    b: TransformNode,
+    mats: { orange: StandardMaterial; cream: StandardMaterial; black: StandardMaterial; white: StandardMaterial },
+  ): void {
+    const { orange, cream, black, white } = mats;
+    const head = MeshBuilder.CreateSphere('cz_head', { diameter: 0.5, segments: 14 }, this.scene);
+    head.scaling = new Vector3(1, 0.92, 1.15);
+    this.add(b, head, orange, new Vector3(0, 1.5, 0.14));
+    // Rounded muzzle tapering forward with a slight upper-jaw overhang.
+    // Rounded muzzle with a slight upper-jaw overhang toward the front.
+    const snout = MeshBuilder.CreateSphere('cz_snout', { diameter: 0.34, segments: 12 }, this.scene);
+    snout.scaling = new Vector3(0.85, 0.62, 1.5);
+    this.add(b, snout, orange, new Vector3(0, 1.44, 0.46));
+    // Nostrils.
+    for (const s of [-1, 1]) {
+      const nostril = MeshBuilder.CreateSphere('cz_nostril', { diameter: 0.05, segments: 6 }, this.scene);
+      this.add(b, nostril, black, new Vector3(s * 0.06, 1.46, 0.62));
+    }
+    // Two horns sweeping BACKWARD off the back of the skull, slightly upturned.
+    for (const s of [-1, 1]) {
+      const horn = MeshBuilder.CreateCylinder('cz_horn', { diameterTop: 0, diameterBottom: 0.09, height: 0.34, tessellation: 6 }, this.scene);
+      horn.rotation.x = 2.5; // point back and slightly up
+      this.add(b, horn, cream, new Vector3(s * 0.14, 1.66, -0.14));
+    }
+    // Eyes.
+    for (const s of [-1, 1]) {
+      this.addEye(b, black, white, new Vector3(s * 0.14, 1.54, 0.4), 0.09);
+    }
+  }
+
+  /**
+   * One large membranous Charizard wing (side `s` = ±1). An orange leading-edge
+   * "arm bone" (two tapered segments + a small elbow claw) sweeps up and out,
+   * with a big teal membrane spanning below/behind it and scalloped trailing
+   * points. Grouped under a TransformNode child of `b`.
+   */
+  private buildCharizardWing(
+    b: TransformNode,
+    s: number,
+    mats: { orange: StandardMaterial; orangeDk: StandardMaterial; wing: StandardMaterial; wingDk: StandardMaterial; claw: StandardMaterial },
+  ): void {
+    const { orange, orangeDk, wing, wingDk, claw } = mats;
+    const g = new TransformNode('cz_winggrp', this.scene);
+    g.parent = b;
+    g.position = new Vector3(s * 0.34, 1.12, -0.28);
+    g.rotation.y = s * 0.7;
+    g.rotation.z = s * 0.35;
+    g.rotation.x = -0.2;
+
+    // Leading-edge arm bone: upper segment (shoulder→elbow) then forearm.
+    const upper = MeshBuilder.CreateCapsule('cz_wingbone1', { radius: 0.05, height: 0.7, tessellation: 8 }, this.scene);
+    upper.rotation.z = s * -1.15;
+    this.add(g, upper, orange, new Vector3(s * 0.3, 0.28, 0));
+    const fore = MeshBuilder.CreateCapsule('cz_wingbone2', { radius: 0.04, height: 0.62, tessellation: 8 }, this.scene);
+    fore.rotation.z = s * -0.5;
+    this.add(g, fore, orangeDk, new Vector3(s * 0.72, 0.66, 0));
+    // Small thumb-claw at the elbow bend.
+    const elbowClaw = MeshBuilder.CreateCylinder('cz_wingclaw', { diameterTop: 0, diameterBottom: 0.05, height: 0.14, tessellation: 6 }, this.scene);
+    elbowClaw.rotation.z = s * 0.9;
+    this.add(g, elbowClaw, claw, new Vector3(s * 0.5, 0.62, 0));
+
+    // Big teal membrane — thin flattened box spanning below/behind the bone.
+    const membrane = MeshBuilder.CreateBox('cz_wing', { width: 1.1, height: 0.86, depth: 0.025 }, this.scene);
+    this.add(g, membrane, wing, new Vector3(s * 0.5, 0.02, 0.01));
+    // 2 shallow scallop points along the trailing (lower) edge; the darker
+    // teal reads as the membrane's shaded underside between the fingers.
+    for (const fx of [0.32, 0.78]) {
+      const scallop = MeshBuilder.CreateCylinder('cz_scallop', { diameterTop: 0, diameterBottom: 0.34, height: 0.3, tessellation: 3 }, this.scene);
+      scallop.scaling = new Vector3(1, 1, 0.12);
+      scallop.rotation.x = Math.PI; // point downward
+      this.add(g, scallop, wingDk, new Vector3(s * fx, -0.42, 0.01));
+    }
   }
 
   private buildGardevoir(b: TransformNode, accent: string): void {
