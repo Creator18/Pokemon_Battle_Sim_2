@@ -60,3 +60,6 @@ crashlytics-build.properties
 node_modules/
 dist/
 *.local
+
+# PokéAPI responses cached by tools/gen-species.mjs
+tools/.pokeapi-cache.json

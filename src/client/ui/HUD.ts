@@ -5,6 +5,7 @@
 
 import type { BattleStateJSON, PokemonJSON } from '../../shared/index.ts';
 import { el, ensureStyles, clearChildren } from './dom.ts';
+import { hpColorCss } from '../theme.ts';
 
 const STATUS_STYLE: Record<string, { label: string; bg: string; fg: string }> = {
   burned: { label: 'BRN', bg: '#F97316', fg: '#2A1000' },
@@ -40,6 +41,22 @@ export class HUD {
     this.localPlayerId = id;
   }
 
+  /**
+   * Move one side's bar to `hp` in place (it slides and recolours), at the
+   * moment a hit lands; the turn's `update` then confirms it.
+   */
+  setHp(pid: number, hp: number, maxHp: number): void {
+    const wrap = pid === 1 ? this.p1wrap : this.p2wrap;
+    const fill = wrap.querySelector<HTMLElement>('.pbw-hpfill');
+    const text = wrap.querySelector<HTMLElement>('.pbw-hptext');
+    const pct = Math.max(0, hp / maxHp);
+    if (fill) {
+      fill.style.width = `${pct * 100}%`;
+      fill.style.background = hpColorCss(pct);
+    }
+    if (text) text.textContent = `${hp} / ${maxHp} HP`;
+  }
+
   update(state: BattleStateJSON): void {
     const p1 = state.pokemon.p1;
     const p2 = state.pokemon.p2;
@@ -64,7 +81,7 @@ export class HUD {
     clearChildren(wrap);
     if (!poke) return;
     const pct = Math.max(0, poke.current_hp / poke.max_hp);
-    const color = pct > 0.5 ? 'var(--good)' : pct > 0.22 ? 'var(--warn)' : 'var(--bad)';
+    const color = hpColorCss(pct);
     const youTag = pid === this.localPlayerId ? ' (You)' : '';
 
     const fill = el('div', { class: 'pbw-hpfill', style: { width: `${pct * 100}%`, background: color } });

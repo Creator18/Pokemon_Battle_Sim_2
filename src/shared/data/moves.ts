@@ -26,6 +26,9 @@ interface RawMove {
   aoe_radius?: number;
   always_hits?: boolean;
   needs_momentum?: boolean;
+  is_beam?: boolean;
+  self_hp_cost?: number;
+  fixed_damage?: number;
   quick_priority?: boolean;
   recoil_fraction?: number;
   self_debuff?: Record<string, number>;
@@ -71,6 +74,9 @@ function buildMove(name: string, d: RawMove, fallback: MoveCategory): MoveDefini
     aoeRadius: d.aoe_radius ?? 0,
     alwaysHits: d.always_hits ?? false,
     needsMomentum: d.needs_momentum ?? false,
+    isBeam: d.is_beam ?? false,
+    selfHpCost: d.self_hp_cost ?? 0,
+    fixedDamage: d.fixed_damage ?? 0,
     quickPriority: d.quick_priority ?? false,
     recoilFraction: d.recoil_fraction ?? 0.0,
     selfDebuff: (d.self_debuff ?? {}) as Partial<Record<StatName, number>>,

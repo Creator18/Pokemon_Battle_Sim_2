@@ -19,7 +19,7 @@ import {
 
 import { NetClient } from './net/NetClient.ts';
 import { HexBoard } from './render/HexBoard.ts';
-import { PokemonFactory } from './render/PokemonFactory.ts';
+import type { UnitFactory } from './render/unitFactory.ts';
 import { MoveVfx } from './vfx/MoveVfx.ts';
 import { BattleCamera } from './camera/BattleCamera.ts';
 
@@ -29,12 +29,13 @@ import { HUD } from './ui/HUD.ts';
 import { BattleLog } from './ui/BattleLog.ts';
 import { DeclarationPanel, type HighlightSetter } from './ui/DeclarationPanel.ts';
 import { GameOverOverlay } from './ui/GameOverOverlay.ts';
+import { LoadingScreen } from './ui/LoadingScreen.ts';
 import { ResolutionPlayback } from './ui/ResolutionPlayback.ts';
 
 export interface GameControllerDeps {
   net: NetClient;
   board: HexBoard;
-  factory: PokemonFactory;
+  factory: UnitFactory;
   vfx: MoveVfx;
   camera: BattleCamera;
   uiRoot: HTMLElement;
@@ -43,7 +44,7 @@ export interface GameControllerDeps {
 export class GameController {
   private net: NetClient;
   private board: HexBoard;
-  private factory: PokemonFactory;
+  private factory: UnitFactory;
   private camera: BattleCamera;
   private playback: ResolutionPlayback;
 
@@ -53,6 +54,8 @@ export class GameController {
   private battleLog: BattleLog;
   private declPanel: DeclarationPanel;
   private gameOver: GameOverOverlay;
+  private loading: LoadingScreen;
+  private unitsLoading: Promise<void> | null = null;
 
   private localPlayerId = 1;
   private sessionId = '';
@@ -67,7 +70,8 @@ export class GameController {
     this.board = deps.board;
     this.factory = deps.factory;
     this.camera = deps.camera;
-    this.playback = new ResolutionPlayback(deps.board, deps.factory, deps.vfx, deps.camera);
+    this.playback = new ResolutionPlayback(deps.board, deps.factory, deps.vfx, deps.camera,
+      (pid, hp, maxHp) => this.hud.setHp(pid, hp, maxHp));
 
     this.connectScreen = new ConnectScreen({ onJoin: (sid) => this.doJoin(sid) });
     this.draftScreen = new DraftScreen({
@@ -82,8 +86,9 @@ export class GameController {
       clearHighlights: () => this.board.clearHighlights(),
     });
     this.gameOver = new GameOverOverlay(() => window.location.reload());
+    this.loading = new LoadingScreen();
 
-    for (const c of [this.connectScreen, this.draftScreen, this.hud, this.battleLog, this.declPanel, this.gameOver]) {
+    for (const c of [this.connectScreen, this.draftScreen, this.hud, this.battleLog, this.declPanel, this.gameOver, this.loading]) {
       deps.uiRoot.append(c.root);
     }
 
@@ -208,15 +213,44 @@ export class GameController {
     return p ? [p.tile[0], p.tile[1]] : [0, 0];
   }
 
-  private async ensureUnits(state: BattleStateJSON): Promise<void> {
+  /** Build any missing Pokémon. Concurrent callers share one load. */
+  private ensureUnits(state: BattleStateJSON): Promise<void> {
+    if (!this.unitsLoading) {
+      this.unitsLoading = this.loadUnits(state).finally(() => { this.unitsLoading = null; });
+    }
+    return this.unitsLoading;
+  }
+
+  /**
+   * Load both Pokémon in parallel behind the loading screen; the battle is
+   * shown only once both are ready.
+   */
+  private async loadUnits(state: BattleStateJSON): Promise<void> {
+    const todo: { pid: number; species: SpeciesDefinition }[] = [];
     for (const pid of [1, 2] as const) {
       if (this.units.has(pid)) continue;
       const p = pid === 1 ? state.pokemon.p1 : state.pokemon.p2;
       if (!p) continue;
       const species = getSpecies(p.name) ?? this.species.find((s) => s.name === p.name);
-      if (!species) continue;
-      const node = await this.factory.createPokemon(species, pid);
-      this.units.set(pid, node);
+      if (species) todo.push({ pid, species });
+    }
+    if (todo.length === 0) return;
+
+    this.loading.show(todo.map((t) => t.species.name));
+    const progress = new Map(todo.map((t) => [t.pid, 0]));
+    const report = () => this.loading.setProgress([...progress.values()].reduce((a, b) => a + b, 0) / progress.size);
+    try {
+      await Promise.all(todo.map(async ({ pid, species }) => {
+        const node = await this.factory.createPokemon(species, pid, (f) => { progress.set(pid, f); report(); });
+        progress.set(pid, 1);
+        report();
+        this.units.set(pid, node);
+      }));
+      // From the start, the two keep looking at each other.
+      const a = this.units.get(1), b = this.units.get(2);
+      if (a && b) this.factory.faceEachOther(a, b);
+    } finally {
+      this.loading.hide();
     }
   }
 
@@ -225,14 +259,19 @@ export class GameController {
       const p = pid === 1 ? state.pokemon.p1 : state.pokemon.p2;
       const node = this.units.get(pid);
       if (!p || !node) continue;
-      const pos = this.board.tileTop(p.tile[0], p.tile[1]);
-      node.position = new Vector3(pos.x, node.position.y || 0, pos.z);
-      if (p.status === 'fainted') node.setEnabled(false);
-      else if (!node.isEnabled()) this.factory.revive(node);
+      // Stand ON the tile: tileTop is the top surface of the tile (y = 0.4),
+      // not the ground plane under it.
+      // A huge Pokémon stands in the middle of its three tiles.
+      const pos = this.board.standPoint(p.tile[0], p.tile[1], p.huge === true);
+      node.position = new Vector3(pos.x, pos.y, pos.z);
+      // On a rock or tree (only a flier can be there): hover over it.
+      this.factory.setHover(node, p.status === 'fainted' ? 0 : this.board.hoverOver(p.tile[0], p.tile[1], p.huge === true));
+      if (p.status === 'fainted') this.factory.lieDown(node);
+      else if (this.factory.isDown(node)) this.factory.revive(node);
       // Face toward center / opponent.
       const other = pid === 1 ? state.pokemon.p2 : state.pokemon.p1;
       if (other) {
-        const o = this.board.tileTop(other.tile[0], other.tile[1]);
+        const o = this.board.standPoint(other.tile[0], other.tile[1], other.huge === true);
         this.factory.setFacing(node, Math.atan2(o.x - pos.x, o.z - pos.z));
       }
     }

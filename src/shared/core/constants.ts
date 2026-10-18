@@ -9,6 +9,9 @@ export const SPEED_TILE_DIVISOR = 20;
 export const MOVE_FIRST_COST = 10;
 export const MOMENTUM_BONUS_PER_TILE = 0.1;
 export const MOMENTUM_CAP = 1.5;
+/** A ranged special move charges with the movement it leaves unused: +CHARGE_BONUS_PER_TILE a tile, at most CHARGE_CAP. */
+export const CHARGE_BONUS_PER_TILE = 0.1;
+export const CHARGE_CAP = 1.5;
 
 export const EARLY_STOP_BOOST_PER_TILE = 0.15;
 export const EARLY_STOP_BOOST_MAX = 2.0;
@@ -43,6 +46,10 @@ export const MAP_SPAWN_EXCLUSION = 2;
 
 export const DEFAULT_STEP_COST = 1;
 export const MAP_ROCK_STEP_COST = 2;
+
+/** Earthquake's tilted ground: rough to cross (step cost), for 3 turns after the quake's (it ticks once at that turn's end). */
+export const TILTED_STEP_COST = 2;
+export const TILTED_DURATION = 4;
 
 export const STAT_STAGE_MIN = -6;
 export const STAT_STAGE_MAX = 6;

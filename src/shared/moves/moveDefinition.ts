@@ -13,6 +13,12 @@ export interface MoveDefinition {
   readonly aoeRadius: number;
   readonly alwaysHits: boolean;
   readonly needsMomentum: boolean;
+  /** A beam: two fired at each other in one turn meet in a clash (moves/clash.ts). */
+  readonly isBeam: boolean;
+  /** Fired, it costs its user this share of its max HP, hit or miss (Steel Beam). */
+  readonly selfHpCost: number;
+  /** Deals exactly this much HP, whatever the stats or boosts (Dragon Rage); 0 = the damage formula. */
+  readonly fixedDamage: number;
   readonly quickPriority: boolean;
   readonly recoilFraction: number;
   readonly selfDebuff: Partial<Record<StatName, number>>;

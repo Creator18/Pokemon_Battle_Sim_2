@@ -16,6 +16,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 // Side-effect import: registers MeshBuilder.CreateCapsule used by the stylized
 // primitive fallbacks below (rounder limbs/bodies than plain cylinders).
 import '@babylonjs/core/Meshes/Builders/capsuleBuilder';
+import '@babylonjs/core/Rendering/outlineRenderer'; // overlay (hit flash)
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -23,6 +24,14 @@ import { SceneLoader } from '@babylonjs/core/Loading/sceneLoader';
 import { Animation } from '@babylonjs/core/Animations/animation';
 
 import type { SpeciesDefinition } from '../../shared/index.ts';
+import type { BeamPlay, CastKind, ClashPlay, UnitFactory } from './unitFactory.ts';
+import { arcTo, KNOCK_TIME, KNOCK_MIN_ARC } from './unitFactory.ts';
+import type { BeamSpec } from '../vfx/beam/beamMoves.ts';
+import type { BallSpec } from '../vfx/beam/ballMoves.ts';
+import type { PulseSpec } from '../vfx/PulseFx.ts';
+import type { WindSpec } from '../vfx/windMoves.ts';
+import type { LightningSpec } from '../vfx/lightningMoves.ts';
+import type { AuraHandle, AuraOptions } from '../vfx/UnitFx.ts';
 import { typeColor, hexToRgb } from '../theme.ts';
 
 function solidMat(scene: Scene, name: string, hex: string, emissive?: string): StandardMaterial {
@@ -46,7 +55,7 @@ export interface PokemonNodeMeta {
   idle?: () => void;
 }
 
-export class PokemonFactory {
+export class PokemonFactory implements UnitFactory {
   private readonly scene: Scene;
   private shadowGen?: { addShadowCaster: (m: Mesh) => void };
 
@@ -85,7 +94,8 @@ export class PokemonFactory {
   }
 
   /** Build a display node for a species (async: tries GLB then primitives). */
-  async createPokemon(species: SpeciesDefinition, playerId: number): Promise<TransformNode> {
+  async createPokemon(species: SpeciesDefinition, playerId: number, onProgress?: (fraction: number) => void): Promise<TransformNode> {
+    onProgress?.(1);
     const root = new TransformNode(`poke_${species.name}_${playerId}`, this.scene);
     root.metadata = { species: species.name, playerId, facing: 0 } as PokemonNodeMeta;
 
@@ -735,7 +745,7 @@ export class PokemonFactory {
   }
 
   /** Tween a unit along a world-space path (list of tile-top positions). */
-  playMoveTo(node: TransformNode, worldPath: Vector3[]): Promise<void> {
+  playMoveTo(node: TransformNode, worldPath: Vector3[], _hover?: number[]): Promise<void> {
     return new Promise((resolve) => {
       if (worldPath.length === 0) return resolve();
       let i = 0;
@@ -752,7 +762,7 @@ export class PokemonFactory {
     });
   }
 
-  playAttackLunge(node: TransformNode, targetPos: Vector3): Promise<void> {
+  playAttackLunge(node: TransformNode, targetPos: Vector3, _swipe?: boolean): Promise<void> {
     return new Promise((resolve) => {
       const start = node.position.clone();
       const dir = targetPos.subtract(start);
@@ -766,7 +776,27 @@ export class PokemonFactory {
     });
   }
 
-  playHitReact(node: TransformNode): Promise<void> {
+  /** The primitives have no claw marks. */
+  playClaw(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  async playKnockback(node: TransformNode, to: Vector3, flash?: [number, number, number]): Promise<void> {
+    void this.playHitReact(node, flash);
+    await arcTo(node, to, KNOCK_TIME, KNOCK_MIN_ARC);
+  }
+
+  playHitReact(node: TransformNode, flash?: [number, number, number]): Promise<void> {
+    if (flash) {
+      // The hit flash: a flat overlay in the HP colour for a moment.
+      const meshes = node.getChildMeshes();
+      for (const m of meshes) {
+        m.overlayColor = new Color3(flash[0], flash[1], flash[2]);
+        m.overlayAlpha = 0.85;
+        m.renderOverlay = true;
+      }
+      setTimeout(() => meshes.forEach((m) => { m.renderOverlay = false; }), 260);
+    }
     return new Promise((resolve) => {
       const body = node.getChildTransformNodes(true).find((n) => n.name.startsWith('body_')) ?? node;
       const orig = body.scaling.clone();
@@ -792,6 +822,73 @@ export class PokemonFactory {
         resolve();
       });
     });
+  }
+
+  /** The primitives have no flying pose: they simply float at the height. */
+  setHover(node: TransformNode, height: number): void {
+    node.position.y += height;
+  }
+
+  /** No beam renderer here: just the turn, resolving at once. */
+  playBeam(node: TransformNode, _target: TransformNode | null, targetPos: Vector3, _spec: BeamSpec): BeamPlay {
+    const d = targetPos.subtract(node.position);
+    node.rotation.y = Math.atan2(d.x, d.z);
+    return { hit: Promise.resolve(), contactEnds: Promise.resolve(), done: Promise.resolve() };
+  }
+
+  faceEachOther(a: TransformNode, b: TransformNode): void {
+    this.scene.onBeforeRenderObservable.add(() => {
+      for (const [x, y] of [[a, b], [b, a]]) {
+        const d = y.position.subtract(x.position);
+        if (Math.abs(d.x) + Math.abs(d.z) > 1e-3 && x.isEnabled()) x.rotation.y = Math.atan2(d.x, d.z);
+      }
+    });
+  }
+
+  playBall(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: BallSpec): BeamPlay {
+    return this.playBeam(node, target, targetPos, { element: spec.element });
+  }
+
+  playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null): ClashPlay {
+    const pa = this.playBeam(a, b, b.position.clone(), specA), pb = this.playBeam(b, a, a.position.clone(), specB);
+    void winner;
+    return { hit: Promise.all([pa.hit, pb.hit]).then(() => {}), done: Promise.all([pa.done, pb.done]).then(() => {}) };
+  }
+
+  playPulse(node: TransformNode, target: TransformNode | null, targetPos: Vector3, _spec: PulseSpec): BeamPlay {
+    return this.playBeam(node, target, targetPos, { element: _spec.element });
+  }
+
+  playWind(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: WindSpec): BeamPlay {
+    return this.playBeam(node, target, targetPos, { element: spec.element });
+  }
+
+  playLightning(node: TransformNode, target: TransformNode | null, targetPos: Vector3, _spec: LightningSpec): BeamPlay {
+    return this.playBeam(node, target, targetPos, { element: 'Electric' });
+  }
+
+  /** The primitives have one flinch; playHitReact already played it. */
+  holdHitReact(_node: TransformNode, _until: Promise<void>): void {}
+
+  /** Without a UnitFx there is no outline: a handle that is at once lit and gone. */
+  aura(_node: TransformNode, _options: AuraOptions): AuraHandle {
+    return { lit: Promise.resolve(), release: () => Promise.resolve() };
+  }
+
+  /** Primitives have no cast animation: just turn toward the target. */
+  playCast(node: TransformNode, targetPos: Vector3, _kind: CastKind): Promise<void> {
+    const d = targetPos.subtract(node.position);
+    if (Math.abs(d.x) + Math.abs(d.z) > 1e-3) this.setFacing(node, Math.atan2(d.x, d.z));
+    return Promise.resolve();
+  }
+
+  /** A fainted primitive is simply hidden. */
+  lieDown(node: TransformNode): void {
+    node.setEnabled(false);
+  }
+
+  isDown(node: TransformNode): boolean {
+    return !node.isEnabled();
   }
 
   revive(node: TransformNode): void {

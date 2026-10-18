@@ -163,6 +163,23 @@
       "skip_turn_on_hit": false,
       "description": "Melee Fire-type bite. 10% chance to apply burn status to the target."
     },
+    "Earthquake": {
+      "category": "physical",
+      "base_power": 100,
+      "move_type": "Ground",
+      "is_ranged": false,
+      "requires_los": false,
+      "bypasses_los": true,
+      "aoe_radius": 2,
+      "target": "self_area",
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "recoil_fraction": 0.0,
+      "self_debuff": {},
+      "skip_turn_on_hit": false,
+      "description": "Centred on the user: the ground heaves two rings deep round it. Anything there is hit and thrown out of the zone, rocks there shatter, trees fall, and the ground stays tilted inward (rough, costs 2 to cross) for 3 turns."
+    },
     "Dragon Claw": {
       "category": "physical",
       "base_power": 80,

@@ -320,6 +320,10 @@ function toWire(a: ResolvedAction): ResolvedActionWire {
     toTile: tile(a.toTile),
     path: (a.path ?? []).map((t) => [t[0], t[1]] as [number, number]),
     qaLandedAt: tile(a.qaLandedAt),
+    knockback: a.result?.knockback
+      ? { playerId: a.result.knockback.playerId, from: tile(a.result.knockback.from)!, to: tile(a.result.knockback.to)! }
+      : null,
+    clash: a.clash ? { players: a.clash.players, winner: a.clash.winner, outputs: a.clash.outputs, charges: a.clash.charges, margin: a.clash.margin } : null,
     skippedMovement: a.skippedMovement,
     skippedAttack: a.skippedAttack,
   };

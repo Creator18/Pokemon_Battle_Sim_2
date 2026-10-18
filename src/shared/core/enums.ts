@@ -44,6 +44,8 @@ export enum TerrainType {
   RESONANCE_ZONE = 'resonance_zone',
   PERISH_ZONE = 'perish_zone',
   ICE_ZONE = 'ice_zone',
+  /** Ground heaved by Earthquake, left tilted inward: rough to cross. */
+  TILTED = 'tilted',
 }
 
 export enum ActionType {

@@ -20,6 +20,7 @@ export { TERRAIN_PROPS, getTerrainProps, type TerrainProperties } from './terrai
 export {
   TerrainEntity,
   TerrainManager,
+  canFly,
   type TerrainAffectable,
   type TerrainEntityJSON,
   type TerrainRemoval,
@@ -35,10 +36,15 @@ export {
   isHighCritMove,
   rollCrit,
   momentumMultiplier,
+  chargeMultiplier,
+  chargesUp,
   voltTackleRecoilMultiplier,
   type DamageParams,
 } from './moves/damage.ts';
 export { executeMove, qaPowerMultiplier, type MoveResult, type ExecuteOptions } from './moves/execute.ts';
+export { QUAKE_RINGS, isSelfArea, quakeZone, quakeLanding } from './moves/quake.ts';
+export { beamOutput, resolveClash, beamsMeet } from './moves/clash.ts';
+export type { ClashOutcome, ClashSide } from './moves/clash.ts';
 
 // Data
 export {

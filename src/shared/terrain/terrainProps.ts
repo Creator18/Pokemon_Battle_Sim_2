@@ -5,6 +5,8 @@ import type { StatName } from '../core/enums.ts';
 import {
   DEFAULT_STEP_COST,
   MAP_ROCK_STEP_COST,
+  TILTED_STEP_COST,
+  TILTED_DURATION,
   MAP_TREE_INTEGRITY,
   TERRAIN_DURATION_MINOR,
   TERRAIN_DURATION_MODERATE,
@@ -114,6 +116,11 @@ export const TERRAIN_PROPS: Record<TerrainType, TerrainProperties> = {
   [TerrainType.ICE_ZONE]: props({
     terrainType: TerrainType.ICE_ZONE,
     defaultDuration: TERRAIN_DURATION_MODERATE,
+  }),
+  [TerrainType.TILTED]: props({
+    terrainType: TerrainType.TILTED,
+    defaultDuration: TILTED_DURATION,
+    stepCost: TILTED_STEP_COST,
   }),
 };
 

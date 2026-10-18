@@ -14,8 +14,20 @@
 
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 
-/** Circumradius of a hex tile in world units. */
-export const HEX_SIZE = 1.0;
+/**
+ * The widest floor footprint any Pokémon may have after squeezing (world
+ * units): RecipeFactory scales down anything longer or wider than this.
+ */
+export const FOOT_CAP = 2.6;
+/** The same for a huge Pokémon, which has a triangle of three tiles (about two tiles across). */
+export const FOOT_CAP_HUGE = FOOT_CAP * 1.9;
+/**
+ * Circumradius of a hex tile in world units, chosen so a tile (flat to flat,
+ * √3 × this) is a little wider than FOOT_CAP: every Pokémon fits on one.
+ */
+export const HEX_SIZE = (FOOT_CAP * 1.08) / Math.sqrt(3);
+/** How much larger the tiles are than the original 1.0 — for things sized to them. */
+export const TILE_SCALE = HEX_SIZE / 1.0;
 /** Small gap so tiles read as discrete cells. */
 export const HEX_GAP = 0.06;
 

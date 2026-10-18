@@ -15,6 +15,7 @@ import {
   Tile,
   tileKey,
   keyToTile,
+  tilesEqual,
   hexDistance,
   hexNeighbors,
   getHexArea,
@@ -24,6 +25,9 @@ import {
   getAttackDirection,
   countStraightApproach,
   HEX_GRID,
+  footprint,
+  footprintKeys,
+  anchorRules,
 } from '../core/hex.ts';
 import { statStageMultiplier } from '../core/stats.ts';
 import {
@@ -45,7 +49,10 @@ import { getMove } from '../data/moves.ts';
 import { MoveCategory } from '../core/enums.ts';
 import { TurnDeclaration } from './declaration.ts';
 import { QueuedAction, buildQueue, qaEffectiveMoveRange } from './queue.ts';
-import { executeMove, MoveResult } from '../moves/execute.ts';
+import { executeMove, payHpCost, MoveResult } from '../moves/execute.ts';
+import { chargeMultiplier, chargesUp } from '../moves/damage.ts';
+import { beamsMeet, resolveClash, ClashOutcome } from '../moves/clash.ts';
+import type { MoveDefinition } from '../moves/moveDefinition.ts';
 import {
   BattleState,
   createEmptyState,
@@ -72,6 +79,8 @@ export interface ResolvedAction {
   qaLandedAt: Tile | null;
   skippedMovement: boolean;
   skippedAttack: boolean;
+  /** A beam clash this attack took part in (both sides' actions carry it, the initiator's first). */
+  clash?: (ClashOutcome & { players: [number, number] }) | null;
 }
 
 export interface TurnResolution {
@@ -117,6 +126,15 @@ export class TurnEngine {
   private aoeTiles: Record<number, Set<string>> = {};
   resolvedActions: ResolvedAction[] = [];
   private destinyBond: Record<number, boolean> = {};
+  /** Who has already fired this turn (a clash resolves both sides at once). */
+  private attacked = new Set<number>();
+
+  /** Movement left unused this turn: what it has moved, else what it plans to. */
+  private unusedTiles(p: Pokemon, tm: TerrainManager): number {
+    const path = p.pathThisTurn.length > 1 ? p.pathThisTurn : (p.declaration?.plannedPath ?? []);
+    const cost = path.slice(1).reduce((sum, t) => sum + tm.getStepCost(t), 0);
+    return Math.max(0, p.effectiveMoveRange - cost);
+  }
 
   private truncatePath(
     path: readonly Tile[],
@@ -198,6 +216,13 @@ export class TurnEngine {
     }
 
     const path = decl.plannedPath;
+    // Thrown off its tile earlier this turn (Earthquake): its planned path no longer starts where it is.
+    if (path && path.length >= 2 && !tilesEqual(path[0], pokemon.tile)) {
+      this.log.push(`${pokemon.logName} was thrown off its course! Movement skipped this turn.`);
+      pokemon.pathThisTurn = [pokemon.tile];
+      this.resolvedActions.push(this.moveResolved(pokemon, pokemon.tile, pokemon.tile, [pokemon.tile], true));
+      return;
+    }
     if (!path || path.length < 2) {
       this.log.push(`${pokemon.logName} (P${pokemon.playerId}) stays in place.`);
       pokemon.pathThisTurn = [pokemon.tile];
@@ -205,8 +230,7 @@ export class TurnEngine {
       return;
     }
 
-    const blocked = tm.blockedMovementTiles;
-    const occupied = other.isAlive ? new Set([tileKey(other.tile[0], other.tile[1])]) : new Set<string>();
+    const { blocked, occupied } = moveRules(pokemon, other, tm);
     const moveRange = overrideRange ?? pokemon.effectiveMoveRange;
 
     const actualPath = this.truncatePath(path, blocked, occupied, pokemon.canPassThrough, moveRange, tm);
@@ -322,17 +346,42 @@ export class TurnEngine {
 
     if (decl.moveName === 'Destiny Bond') this.destinyBond[pokemon.playerId] = true;
 
+    // Already fired, in a clash the other side started.
+    if (this.attacked.has(pokemon.playerId)) return;
+
     // Volt Tackle: force boost_mult = 1.0
     if (move.needsMomentum) pokemon.boostMult = 1.0;
+
+    // Two beams fired at each other: they meet in a clash, resolved here for both.
+    const defMove = defender.declaration ? getMove(defender.declaration.moveName) : undefined;
+    if (defMove && !this.attacked.has(defender.playerId) &&
+        beamsMeet(pokemon, move, decl.targetTile, defender, defMove, defender.declaration!.targetTile, tm)) {
+      this.resolveClashAction(pokemon, move, defender, defMove, tm, state, rng);
+      return;
+    }
+    this.attacked.add(pokemon.playerId);
 
     const result = executeMove(move, pokemon, defender, tm, rng, {
       targetTile: decl.targetTile,
       straightTiles: pokemon.straightTilesThisTurn,
       tilesMoved: decl.tilesToMove(),
+      chargeTiles: chargesUp(move) ? this.unusedTiles(pokemon, tm) : 0,
       actionOrder: decl.actionOrder,
       defenderDeclaration: defender.declaration,
     });
+    this.finishAttack(pokemon, defender, move, result, state, null);
+  }
 
+  /** Record an attack's result: its log, status effects, cooldown and resolved action. */
+  private finishAttack(
+    pokemon: Pokemon,
+    defender: Pokemon,
+    move: MoveDefinition,
+    result: MoveResult,
+    state: BattleState,
+    clash: ResolvedAction['clash'],
+  ): void {
+    const decl = pokemon.declaration!;
     this.log.push(...result.logLines);
     this.moveResults[pokemon.playerId] = result;
     this.aoeTiles[pokemon.playerId] = result.tilesHit;
@@ -364,7 +413,72 @@ export class TurnEngine {
       qaLandedAt: result.qaLandedAt,
       skippedMovement: false,
       skippedAttack: false,
+      clash,
     });
+  }
+
+  /**
+   * A beam clash between `a` (firing now) and `b` (who had yet to): the
+   * stronger output wins and hits, scaled by its margin; a tie disperses both.
+   * Both sides are spent either way (cooldowns), and both actions are recorded,
+   * `a`'s first, each carrying the clash.
+   */
+  private resolveClashAction(
+    a: Pokemon,
+    aMove: MoveDefinition,
+    b: Pokemon,
+    bMove: MoveDefinition,
+    tm: TerrainManager,
+    state: BattleState,
+    rng: RNG,
+  ): void {
+    this.attacked.add(a.playerId);
+    this.attacked.add(b.playerId);
+    const outcome = resolveClash(
+      { playerId: a.playerId, move: aMove, charge: chargeMultiplier(this.unusedTiles(a, tm)) },
+      { playerId: b.playerId, move: bMove, charge: chargeMultiplier(this.unusedTiles(b, tm)) },
+    );
+    const clash = { ...outcome, players: [a.playerId, b.playerId] as [number, number] };
+    const fmt = (p: Pokemon) => `${p.logName} ${outcome.outputs[p.playerId].toFixed(1)}`;
+    this.log.push(`BEAM CLASH! ${aMove.name} meets ${bMove.name} — ${fmt(a)} vs ${fmt(b)}.`);
+    if (outcome.winner === null) this.log.push('The beams are evenly matched — both disperse!');
+
+    for (const [self, other, move] of [[a, b, aMove], [b, a, bMove]] as Array<[Pokemon, Pokemon, MoveDefinition]>) {
+      const decl = self.declaration!;
+      if (outcome.winner === self.playerId) {
+        this.log.push(`${self.logName}'s ${move.name} overpowers it (margin ${(outcome.margin * 100).toFixed(0)}%)!`);
+        const result = executeMove(move, self, other, tm, rng, {
+          targetTile: decl.targetTile,
+          straightTiles: self.straightTilesThisTurn,
+          tilesMoved: decl.tilesToMove(),
+          chargeTiles: this.unusedTiles(self, tm),
+          clashMult: outcome.margin,
+          actionOrder: decl.actionOrder,
+          defenderDeclaration: other.declaration,
+        });
+        this.finishAttack(self, other, move, result, state, clash);
+      } else {
+        // Overpowered, or dispersed: spent, nothing lands (but it was fired: Steel Beam still costs).
+        self.applyCooldown(decl.moveName, decl.actionOrder);
+        const spent = { logLines: [] as string[], selfCost: 0 } as unknown as MoveResult;
+        payHpCost(move, self, spent);
+        this.log.push(...spent.logLines);
+        this.resolvedActions.push({
+          playerId: self.playerId,
+          actionType: ActionType.ATTACK,
+          moveName: decl.moveName,
+          actionOrder: decl.actionOrder,
+          fromTile: self.tile,
+          toTile: other.tile,
+          path: [],
+          result: null,
+          qaLandedAt: null,
+          skippedMovement: false,
+          skippedAttack: false,
+          clash,
+        });
+      }
+    }
   }
 
   private checkDestinyBond(p1: Pokemon, p2: Pokemon): void {
@@ -434,6 +548,7 @@ export class TurnEngine {
     this.aoeTiles = {};
     this.resolvedActions = [];
     this.destinyBond = {};
+    this.attacked = new Set();
 
     const p1 = state.p1!;
     const p2 = state.p2!;
@@ -635,10 +750,9 @@ export class BattleSession {
 
   getReachableTiles(playerId: number): string[] {
     const { self, other } = this.pokemonAndOther(playerId);
-    const blocked = this.state.terrain.blockedMovementTiles;
-    const occupied = other.isAlive ? new Set([tileKey(other.tile[0], other.tile[1])]) : new Set<string>();
+    const { blocked, occupied } = moveRules(self, other, this.state.terrain);
     return [
-      ...getReachableTiles(self.tile[0], self.tile[1], self.effectiveMoveRange, blocked, occupied),
+      ...getReachableTiles(self.tile[0], self.tile[1], self.effectiveMoveRange, blocked, occupied, undefined, this.stepCost),
     ];
   }
 
@@ -649,8 +763,20 @@ export class BattleSession {
     const from = fromTile ?? self.tile;
     const barriers = move.bypassesLos ? new Set<string>() : this.state.terrain.blockedLosTiles;
     const range = self.effectiveMoveRange;
-    return [...getAttackableTiles(from[0], from[1], move.isRanged ? range : null, move.isRanged, barriers)];
+    // A huge Pokémon attacks from any of its three tiles (never onto its own).
+    const own = footprint(from, self.huge);
+    const ownKeys = new Set(own.map((t) => tileKey(t[0], t[1])));
+    const out = new Set<string>();
+    for (const t of own) {
+      for (const k of getAttackableTiles(t[0], t[1], move.isRanged ? range : null, move.isRanged, barriers)) {
+        if (!ownKeys.has(k)) out.add(k);
+      }
+    }
+    return [...out];
   }
+
+  /** What entering a tile costs (rough ground, rocks: more), as the move resolves it. */
+  private readonly stepCost = (key: string): number => this.state.terrain.getStepCost(keyToTile(key));
 
   validateDeclaration(playerId: number, decl: TurnDeclaration): { ok: boolean; reason: string } {
     const { self, other } = this.pokemonAndOther(playerId);
@@ -660,13 +786,22 @@ export class BattleSession {
     if ((self.cooldowns[decl.moveName] ?? 0) > 0) return { ok: false, reason: 'Move on cooldown.' };
     // Path validation
     if (decl.plannedPath.length > 1) {
-      const blocked = this.state.terrain.blockedMovementTiles;
-      const occupied = other.isAlive ? new Set([tileKey(other.tile[0], other.tile[1])]) : new Set<string>();
-      const { ok, reason } = isValidPath(decl.plannedPath, blocked, occupied, self.effectiveMoveRange);
+      const { blocked, occupied } = moveRules(self, other, this.state.terrain);
+      const { ok, reason } = isValidPath(decl.plannedPath, blocked, occupied, self.effectiveMoveRange, undefined, this.stepCost);
       if (!ok) return { ok: false, reason };
     }
     return { ok: true, reason: 'OK' };
   }
+}
+
+/**
+ * Movement rules for `self` against `other`: the anchors it may not enter
+ * (blocked) and may pass but not stop on (occupied) — footprints counted on
+ * both sides, so huge Pokémon need room for all three tiles.
+ */
+function moveRules(self: Pokemon, other: Pokemon, tm: TerrainManager): { blocked: Set<string>; occupied: Set<string> } {
+  const occupiedTiles = other.isAlive ? footprintKeys(other.tile, other.huge) : new Set<string>();
+  return anchorRules(self.huge, tm.movementBlockersFor(self), occupiedTiles);
 }
 
 function hashSeed(str: string): number {

@@ -8,7 +8,7 @@
  */
 
 import { ActionOrder, PokemonStatus, StatName } from '../core/enums.ts';
-import { Tile } from '../core/hex.ts';
+import { Tile, footprint } from '../core/hex.ts';
 import {
   StatStages,
   statStageMultiplier,
@@ -45,6 +45,7 @@ export interface PokemonJSON {
   level: number;
   status: string;
   can_pass_through: boolean;
+  huge?: boolean;
   stat_stages: Record<string, number>;
   boost_mult: number;
   tiles_short: number;
@@ -71,6 +72,8 @@ export interface PokemonInit {
   level: number;
   status: PokemonStatus;
   canPassThrough: boolean;
+  /** Stands on three tiles (see footprint in core/hex). */
+  huge?: boolean;
   statStages: StatStages;
   boostMult: number;
   tilesShort: number;
@@ -97,6 +100,7 @@ export class Pokemon implements TerrainAffectable {
   level: number;
   status: PokemonStatus;
   canPassThrough: boolean;
+  huge: boolean;
   statStages: StatStages;
   boostMult: number;
   tilesShort: number;
@@ -122,6 +126,7 @@ export class Pokemon implements TerrainAffectable {
     this.level = init.level;
     this.status = init.status;
     this.canPassThrough = init.canPassThrough;
+    this.huge = init.huge ?? false;
     this.statStages = init.statStages;
     this.boostMult = init.boostMult;
     this.tilesShort = init.tilesShort;
@@ -227,6 +232,11 @@ export class Pokemon implements TerrainAffectable {
     this.cooldowns[moveName] = dur;
   }
 
+  /** Every tile it stands on (one, or three if huge). */
+  get tiles(): Tile[] {
+    return footprint(this.tile, this.huge);
+  }
+
   // ── Serialization ─────────────────────────
   toJSON(): PokemonJSON {
     return {
@@ -246,6 +256,7 @@ export class Pokemon implements TerrainAffectable {
       level: this.level,
       status: this.status,
       can_pass_through: this.canPassThrough,
+      huge: this.huge,
       stat_stages: { ...this.statStages },
       boost_mult: this.boostMult,
       tiles_short: this.tilesShort,
@@ -278,6 +289,7 @@ export class Pokemon implements TerrainAffectable {
       level: d.level ?? DEFAULT_LEVEL,
       status: (d.status ?? PokemonStatus.ACTIVE) as PokemonStatus,
       canPassThrough: d.can_pass_through ?? false,
+      huge: d.huge ?? false,
       statStages: stages,
       boostMult: d.boost_mult ?? 1.0,
       tilesShort: d.tiles_short ?? 0,
@@ -313,6 +325,7 @@ export class Pokemon implements TerrainAffectable {
       level: species.level ?? DEFAULT_LEVEL,
       status: PokemonStatus.ACTIVE,
       canPassThrough: species.canPassThrough,
+      huge: species.huge,
       statStages: defaultStatStages(),
       boostMult: 1.0,
       tilesShort: 0,

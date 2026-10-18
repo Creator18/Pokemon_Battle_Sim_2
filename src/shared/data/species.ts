@@ -15,6 +15,12 @@ export interface SpeciesDefinition {
   readonly level: number;
   readonly canPassThrough: boolean;
   readonly spriteId: number;
+  /** The model form to load, when the species has no base (_00_00) model. */
+  readonly modelId?: string;
+  /** A huge Pokémon: it stands on a triangle of three tiles. */
+  readonly huge: boolean;
+  /** For a Mega/regional form: its species' sprite, if the form has none. */
+  readonly baseSpriteId?: number;
   readonly description: string;
   readonly compatibleTerrain: readonly string[];
   readonly compatibleStatus: readonly string[];
@@ -37,6 +43,9 @@ interface RawSpecies {
   level: number;
   can_pass_through: boolean;
   sprite_id: number;
+  model_id?: string;
+  huge?: boolean;
+  base_sprite_id?: number;
   description: string;
   compatible_terrain: string[];
   compatible_status: string[];
@@ -58,6 +67,9 @@ function build(r: RawSpecies): SpeciesDefinition {
     level: r.level,
     canPassThrough: r.can_pass_through,
     spriteId: r.sprite_id,
+    ...(r.model_id ? { modelId: r.model_id } : {}),
+    huge: r.huge === true,
+    ...(r.base_sprite_id ? { baseSpriteId: r.base_sprite_id } : {}),
     description: r.description,
     compatibleTerrain: r.compatible_terrain,
     compatibleStatus: r.compatible_status,

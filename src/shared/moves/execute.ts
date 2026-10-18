@@ -11,6 +11,7 @@ import { Pokemon } from '../model/pokemon.ts';
 import { TerrainManager } from '../terrain/terrainManager.ts';
 import { TurnDeclaration } from '../engine/declaration.ts';
 import { RNG } from '../rng.ts';
+import { isSelfArea, quakeZone, quakeLanding } from './quake.ts';
 import { getMove, moveType } from '../data/moves.ts';
 import { getTypeEffectiveness } from '../core/typechart.ts';
 import {
@@ -30,6 +31,8 @@ import {
   getMoveTypeMult,
   getWeatherMult,
   momentumMultiplier,
+  chargeMultiplier,
+  chargesUp,
   rollCrit,
   voltTackleRecoilMultiplier,
 } from './damage.ts';
@@ -41,6 +44,7 @@ import {
   TERRAIN_DURATION_MODERATE,
   ELECTRO_WEB_SPEED_STAGES,
   PERISH_COUNTDOWN_TURNS,
+  TILTED_DURATION,
 } from '../core/constants.ts';
 
 /** Result of executing a move. */
@@ -55,6 +59,10 @@ export interface MoveResult {
   statChanges: Array<[number, string, number, string | number]>;
   selfStatChanges: Array<[number, string, number, number]>;
   momentumMult: number;
+  /** A ranged special move's charge from unused movement (chargeMultiplier). */
+  chargeMult: number;
+  /** A clash won by this beam: how decisively (the margin, 0..1, scaling its damage). 1 = no clash. */
+  clashMult: number;
   powerMult: number;
   boostMult: number;
   typeMult: number;
@@ -64,6 +72,10 @@ export interface MoveResult {
   suckerPunchFailed: boolean;
   flinched: boolean;
   qaLandedAt: Tile | null;
+  /** What firing it cost its user (Steel Beam: half its max HP). */
+  selfCost: number;
+  /** Thrown off its tile by the attack (Earthquake): where from, where to. */
+  knockback: { playerId: number; from: Tile; to: Tile } | null;
   missReason: string;
   logLines: string[];
 }
@@ -79,6 +91,8 @@ function newResult(): MoveResult {
     statChanges: [],
     selfStatChanges: [],
     momentumMult: 1.0,
+    chargeMult: 1.0,
+    clashMult: 1.0,
     powerMult: 1.0,
     boostMult: 1.0,
     typeMult: 1.0,
@@ -88,13 +102,23 @@ function newResult(): MoveResult {
     suckerPunchFailed: false,
     flinched: false,
     qaLandedAt: null,
+    knockback: null,
+    selfCost: 0,
     missReason: '',
     logLines: [],
   };
 }
 
 function totalMultiplier(r: MoveResult): number {
-  return r.momentumMult * r.powerMult * r.boostMult * r.typeMult * r.weatherMult;
+  return r.momentumMult * r.chargeMult * r.clashMult * r.powerMult * r.boostMult * r.typeMult * r.weatherMult;
+}
+
+/** A move that costs its user HP to fire (selfHpCost): pay it, once fired. */
+export function payHpCost(move: MoveDefinition, attacker: Pokemon, result: MoveResult): void {
+  if (move.selfHpCost <= 0 || !attacker.isAlive) return;
+  result.selfCost = attacker.takeDamage(Math.max(1, Math.floor(attacker.maxHp * move.selfHpCost)));
+  result.logLines.push(`${attacker.logName} paid ${result.selfCost} HP to fire ${move.name}! HP: ${attacker.currentHp}/${attacker.maxHp}`);
+  if (!attacker.isAlive) result.logLines.push(`${attacker.logName} fainted!`);
 }
 
 // ── QA helpers ───────────────────────────────
@@ -148,7 +172,14 @@ function resolveAoe(move: MoveDefinition, targetTile: Tile, grid: ReadonlySet<st
   return grid.has(key) ? new Set([key]) : new Set();
 }
 
-function validateMove(
+/** The tile of `tiles` nearest to `target`. */
+function nearestTile(tiles: Tile[], target: Tile): Tile {
+  let best = tiles[0], bd = Infinity;
+  for (const t of tiles) { const d = hexDistance(t[0], t[1], target[0], target[1]); if (d < bd) { bd = d; best = t; } }
+  return best;
+}
+
+export function validateMove(
   move: MoveDefinition,
   attacker: Pokemon,
   targetTile: Tile,
@@ -160,14 +191,16 @@ function validateMove(
     return { ok: false, reason: 'Target tile outside battlefield.' };
   }
   if (!attacker.isAlive) return { ok: false, reason: 'Attacker has fainted.' };
+  // A huge attacker reaches from its nearest tile.
+  const near = nearestTile(attacker.tiles, targetTile);
   if (!move.isRanged && !move.bypassesLos) {
-    const dist = hexDistance(attacker.tile[0], attacker.tile[1], targetTile[0], targetTile[1]);
+    const dist = hexDistance(near[0], near[1], targetTile[0], targetTile[1]);
     if (dist !== 1) return { ok: false, reason: `${move.name} is melee — must be adjacent (distance=${dist}).` };
   }
   if (move.requiresLos && !move.bypassesLos) {
     const { clear } = hasLineOfSight(
-      attacker.tile[0],
-      attacker.tile[1],
+      near[0],
+      near[1],
       targetTile[0],
       targetTile[1],
       barrierTiles,
@@ -330,6 +363,10 @@ export interface ExecuteOptions {
   targetTile: Tile | null;
   straightTiles: number;
   tilesMoved?: number;
+  /** Movement left unused this turn: a ranged special move charges with it (chargeMultiplier). */
+  chargeTiles?: number;
+  /** Won a beam clash: its damage × this margin (moves/clash.ts). */
+  clashMult?: number;
   actionOrder?: ActionOrder | null;
   defenderDeclaration?: TurnDeclaration | null;
   grid?: ReadonlySet<string>;
@@ -376,9 +413,18 @@ export function executeMove(
     }
   }
 
-  // QA move-first: auto-target
-  if (n === 'Quick Attack' && actionOrder === ActionOrder.MOVE_FIRST) {
-    const barriers = tm.blockedMovementTiles;
+  const selfArea = isSelfArea(move);
+  // A move centred on its user (Earthquake): no target to pick or check.
+  if (selfArea) {
+    if (!attacker.isAlive) {
+      result.missReason = 'Attacker has fainted.';
+      return result;
+    }
+    targetTile = attacker.tile;
+    result.logLines.push(`${attacker.logName} used ${n}! The ground heaves round it.`);
+  } else if (n === 'Quick Attack' && actionOrder === ActionOrder.MOVE_FIRST) {
+    // QA move-first: auto-target
+    const barriers = tm.movementBlockersFor(attacker);
     if (!qaCheckStraightLine(attacker.tile, defender.tile, barriers)) {
       result.qaFailed = true;
       result.missReason = 'Quick Attack (move-first) failed — barrier blocks path.';
@@ -402,6 +448,9 @@ export function executeMove(
     }
   }
 
+  // Fired: it costs its user, hit or miss (Steel Beam).
+  payHpCost(move, attacker, result);
+
   // Focus Blast accuracy (70%)
   if (n === 'Focus Blast') {
     if (rng() > 0.7) {
@@ -415,15 +464,31 @@ export function executeMove(
 
   result.momentumMult = move.needsMomentum ? momentumMultiplier(opts.straightTiles) : 1.0;
   result.powerMult = n === 'Quick Attack' ? qaPowerMultiplier(tilesMoved, actionOrder) : 1.0;
-  result.boostMult = move.needsMomentum ? 1.0 : attacker.boostMult;
+  result.chargeMult = chargesUp(move) ? chargeMultiplier(opts.chargeTiles ?? 0) : 1.0;
+  result.clashMult = opts.clashMult ?? 1.0;
+  // A charged move takes no early-stop boost on top: the unused tiles are its charge.
+  result.boostMult = move.needsMomentum || chargesUp(move) ? 1.0 : attacker.boostMult;
   result.typeMult = getMoveTypeMult(move, defender);
   result.weatherMult = getWeatherMult(move, tm);
 
   const hexPower = getHexPower(move, defender, tm);
 
   // targetTile is guaranteed non-null here (validated above or set to defender.tile).
-  const aoe = resolveAoe(move, targetTile as Tile, grid);
+  const aoe = selfArea ? quakeZone(attacker.tiles, grid) : resolveAoe(move, targetTile as Tile, grid);
   result.tilesHit = aoe;
+
+  // Earthquake shatters the rocks in its zone (other attacks cannot touch
+  // them) and fells the trees there, however sturdy.
+  if (selfArea) {
+    for (const key of aoe) {
+      const tile = keyToTile(key);
+      const type = tm.getTerrain(tile)?.terrainType;
+      if (type !== TerrainType.ROCK && type !== TerrainType.TREE) continue;
+      tm.removeTerrain(tile);
+      result.terrainDestroyed.push([tile, type]);
+      result.logLines.push(type === TerrainType.ROCK ? `The rock at ${key} shattered!` : `The tree at ${key} fell!`);
+    }
+  }
 
   // Terrain destruction (physical)
   if (move.category === MoveCategory.PHYSICAL) {
@@ -438,6 +503,16 @@ export function executeMove(
     }
   }
 
+  // The heaved ground is left tilted inward, wherever nothing still stands on it.
+  if (selfArea) {
+    for (const key of aoe) {
+      const tile = keyToTile(key);
+      if (tm.hasTerrain(tile)) continue;
+      tm.addTerrain(tile, TerrainType.TILTED, attacker.playerId, TILTED_DURATION).origin = attacker.tile;
+      result.terrainPlaced.push([tile, TerrainType.TILTED]);
+    }
+  }
+
   // Type immunity
   if (result.typeMult === 0.0) {
     result.missReason = 'No effect (type immunity).';
@@ -446,13 +521,15 @@ export function executeMove(
   }
 
   const defenderKey = tileKey(defender.tile[0], defender.tile[1]);
+  // A huge defender is hit if the attack covers any of its tiles.
+  const struck = defender.tiles.some((t) => aoe.has(tileKey(t[0], t[1])));
   if (!defender.isAlive) {
     result.missReason = 'Defender already fainted.';
     result.logLines.push(`${defender.logName} already fainted.`);
-  } else if (aoe.has(defenderKey)) {
-    const dmg = calculateDamage(move, attacker, defender, {
+  } else if (struck) {
+    const dmg = move.fixedDamage > 0 ? move.fixedDamage : calculateDamage(move, attacker, defender, {
       momentum: result.momentumMult,
-      powerMult: result.powerMult,
+      powerMult: result.powerMult * result.chargeMult * result.clashMult,
       boostMult: result.boostMult,
       typeMult: result.typeMult,
       weatherMult: result.weatherMult,
@@ -520,6 +597,18 @@ export function executeMove(
         result.logLines.push(`${attacker.logName}'s ${stat} fell! (stage ${newStage})`);
       }
     }
+
+    // Thrown out of the quake, to the first free tile just outside it.
+    if (selfArea && defender.isAlive) {
+      const occupied = new Set(attacker.tiles.map((t) => tileKey(t[0], t[1])));
+      const landing = quakeLanding(defender, attacker.tiles, tm.movementBlockersFor(defender), occupied, grid);
+      if (landing) {
+        const from = defender.tile;
+        defender.moveTo(landing);
+        result.knockback = { playerId: defender.playerId, from, to: landing };
+        result.logLines.push(`${defender.logName} was thrown to ${tileKey(landing[0], landing[1])}!`);
+      }
+    }
   } else {
     result.missReason = `${defender.logName} not in AOE.`;
     result.logLines.push(`Miss — ${result.missReason}`);
@@ -527,8 +616,8 @@ export function executeMove(
 
   // QA landing
   if (n === 'Quick Attack') {
-    const blocked = tm.blockedMovementTiles;
-    const occupied = new Set([defenderKey]);
+    const blocked = tm.movementBlockersFor(attacker);
+    const occupied = new Set(defender.tiles.map((t) => tileKey(t[0], t[1])));
     const landing = qaLandingTile(attacker.tile, defender.tile, blocked, occupied, grid);
     if (landing) {
       attacker.moveTo(landing);

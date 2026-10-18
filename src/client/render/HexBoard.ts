@@ -9,7 +9,8 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Vector3, Quaternion } from '@babylonjs/core/Maths/math.vector';
+import type { Observer } from '@babylonjs/core/Misc/observable';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents';
 import type { PickingInfo } from '@babylonjs/core/Collisions/pickingInfo';
@@ -17,13 +18,15 @@ import { flareTexture } from './textures.ts';
 
 import {
   HEX_GRID,
+  hexDistance,
   keyToTile,
   tileKey,
+  footprint,
   TerrainType,
   type BattleStateJSON,
   type TerrainEntityJSON,
 } from '../../shared/index.ts';
-import { axialToWorld, HEX_SIZE } from '../hexWorld.ts';
+import { axialToWorld, HEX_SIZE, TILE_SCALE } from '../hexWorld.ts';
 import { HIGHLIGHT_COLORS, hexToRgb, ENV, type HighlightType } from '../theme.ts';
 
 const TILE_HEIGHT = 0.4;
@@ -47,6 +50,22 @@ interface ZoneVisual {
   particles?: ParticleSystem;
 }
 
+/** Gap between an obstacle's top and a hovering flier's root (its legs hang below it). */
+const HOVER_CLEAR = 0.55;
+
+/**
+ * Earthquake: each heaved tile bounces once (QUAKE_LIFT high, up over
+ * QUAKE_UP s, down over QUAKE_DOWN s, a small rebound over QUAKE_SETTLE s),
+ * the outer ring QUAKE_RING_DELAY s after the inner, and settles tilted
+ * inward by QUAKE_TILT rad — its surface leaning toward the quake's centre.
+ */
+const QUAKE_LIFT = 0.55, QUAKE_UP = 0.16, QUAKE_DOWN = 0.2, QUAKE_SETTLE = 0.22, QUAKE_RING_DELAY = 0.12;
+const QUAKE_TILT = 0.13;
+/** A felled tree: falls over (TREE_FALL rad, outward) in TREE_TOPPLE s, lies TREE_LIE s, sinks away in TREE_SINK s. */
+const TREE_FALL = Math.PI / 2 - 0.08, TREE_TOPPLE = 0.7, TREE_LIE = 0.5, TREE_SINK = 0.6;
+const easeOutCubic = (x: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+const easeInQuad = (x: number) => Math.min(1, Math.max(0, x)) ** 2;
+
 export class HexBoard {
   readonly root: TransformNode;
   private readonly scene: Scene;
@@ -63,6 +82,9 @@ export class HexBoard {
     canopy: StandardMaterial;
     edge: StandardMaterial;
   };
+
+  /** Ends the quake animation running, if any (its promises resolve; the state sync then sets the tiles). */
+  private stopQuake: (() => void) | null = null;
 
   private tileHoverCb: ((tile: [number, number]) => void) | null = null;
   private tilePickCb: ((tile: [number, number]) => void) | null = null;
@@ -120,14 +142,49 @@ export class HexBoard {
       tile.material = this.mats.tiles[matIdx];
       tile.receiveShadows = true;
       tile.parent = this.root;
-      tile.metadata = { q, r, key };
+      tile.metadata = { q, r, key, material: tile.material };
+      // Turned about its top's middle (a tilt keeps that point, where a Pokémon stands, in place).
+      tile.setPivotPoint(new Vector3(0, height / 2, 0));
+      tile.rotationQuaternion = Quaternion.Identity();
       this.tiles.set(key, tile);
     }
+  }
+
+  /**
+   * Where a Pokémon at anchor (q, r) stands: its tile's top, or for a huge one
+   * the middle of its three-tile triangle.
+   */
+  standPoint(q: number, r: number, huge = false): Vector3 {
+    const feet = footprint([q, r], huge);
+    const p = new Vector3(0, 0, 0);
+    for (const [fq, fr] of feet) p.addInPlace(this.tileTop(fq, fr));
+    return p.scaleInPlace(1 / feet.length);
+  }
+
+  /** The hover height over a whole footprint (a huge flier clears its tallest obstacle). */
+  hoverOver(q: number, r: number, huge = false): number {
+    return Math.max(...footprint([q, r], huge).map(([fq, fr]) => this.hoverHeight(fq, fr)));
   }
 
   /** World position of a tile top surface (for placing units / vfx). */
   tileTop(q: number, r: number): Vector3 {
     return axialToWorld(q, r, TILE_HEIGHT);
+  }
+
+  /**
+   * How high a flier hovers over this tile, above its top: clear of the rock
+   * or tree standing on it (plus HOVER_CLEAR for the hanging legs), or 0 for
+   * a tile with nothing on it.
+   */
+  hoverHeight(q: number, r: number): number {
+    const prop = this.terrainProps.get(tileKey(q, r));
+    if (!prop) return 0;
+    let top = -Infinity;
+    for (const m of prop.getChildMeshes()) {
+      m.computeWorldMatrix(true);
+      top = Math.max(top, m.getBoundingInfo().boundingBox.maximumWorld.y);
+    }
+    return Number.isFinite(top) ? Math.max(0, top - TILE_HEIGHT) + HOVER_CLEAR : 0;
   }
 
   getTileMesh(key: string): Mesh | undefined {
@@ -146,10 +203,23 @@ export class HexBoard {
     }
     this.zones.clear();
 
+    // Tilted ground (Earthquake's aftermath) leans in toward its quake's centre;
+    // every other tile lies flat.
+    this.stopQuake?.();
+    const tilted = new Map<string, [number, number]>();
+    for (const t of state.terrain) {
+      if (t.terrain_type === TerrainType.TILTED && t.origin) tilted.set(tileKey(t.tile[0], t.tile[1]), t.origin);
+    }
+    for (const [key, tile] of this.tiles) {
+      const origin = tilted.get(key);
+      this.setTilt(tile, origin ? this.tiltToward(key, origin) : Quaternion.Identity(), 0);
+    }
+
     let sunny = false;
     let rainy = false;
 
     for (const t of state.terrain) {
+      if (t.terrain_type === TerrainType.TILTED) continue; // the tilt is its look
       const type = t.terrain_type as TerrainType;
       if (type === TerrainType.SUNNY_ZONE) {
         sunny = true;
@@ -167,6 +237,119 @@ export class HexBoard {
     this.applyWeather(sunny, rainy);
   }
 
+  /** A tile's tilt: its surface leaning toward `origin`'s tile by QUAKE_TILT. */
+  private tiltToward(key: string, origin: readonly [number, number]): Quaternion {
+    const [q, r] = keyToTile(key);
+    const d = axialToWorld(origin[0], origin[1], 0).subtract(axialToWorld(q, r, 0));
+    d.y = 0;
+    if (d.lengthSquared() < 1e-6) return Quaternion.Identity();
+    // Rotating up toward the centre lowers the tile's inner edge and raises its outer one.
+    const axis = Vector3.Cross(Vector3.Up(), d.normalize()).normalize();
+    return Quaternion.RotationAxis(axis, QUAKE_TILT);
+  }
+
+  /** Sets a tile's turn and lift; upturned (bare earth) while tilted. */
+  private setTilt(tile: Mesh, rot: Quaternion, lift: number): void {
+    tile.rotationQuaternion!.copyFrom(rot);
+    const height = tile.getBoundingInfo().boundingBox.extendSize.y * 2;
+    tile.position.y = TILE_HEIGHT - height / 2 + lift;
+    const flat = Math.abs(rot.w) > 0.99999;
+    tile.material = flat ? tile.metadata.material : this.mats.edge;
+  }
+
+  /**
+   * Earthquake round `origin`: every tile of `keys` bounces once — the inner
+   * ring first — and settles tilted in toward the centre. `landed` resolves as
+   * the first ring comes down, `done` once every tile has settled;
+   * `heaves(key)` is how long (s) after the start that tile starts to rise.
+   * What stands on the `breaking` tiles goes down: a rock is thrown up with
+   * its tile and shatters, a tree topples outward and sinks into the ground.
+   */
+  quake(origin: readonly [number, number], keys: readonly string[], breaking: ReadonlySet<string> = new Set()):
+    { landed: Promise<void>; done: Promise<void>; heaves(key: string): number } {
+    this.stopQuake?.();
+    const parts = keys.flatMap((key) => {
+      const tile = this.tiles.get(key);
+      if (!tile) return [];
+      const [q, r] = keyToTile(key);
+      const ring = Math.max(1, hexDistance(origin[0], origin[1], q, r));
+      // What breaks here: a rock is lifted with its tile, shrinking away as it
+      // shatters; a tree falls over away from the centre (about its foot).
+      const prop = breaking.has(key) ? this.terrainProps.get(key) ?? null : null;
+      const top = this.tileTop(q, r);
+      prop?.setPivotPoint(new Vector3(top.x, top.y, top.z));
+      const isTree = !!prop?.name.startsWith('treefeat_');
+      let fall: Quaternion | null = null;
+      if (prop && isTree) {
+        const out = top.subtract(axialToWorld(origin[0], origin[1], TILE_HEIGHT));
+        out.y = 0;
+        if (out.lengthSquared() < 1e-6) out.set(1, 0, 0);
+        fall = Quaternion.RotationAxis(Vector3.Cross(Vector3.Up(), out.normalize()).normalize(), TREE_FALL);
+        prop.rotationQuaternion = Quaternion.Identity();
+      }
+      return [{ tile, key, rock: isTree ? null : prop, tree: isTree ? prop : null, fall,
+        delay: (ring - 1) * QUAKE_RING_DELAY, end: this.tiltToward(key, origin) }];
+    });
+    const felled = parts.some((p) => p.tree) ? TREE_TOPPLE + TREE_LIE + TREE_SINK : 0;
+    const span = Math.max(0, ...parts.map((p) => p.delay)) + Math.max(QUAKE_UP + QUAKE_DOWN + QUAKE_SETTLE, felled);
+    let resolveLanded!: () => void, resolveDone!: () => void;
+    const landed = new Promise<void>((r) => { resolveLanded = r; });
+    const done = new Promise<void>((r) => { resolveDone = r; });
+    const t0 = performance.now();
+    const flat = Quaternion.Identity(), rot = new Quaternion();
+    let obs: Observer<Scene> | null = null;
+    const stop = () => {
+      if (obs) this.scene.onBeforeRenderObservable.remove(obs);
+      obs = null;
+      if (this.stopQuake === stop) this.stopQuake = null;
+      resolveLanded(); resolveDone();
+    };
+    obs = this.scene.onBeforeRenderObservable.add(() => {
+      const t = (performance.now() - t0) / 1000;
+      if (t >= QUAKE_UP + QUAKE_DOWN) resolveLanded();
+      for (const p of parts) {
+        const k = t - p.delay;
+        let lift = 0, tilt = 0;
+        if (k <= 0) { lift = 0; tilt = 0; }
+        else if (k < QUAKE_UP) { lift = QUAKE_LIFT * easeOutCubic(k / QUAKE_UP); }
+        else if (k < QUAKE_UP + QUAKE_DOWN) {
+          const u = (k - QUAKE_UP) / QUAKE_DOWN;
+          lift = QUAKE_LIFT * (1 - easeInQuad(u));
+          tilt = easeOutCubic(u);
+        } else {
+          // One small rebound as it settles, already leaning in.
+          const u = Math.min(1, (k - QUAKE_UP - QUAKE_DOWN) / QUAKE_SETTLE);
+          lift = QUAKE_LIFT * 0.14 * Math.sin(Math.PI * u);
+          tilt = 1;
+        }
+        Quaternion.SlerpToRef(flat, p.end, tilt, rot);
+        this.setTilt(p.tile, rot, lift);
+        if (p.rock) {
+          const s = 1 - Math.min(1, Math.max(0, (k - QUAKE_UP * 0.5) / (QUAKE_UP + QUAKE_DOWN * 0.5)));
+          p.rock.position.y = lift + (1 - s) * 0.6;
+          p.rock.scaling.setAll(Math.max(0.001, s));
+          if (s <= 0) { p.rock.dispose(); this.terrainProps.delete(p.key); p.rock = null; }
+        }
+        if (p.tree && p.fall) {
+          // Toppling (gathering speed, from the heave), lying a moment, then sinking away.
+          const f = Math.max(0, k) / TREE_TOPPLE;
+          Quaternion.SlerpToRef(flat, p.fall, Math.min(1, f * f), p.tree.rotationQuaternion!);
+          const sink = Math.min(1, Math.max(0, (k - TREE_TOPPLE - TREE_LIE) / TREE_SINK));
+          p.tree.position.y = lift - sink * 0.9;
+          p.tree.scaling.setAll(TILE_SCALE * (1 - 0.3 * sink));
+          if (sink >= 1) { p.tree.dispose(); this.terrainProps.delete(p.key); p.tree = null; }
+        }
+      }
+      if (t >= span) stop();
+    });
+    this.stopQuake = stop;
+    const heaves = (key: string) => {
+      const [q, r] = keyToTile(key);
+      return (Math.max(1, hexDistance(origin[0], origin[1], q, r)) - 1) * QUAKE_RING_DELAY;
+    };
+    return { landed, done, heaves };
+  }
+
   private buildRock(t: TerrainEntityJSON): void {
     const [q, r] = t.tile;
     const key = tileKey(q, r);
@@ -174,9 +357,9 @@ export class HexBoard {
     if (base) base.isVisible = true;
     const node = new TransformNode(`rockfeat_${key}`, this.scene);
     const p = this.tileTop(q, r);
-    const boulder = MeshBuilder.CreatePolyhedron(`rock_${key}`, { type: 2, size: 0.62 }, this.scene);
+    const boulder = MeshBuilder.CreatePolyhedron(`rock_${key}`, { type: 2, size: 0.62 * TILE_SCALE }, this.scene);
     boulder.material = this.mats.rock;
-    boulder.position = new Vector3(p.x, TILE_HEIGHT + 0.5, p.z);
+    boulder.position = new Vector3(p.x, TILE_HEIGHT + 0.5 * TILE_SCALE, p.z);
     boulder.rotation = new Vector3(Math.random(), Math.random() * Math.PI, Math.random());
     boulder.parent = node;
     boulder.receiveShadows = true;
@@ -204,6 +387,9 @@ export class HexBoard {
       this.castShadow(cone);
     }
     node.parent = this.root;
+    // Sized to the tile: scaled about its foot.
+    node.setPivotPoint(new Vector3(p.x, TILE_HEIGHT, p.z));
+    node.scaling.setAll(TILE_SCALE);
     this.terrainProps.set(key, node);
   }
 

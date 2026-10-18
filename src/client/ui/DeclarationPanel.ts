@@ -16,6 +16,9 @@ import {
   tileKey,
   hexDistance,
   getHexArea,
+  footprint,
+  isSelfArea,
+  quakeZone,
   MoveCategory,
   TurnDeclaration,
   type BattleSession,
@@ -194,6 +197,10 @@ export class DeclarationPanel {
       if (this.order === ActionOrder.MOVE_FIRST && this.path.length > 1) {
         set(this.path.map((t) => tileKey(t[0], t[1])), 'path');
       }
+      if (isSelfArea(this.move!)) {
+        set([...quakeZone(footprint(from, this.myPokemon()?.huge ?? false))], 'aoe');
+        return;
+      }
       const attackable = this.session!.getAttackableTiles(this.localPlayerId, this.move!.name, from);
       set(attackable, 'attack');
       if (this.target) {
@@ -269,8 +276,17 @@ export class DeclarationPanel {
   }
 
   private beginTargeting(): void {
-    this.phase = 'pickTarget';
     const from = this.order === ActionOrder.MOVE_FIRST && this.path.length ? this.path[this.path.length - 1] : this.startTile();
+    // Centred on the user (Earthquake): nothing to pick — it heaves round wherever it stands.
+    if (this.move && isSelfArea(this.move)) {
+      this.target = from;
+      this.phase = 'confirm';
+      this.refreshTargetHighlights(from);
+      this.setHint(`${this.move.name} heaves the ground round you. Confirm to send.`);
+      this.renderControls();
+      return;
+    }
+    this.phase = 'pickTarget';
     this.cb.clearHighlights();
     this.cb.setHighlights((set) => {
       if (this.order === ActionOrder.MOVE_FIRST && this.path.length > 1) set(this.path.map((t) => tileKey(t[0], t[1])), 'path');
@@ -330,7 +346,9 @@ export class DeclarationPanel {
     } else if (this.phase === 'confirm') {
       this.controls.append(
         el('button', { class: 'pbw-btn', text: 'Confirm Declaration', onclick: () => this.confirm() }),
-        el('button', { class: 'pbw-btn ghost', text: 'Re-pick target', onclick: () => { this.target = null; this.beginTargeting(); } }),
+        this.move && isSelfArea(this.move)
+          ? el('button', { class: 'pbw-btn ghost', text: 'Back', onclick: () => { this.target = null; this.phase = this.order === ActionOrder.MOVE_FIRST ? 'buildPath' : 'pickOrder'; if (this.phase === 'buildPath') this.refreshPathHighlights(); else this.cb.clearHighlights(); this.renderControls(); } })
+          : el('button', { class: 'pbw-btn ghost', text: 'Re-pick target', onclick: () => { this.target = null; this.beginTargeting(); } }),
       );
     }
   }

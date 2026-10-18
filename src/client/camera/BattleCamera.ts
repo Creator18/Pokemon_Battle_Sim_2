@@ -21,7 +21,7 @@ import '@babylonjs/core/Rendering/depthRendererSceneComponent';
 
 import { ImageProcessingConfiguration } from '@babylonjs/core/Materials/imageProcessingConfiguration';
 
-import { axialToWorld } from '../hexWorld.ts';
+import { axialToWorld, TILE_SCALE } from '../hexWorld.ts';
 import { ENV, hexToRgb } from '../theme.ts';
 
 function c3(hex: string): Color3 {
@@ -30,9 +30,9 @@ function c3(hex: string): Color3 {
 }
 
 const ELEVATION = Math.PI / 2 - (57 * Math.PI) / 180; // beta from 57° above horizon
-const MIN_RADIUS = 12;
-const MAX_RADIUS = 34;
-const DEFAULT_RADIUS = 25;
+const MIN_RADIUS = 12 * TILE_SCALE;
+const MAX_RADIUS = 34 * TILE_SCALE;
+const DEFAULT_RADIUS = 25 * TILE_SCALE;
 const ROTATE_STEP = Math.PI / 12;
 
 export class BattleCamera {
@@ -80,7 +80,7 @@ export class BattleCamera {
     this.shadows.blurKernel = 48;
     this.shadows.darkness = 0.32; // soft, not murky
     this.keyLight.shadowMinZ = 1;
-    this.keyLight.shadowMaxZ = 80;
+    this.keyLight.shadowMaxZ = 80 * TILE_SCALE;
 
     const pipeline = new DefaultRenderingPipeline('default', true, scene, [this.camera]);
     pipeline.bloomEnabled = true;

@@ -17,6 +17,7 @@ import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import '@babylonjs/core/Lights/Shadows/shadowGeneratorSceneComponent';
 
 import { PokemonFactory } from './client/render/PokemonFactory.ts';
+import { RecipeFactory } from './client/render/RecipeFactory.ts';
 import { SPECIES_LIST } from './shared/index.ts';
 
 const canvas = document.getElementById('c') as unknown as HTMLCanvasElement;
@@ -47,7 +48,7 @@ gmat.specularColor = new Color3(0, 0, 0);
 ground.material = gmat;
 ground.receiveShadows = true;
 
-const factory = new PokemonFactory(scene);
+const factory = new RecipeFactory(scene, new PokemonFactory(scene));
 const labels = document.getElementById('labels')!;
 const spinNodes: TransformNode[] = [];
 

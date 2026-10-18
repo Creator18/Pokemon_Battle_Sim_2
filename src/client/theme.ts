@@ -45,6 +45,32 @@ export function typeColor(type: string): string {
 }
 
 /** Hex string (#rrggbb) → normalized [r,g,b]. */
+/**
+ * The HP colour for a health fraction (0..1): full health is green, it turns
+ * through amber to red by HP_RED, then darkens to black at 0. The HP bar and
+ * the hit flash both use it, so a hit flashes the colour the bar is showing.
+ */
+export const HP_RED = 0.35;
+export function hpColor(fraction: number): [number, number, number] {
+  const f = Math.min(1, Math.max(0, fraction));
+  // Hue walks green → amber → red; past HP_RED the red loses its light.
+  const t = f >= HP_RED ? (f - HP_RED) / (1 - HP_RED) : 0;
+  const hue = 158 * t * t * (3 - 2 * t) + 2 * (1 - t);
+  const sat = 0.78 + 0.08 * (1 - t);
+  const light = f >= HP_RED ? 0.53 + 0.04 * (1 - t) : 0.57 * Math.pow(f / HP_RED, 0.8);
+  return hslToRgb(hue, sat, light);
+}
+export function hpColorCss(fraction: number): string {
+  const [r, g, b] = hpColor(fraction).map((c) => Math.round(c * 255));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+  return [f(0), f(8), f(4)];
+}
+
 export function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
   const r = parseInt(h.slice(0, 2), 16) / 255;

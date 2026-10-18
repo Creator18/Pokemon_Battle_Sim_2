@@ -26,6 +26,9 @@ export class DraftScreen {
   private chosenMoves = new Set<string>();
   private opponentReady = false;
   private selfReady = false;
+  /** The picker's search text and type filter (kept across re-renders). */
+  private query = '';
+  private typeFilter = '';
 
   constructor(private cb: DraftCallbacks) {
     ensureStyles();
@@ -56,11 +59,44 @@ export class DraftScreen {
 
   private renderSpecies(): void {
     clearChildren(this.root);
+    // Hundreds of species: a search box and a type filter over a scrolling grid.
     const cards = el('div', {
       class: 'pbw-grid',
-      style: { gridTemplateColumns: 'repeat(3, 1fr)', maxWidth: '760px' },
+      style: { gridTemplateColumns: 'repeat(4, 1fr)', maxHeight: '58vh', overflowY: 'auto', paddingRight: '6px' },
     });
-    for (const sp of this.species) {
+    const count = el('div', { class: 'pbw-sub', style: { margin: '0' } });
+    const fill = () => {
+      clearChildren(cards);
+      const q = this.query.trim().toLowerCase();
+      const shown = this.species.filter((sp) =>
+        (!q || sp.name.toLowerCase().includes(q) || String(sp.spriteId) === q)
+        && (!this.typeFilter || sp.types.includes(this.typeFilter)));
+      count.textContent = `${shown.length} of ${this.species.length}`;
+      for (const sp of shown) cards.append(this.speciesCard(sp));
+    };
+    const search = el('input', { class: 'pbw-input', oninput: (e) => { this.query = (e.target as HTMLInputElement).value; fill(); } }) as HTMLInputElement;
+    search.placeholder = 'Search by name or Pokédex number…';
+    search.value = this.query;
+    const types = [...new Set(this.species.flatMap((s) => s.types))].sort();
+    const typeSel = el('select', { class: 'pbw-input', style: { width: '160px' } }) as HTMLSelectElement;
+    typeSel.append(el('option', { text: 'All types' }));
+    (typeSel.firstChild as HTMLOptionElement).value = '';
+    for (const t of types) { const o = el('option', { text: t }) as HTMLOptionElement; o.value = t; typeSel.append(o); }
+    typeSel.value = this.typeFilter;
+    typeSel.addEventListener('change', () => { this.typeFilter = typeSel.value; fill(); });
+    fill();
+    const panel = el('div', { class: 'pbw-panel', style: { width: '880px' } }, [
+      el('div', { class: 'pbw-h1', text: 'Choose your Pokémon' }),
+      el('div', { class: 'pbw-sub', text: 'Pick a species, then draft 4 of its 8 moves (at least one terrain move).' }),
+      el('div', { class: 'pbw-row', style: { marginBottom: '10px' } }, [search, typeSel, count]),
+      cards,
+    ]);
+    this.root.append(panel);
+    search.focus();
+  }
+
+  private speciesCard(sp: SpeciesDefinition): HTMLElement {
+    {
       const card = el('div', {
         class: 'pbw-card' + (this.chosenSpecies?.name === sp.name ? ' selected' : ''),
         onclick: () => {
@@ -71,7 +107,10 @@ export class DraftScreen {
         },
       });
       const img = el('img') as HTMLImageElement;
+      img.loading = 'lazy';
       img.src = `${SPRITE_BASE}/${sp.spriteId}.png`;
+      // A new Z-A Mega may have no sprite yet: show its species'.
+      if (sp.baseSpriteId) img.onerror = () => { img.onerror = null; img.src = `${SPRITE_BASE}/${sp.baseSpriteId}.png`; };
       img.alt = sp.name;
       card.append(
         img,
@@ -82,14 +121,8 @@ export class DraftScreen {
           text: `HP ${sp.inflatedHp} · ATK ${sp.attack} · DEF ${sp.defense} · SPA ${sp.spAtk} · SPD ${sp.speed}`,
         }),
       );
-      cards.append(card);
+      return card;
     }
-    const panel = el('div', { class: 'pbw-panel', style: { width: '800px' } }, [
-      el('div', { class: 'pbw-h1', text: 'Choose your Pokémon' }),
-      el('div', { class: 'pbw-sub', text: 'Pick a species, then draft 4 of its 8 moves (at least one terrain move).' }),
-      cards,
-    ]);
-    this.root.append(panel);
   }
 
   private moveCard(name: string): HTMLElement | null {

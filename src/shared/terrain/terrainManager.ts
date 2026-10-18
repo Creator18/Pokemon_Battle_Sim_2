@@ -37,6 +37,8 @@ export interface TerrainEntityJSON {
   turns_left: number;
   integrity: number;
   perish_counters: Record<string, number>;
+  /** Tilted ground: the quake's centre, which the tile leans toward. */
+  origin?: [number, number];
 }
 
 const PERMANENT = new Set<TerrainType>([TerrainType.ROCK, TerrainType.TREE]);
@@ -49,6 +51,8 @@ export class TerrainEntity {
   integrity: number;
   /** player_id → turns remaining before perish faint. */
   perishCounters: Map<number, number>;
+  /** Tilted ground: the quake's centre, which the tile leans toward. */
+  origin: Tile | null = null;
 
   constructor(
     tile: Tile,
@@ -120,6 +124,7 @@ export class TerrainEntity {
       turns_left: this.turnsLeft,
       integrity: this.integrity,
       perish_counters: perish,
+      ...(this.origin ? { origin: [this.origin[0], this.origin[1]] as [number, number] } : {}),
     };
   }
 
@@ -128,7 +133,7 @@ export class TerrainEntity {
     for (const [k, v] of Object.entries(data.perish_counters ?? {})) {
       perish.set(Number(k), Number(v));
     }
-    return new TerrainEntity(
+    const e = new TerrainEntity(
       [data.tile[0], data.tile[1]],
       data.terrain_type as TerrainType,
       Number(data.owner ?? 0),
@@ -136,6 +141,8 @@ export class TerrainEntity {
       Number(data.integrity ?? 1),
       perish,
     );
+    if (data.origin) e.origin = [data.origin[0], data.origin[1]];
+    return e;
   }
 }
 
@@ -337,6 +344,14 @@ export class TerrainManager {
     for (const [key, e] of this.entities) if (e.blocksMovement) s.add(key);
     return s;
   }
+  /**
+   * The tiles `p` cannot walk into. A Flying type flies over rocks and trees
+   * (and may stop on them, hovering); everyone else is stopped by them. Line
+   * of sight is not affected (see blockedLosTiles).
+   */
+  movementBlockersFor(p: { types: readonly string[] }): Set<string> {
+    return canFly(p) ? new Set<string>() : this.blockedMovementTiles;
+  }
   get blockedLosTiles(): Set<string> {
     const s = new Set<string>();
     for (const [key, e] of this.entities) if (e.blocksLos) s.add(key);
@@ -411,4 +426,9 @@ export class TerrainManager {
     }
     return tm;
   }
+}
+
+/** Flying types cross movement-blocking terrain (rocks, trees) and can stand on it. */
+export function canFly(p: { types: readonly string[] }): boolean {
+  return p.types.includes('Flying');
 }

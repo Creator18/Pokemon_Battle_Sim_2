@@ -4,7 +4,7 @@
  */
 
 import { Scene } from '@babylonjs/core/scene';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Vector3, Matrix } from '@babylonjs/core/Maths/math.vector';
 import { Color4 } from '@babylonjs/core/Maths/math.color';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
@@ -26,6 +26,8 @@ interface TypeStyle {
 const TYPE_STYLES: Record<string, TypeStyle> = {
   Electric: { color: '#FDE047', color2: '#FACC15', rate: 300, gravity: 0, spread: 0.6 },
   Fire: { color: '#FB923C', color2: '#EF4444', rate: 280, gravity: 1, spread: 0.5 },
+  // Blue flames (auraPalette.elementFor): deeper than Water.
+  BlueFire: { color: '#3B6CFF', color2: '#0B1FB8', rate: 280, gravity: 1, spread: 0.5 },
   Water: { color: '#60A5FA', color2: '#2563EB', rate: 260, gravity: -1, spread: 0.5 },
   Ice: { color: '#A5F3FC', color2: '#22D3EE', rate: 200, gravity: 2, spread: 0.7 },
   Ghost: { color: '#C084FC', color2: '#7E22CE', rate: 160, gravity: -0.5, spread: 0.8 },
@@ -183,7 +185,7 @@ export class MoveVfx {
       const engine = this.scene.getEngine();
       const coords = Vector3.Project(
         world,
-        undefined as never,
+        Matrix.IdentityReadOnly, // points are already in world space
         this.scene.getTransformMatrix(),
         this.camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),
       );
@@ -216,7 +218,7 @@ export class MoveVfx {
       const engine = this.scene.getEngine();
       const coords = Vector3.Project(
         world,
-        undefined as never,
+        Matrix.IdentityReadOnly, // points are already in world space
         this.scene.getTransformMatrix(),
         this.camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight()),
       );

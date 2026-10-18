@@ -10,6 +10,8 @@ import { RNG } from '../rng.ts';
 import {
   MOMENTUM_CAP,
   MOMENTUM_BONUS_PER_TILE,
+  CHARGE_CAP,
+  CHARGE_BONUS_PER_TILE,
   VOLT_TACKLE_RECOIL_MOMENTUM_DAMP,
 } from '../core/constants.ts';
 
@@ -50,6 +52,16 @@ export function getHexPower(move: MoveDefinition, defender: Pokemon, tm: Terrain
 
 export function momentumMultiplier(straightTiles: number): number {
   return Math.min(MOMENTUM_CAP, 1.0 + straightTiles * MOMENTUM_BONUS_PER_TILE);
+}
+
+/** A ranged special move's charge: the movement it left unused, +CHARGE_BONUS_PER_TILE a tile, at most CHARGE_CAP. */
+export function chargeMultiplier(unusedTiles: number): number {
+  return Math.min(CHARGE_CAP, 1.0 + Math.max(0, unusedTiles) * CHARGE_BONUS_PER_TILE);
+}
+
+/** Does `move` charge with unused movement? Ranged special attacks do. */
+export function chargesUp(move: MoveDefinition): boolean {
+  return move.category === MoveCategory.SPECIAL && move.isRanged;
 }
 
 export function voltTackleRecoilMultiplier(momentumMult: number): number {

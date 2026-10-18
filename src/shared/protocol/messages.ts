@@ -76,6 +76,20 @@ export interface ResolvedActionWire {
   toTile: [number, number] | null;
   path: [number, number][];
   qaLandedAt: [number, number] | null;
+  /** The defender thrown off its tile by this attack (Earthquake): where from, where to. */
+  knockback?: { playerId: number; from: [number, number]; to: [number, number] } | null;
+  /**
+   * A beam clash (both sides' attack actions carry it, the initiator's first):
+   * the winner (null: a tie, both disperse), each side's output and charge by
+   * player id, and the winning margin.
+   */
+  clash?: {
+    players: [number, number];
+    winner: number | null;
+    outputs: Record<number, number>;
+    charges: Record<number, number>;
+    margin: number;
+  } | null;
   skippedMovement: boolean;
   skippedAttack: boolean;
 }

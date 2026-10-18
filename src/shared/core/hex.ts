@@ -163,6 +163,55 @@ export function getHexArea(
   return result;
 }
 
+// ── Footprints (huge Pokémon take 3 tiles) ───────────────────
+
+/**
+ * A huge Pokémon stands on a triangle of three mutually adjacent tiles: its
+ * anchor (the tile the engine tracks) and the two at axial +(1,0) and +(0,1).
+ */
+export const HUGE_FOOTPRINT: readonly Tile[] = [[0, 0], [1, 0], [0, 1]];
+
+/** The tiles a Pokémon at `anchor` occupies. */
+export function footprint(anchor: Tile, huge: boolean): Tile[] {
+  if (!huge) return [[anchor[0], anchor[1]]];
+  return HUGE_FOOTPRINT.map(([dq, dr]) => [anchor[0] + dq, anchor[1] + dr] as Tile);
+}
+
+export function footprintKeys(anchor: Tile, huge: boolean): Set<string> {
+  return new Set(footprint(anchor, huge).map((t) => tileKey(t[0], t[1])));
+}
+
+/**
+ * For a mover of the given size: the anchors it cannot stand on, split as the
+ * movement rules use them — `blocked` (off the board, or a blocking tile under
+ * its footprint: it cannot enter) and `occupied` (its footprint overlaps the
+ * opponent: it may pass, not stop). For a one-tile mover these are just the
+ * inputs.
+ */
+export function anchorRules(
+  huge: boolean,
+  blockedTiles: ReadonlySet<string>,
+  occupiedTiles: ReadonlySet<string>,
+  grid: ReadonlySet<string> = HEX_GRID,
+): { blocked: Set<string>; occupied: Set<string> } {
+  if (!huge) return { blocked: new Set(blockedTiles), occupied: new Set(occupiedTiles) };
+  const blocked = new Set<string>(), occupied = new Set<string>();
+  for (const key of grid) {
+    const [q, r] = keyToTile(key);
+    const feet = footprint([q, r], true).map((t) => tileKey(t[0], t[1]));
+    if (feet.some((k) => !grid.has(k) || blockedTiles.has(k))) blocked.add(key);
+    else if (feet.some((k) => occupiedTiles.has(k))) occupied.add(key);
+  }
+  return { blocked, occupied };
+}
+
+/** The fewest hex steps between any tile of `a` and any tile of `b`. */
+export function footprintDistance(a: Tile[], b: Tile[]): number {
+  let best = Infinity;
+  for (const x of a) for (const y of b) best = Math.min(best, hexDistance(x[0], x[1], y[0], y[1]));
+  return best;
+}
+
 // ── Reachability (BFS with step cost) ────────────────────────
 
 export function getReachableTiles(
@@ -172,8 +221,9 @@ export function getReachableTiles(
   blockedTiles: ReadonlySet<string>,
   occupiedTiles: ReadonlySet<string>,
   grid: ReadonlySet<string> = HEX_GRID,
+  /** What entering a tile costs (rough ground more); 1 a step if not given (the Python source counted hops). */
+  stepCost: (key: string) => number = () => 1,
 ): Set<string> {
-  // NOTE: matches the Python source, which counts hops (not step-cost) here.
   const visited = new Map<string, number>();
   visited.set(tileKey(startQ, startR), 0);
   const frontier: Array<[number, number, number]> = [[startQ, startR, 0]];
@@ -184,7 +234,7 @@ export function getReachableTiles(
       const key = tileKey(nq, nr);
       if (!grid.has(key)) continue;
       if (blockedTiles.has(key)) continue;
-      const newSteps = steps + 1;
+      const newSteps = steps + stepCost(key);
       if (newSteps > moveRange) continue;
       const prev = visited.get(key);
       if (prev !== undefined && prev <= newSteps) continue;
@@ -204,9 +254,14 @@ export function isValidPath(
   occupiedTiles: ReadonlySet<string>,
   moveRange: number,
   grid: ReadonlySet<string> = HEX_GRID,
+  /** What entering a tile costs (rough ground more); 1 a step if not given. */
+  stepCost: (key: string) => number = () => 1,
 ): { ok: boolean; reason: string } {
   if (path.length === 0) return { ok: false, reason: 'Empty path' };
   if (path.length - 1 > moveRange) return { ok: false, reason: 'Path too long' };
+  let cost = 0;
+  for (let i = 1; i < path.length; i++) cost += stepCost(tileKey(path[i][0], path[i][1]));
+  if (cost > moveRange) return { ok: false, reason: 'Path too long (rough ground)' };
   for (let i = 1; i < path.length; i++) {
     const prev = path[i - 1];
     const curr = path[i];
