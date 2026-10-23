@@ -2,7 +2,7 @@
 // Z-A archives, so the browser can build the models at runtime ("the recipe")
 // and nothing is ever extracted to disk.
 //
-//   GET /recipe/<id>/manifest     -> { id, files: [name, ...] }   (no shiny, no locators)
+//   GET /recipe/<id>/manifest     -> { id, files: [name, ...] }   (no locators; of the shiny, only its material file)
 //   GET /recipe/<id>/file/<name>  -> raw bytes of one file of that form
 //
 // The archives (ZA-Poke.zip, ZA-PokeDLC.zip, ZA-PokeAnim.zip,
@@ -27,7 +27,8 @@ function buildIndex(dir) {
       const m = entry.match(/\/(pm\d{4}_\d\d_\d\d)\/((pm\d{4}_\d\d_\d\d)[^/]*)$/);
       if (!m || m[1] !== m[3]) continue;
       const [, id, file] = m;
-      if (file.startsWith(`${id}_rare`)) continue; // the shiny
+      // The shiny: only its material file (`<id>_rare.trmtr`, the same textures recoloured).
+      if (file.startsWith(`${id}_rare`) && !file.endsWith('.trmtr')) continue;
       if (!index.has(id)) index.set(id, new Map());
       index.get(id).set(file, { zip: z, entry });
     }

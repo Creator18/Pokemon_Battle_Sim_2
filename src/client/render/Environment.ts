@@ -51,6 +51,8 @@ export class Environment {
   private readonly root: TransformNode;
   private readonly disposables: { dispose(): void }[] = [];
   private beforeRenderObs: ReturnType<Scene['onBeforeRenderObservable']['add']> | null = null;
+  /** The sky dome's gradient (FieldFx brightens, greys or tints it with the weather). */
+  sky!: GradientMaterial;
 
   /**
    * @param scene       the battle scene
@@ -86,6 +88,7 @@ export class Environment {
     gm.backFaceCulling = false;
     gm.disableLighting = true;
     sky.material = gm;
+    this.sky = gm;
     this.disposables.push(gm, sky);
 
     // Warm depth haze: crisp arena, softly fading tree ring.

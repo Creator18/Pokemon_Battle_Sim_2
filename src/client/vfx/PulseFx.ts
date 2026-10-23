@@ -12,6 +12,10 @@
  *
  * The hit lands as the first pulse arrives; contact lasts until the last one
  * has.
+ *
+ * In a clash (PulseShot.endless) it keeps sending until stopped, each pulse
+ * bursting where it arrives — against the other attack's half of the clash's
+ * ball, wherever that is pushed to.
  */
 
 import type { Scene } from '@babylonjs/core/scene';
@@ -47,9 +51,24 @@ export const PULSE_MOVES: Record<string, PulseSpec> = {
   Psychic: { element: 'Psychic' },
   'Water Pulse': { element: 'Water' },
   'Dark Pulse': { element: 'Dark' },
+  // A screech of metal: Psychic's pulse in steel grey (a status move: no damage).
+  'Metal Sound': { element: 'Steel' },
   // A blast of sound: the same pulse with far larger rings.
   Boomburst: { element: 'Normal', scale: 2.5 },
+  // Normal; under a terrain, in the terrain's type and colour (terrainPulseElement).
+  'Terrain Pulse': { element: 'Normal' },
 };
+
+/**
+ * Terrain Pulse's type as it is used: the terrain's (Electric, Grass, Fairy,
+ * Psychic) from a Pokémon on the ground, else Normal.
+ */
+export function terrainPulseElement(terrain: readonly { terrain_type: string }[], userTypes: readonly string[]): string {
+  if (userTypes.includes('Flying')) return 'Normal';
+  const of: Record<string, string> = { electric_terrain: 'Electric', grassy_terrain: 'Grass', misty_terrain: 'Fairy', psychic_terrain: 'Psychic' };
+  for (const t of terrain) if (of[t.terrain_type]) return of[t.terrain_type];
+  return 'Normal';
+}
 
 export function pulseFor(moveName: string | null | undefined): PulseSpec | null {
   return (moveName && PULSE_MOVES[moveName]) || null;
@@ -63,6 +82,10 @@ function tintFor(element: string, strand: number): RGB {
     case 'Psychic': return [1.15, 0.42, 0.95];
     case 'Water': return [0.4, 0.78, 1.25];
     case 'Normal': return [1.2, 1.12, 0.98];
+    case 'Steel': return [0.85, 0.9, 1.05];
+    case 'Electric': return [1.25, 1.05, 0.25];
+    case 'Grass': return [0.45, 1.2, 0.35];
+    case 'Fairy': return [1.25, 0.6, 1.0];
     default: return [1, 1, 1];
   }
 }
@@ -75,6 +98,8 @@ export interface PulseShot {
   target(): Vector3;
   /** The attacker's yaw: the pulses travel along its gaze. */
   facing?(): number;
+  /** Keep sending pulses until stopped (a clash), not PULSES of them. */
+  endless?: boolean;
 }
 
 export interface PulseHandle {
@@ -86,6 +111,15 @@ export interface PulseHandle {
   readonly last: Promise<void>;
   /** All gone. */
   readonly done: Promise<void>;
+  /**
+   * Send no more. `now`: those on their way burst where they are, at once
+   * (a clash lost); otherwise they arrive and burst as ever.
+   */
+  stop(now?: boolean): void;
+  /** Where the leading pulse is now (its front hoop), or null before the first leaves. */
+  head(): Vector3 | null;
+  /** The first pulse has arrived (where it was sent). */
+  reached(): boolean;
 }
 
 const UP = new Vector3(0, 1, 0);
@@ -103,7 +137,13 @@ export class PulseFx {
   }
 }
 
-interface Wave { age: number; strands: { mesh: Mesh; mat: ShaderMaterial }[] }
+/**
+ * One pulse: how far through its flight (1 = arrived), its strands, and how
+ * far it was sent (the way to the target as it left, or further if the target
+ * goes further off): it flies that far, so a target coming at it is met early,
+ * there, not followed back.
+ */
+interface Wave { age: number; strands: { mesh: Mesh; mat: ShaderMaterial }[]; span?: number }
 
 class Pulse implements PulseHandle {
   readonly front: Promise<void>;
@@ -118,6 +158,8 @@ class Pulse implements PulseHandle {
   private arrived = 0;
   private time = 0;
   private waves: Wave[] = [];
+  private stopped = false;
+  private headAt: Vector3 | null = null;
   private tick: Observer<Scene>;
 
   constructor(private readonly scene: Scene, private readonly camera: Camera, private readonly shot: PulseShot,
@@ -129,6 +171,20 @@ class Pulse implements PulseHandle {
   }
 
   open(): void { this.opened = true; }
+
+  stop(now = false): void {
+    this.stopped = true;
+    if (now) for (const w of this.waves) w.age = Math.max(w.age, 1);
+  }
+
+  head(): Vector3 | null { return this.headAt?.clone() ?? null; }
+
+  reached(): boolean { return this.arrived > 0; }
+
+  /** Still sending: PULSES of them, or, endless, until stopped. */
+  private get sending(): boolean {
+    return !this.stopped && (this.shot.endless || this.sent < PULSES);
+  }
 
   private spawnWave(): void {
     const strands = [];
@@ -160,7 +216,7 @@ class Pulse implements PulseHandle {
     const H = this.shot.height;
 
     // Send the rhythm.
-    if (this.sent < PULSES) {
+    if (this.sending) {
       this.sinceSend += dt;
       if (this.sinceSend >= PERIOD) { this.sinceSend = 0; this.sent++; this.spawnWave(); }
     }
@@ -183,20 +239,26 @@ class Pulse implements PulseHandle {
     const side = Vector3.Cross(up, aim).normalize();
     const cam = this.camera.globalPosition;
     const { STRANDS, STRAND_R, STRAND_AT, STRAND_W, RING_W, TUBE_SWELL } = RING_STRAND;
+    let lead = -1;
 
     for (const w of this.waves) {
       w.age += dt / TRAVEL;
+      // (Further if the target goes further off: a clash point pushed away is followed.)
+      w.span = Math.max(w.span ?? 0, reach);
+      // It has reached the target (or the target it: a clash's front coming at it).
+      if (w.age < 1 && w.span * (1 - Math.pow(1 - w.age, DECEL)) >= reach) w.age = 1;
       const k = Math.min(1, w.age);
       if (w.age >= 1 && !('hit' in w)) {
         (w as Wave & { hit?: true }).hit = true;
         this.arrived++;
         if (this.arrived === 1) this.resolveFront();
-        if (this.arrived === PULSES) this.resolveLast();
+        if (this.arrived === PULSES && !this.shot.endless) this.resolveLast();
       }
       // Out from the mouth fast, decelerating hard as it nears the target
       // (ease-out, power DECEL), widening as it goes. On arrival it disperses:
       // its rings burst wider and break apart, gone before the next arrives.
-      const travelled = reach * (1 - Math.pow(1 - k, DECEL));
+      const travelled = Math.min(reach, w.span * (1 - Math.pow(1 - k, DECEL)));
+      lead = Math.max(lead, travelled);
       const burst = w.age > 1 ? Math.min(1, (w.age - 1) / (DISPERSE / TRAVEL)) : 0;
       const spread = 1 + (DISPERSE_GROW - 1) * (1 - Math.pow(1 - burst, 3));
       const size = (SIZE_NEAR + (SIZE_FAR - SIZE_NEAR) * k) * H * (this.shot.scale ?? 1) * spread;
@@ -222,10 +284,12 @@ class Pulse implements PulseHandle {
         mat.setFloat('left', left);
       });
     }
+    // The leading pulse (bursting where it arrived, until it is gone).
+    this.headAt = lead < 0 ? null : origin.add(aim.scale(lead));
     const end = 1 + DISPERSE / TRAVEL;
     for (const w of this.waves.filter((x) => x.age >= end)) for (const st of w.strands) { st.mat.dispose(); st.mesh.dispose(); }
     this.waves = this.waves.filter((x) => x.age < end);
-    if (this.sent >= PULSES && this.waves.length === 0) this.finish();
+    if (!this.sending && this.waves.length === 0) this.finish();
   }
 
   private finish(): void {

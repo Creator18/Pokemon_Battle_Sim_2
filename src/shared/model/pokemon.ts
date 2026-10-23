@@ -46,6 +46,8 @@ export interface PokemonJSON {
   status: string;
   can_pass_through: boolean;
   huge?: boolean;
+  /** Turns it has started frozen (FROZEN). */
+  frozen_turns?: number;
   stat_stages: Record<string, number>;
   boost_mult: number;
   tiles_short: number;
@@ -108,6 +110,8 @@ export class Pokemon implements TerrainAffectable {
   cooldowns: Record<string, number>;
   pathThisTurn: Tile[];
   declaration: TurnDeclaration | null;
+  /** Turns it has started frozen (FREEZE_MAX_TURNS). */
+  frozenTurns = 0;
 
   constructor(init: PokemonInit) {
     this.playerId = init.playerId;
@@ -206,15 +210,29 @@ export class Pokemon implements TerrainAffectable {
   applyStatus(status: PokemonStatus): boolean {
     // Electric types are immune to paralysis (mirrors Thunder Wave / Discharge intent).
     if (status === PokemonStatus.PARALYZED && this.types.includes('Electric')) return false;
+    // Ice types are never frozen.
+    if (status === PokemonStatus.FROZEN && this.types.includes('Ice')) return false;
     if (
       this.status === PokemonStatus.PARALYZED ||
       this.status === PokemonStatus.BURNED ||
+      this.status === PokemonStatus.FROZEN ||
       this.status === PokemonStatus.FAINTED
     ) {
       return false;
     }
     this.status = status;
+    if (status === PokemonStatus.FROZEN) this.frozenTurns = 0;
     return true;
+  }
+
+  get isFrozen(): boolean {
+    return this.status === PokemonStatus.FROZEN;
+  }
+
+  /** Thawed out (frozen no more). */
+  thaw(): void {
+    if (this.status === PokemonStatus.FROZEN) this.status = PokemonStatus.ACTIVE;
+    this.frozenTurns = 0;
   }
 
   /** Early-stop boost: boost_mult grows with tiles the pokemon fell short. */
@@ -257,6 +275,7 @@ export class Pokemon implements TerrainAffectable {
       status: this.status,
       can_pass_through: this.canPassThrough,
       huge: this.huge,
+      frozen_turns: this.frozenTurns,
       stat_stages: { ...this.statStages },
       boost_mult: this.boostMult,
       tiles_short: this.tilesShort,
@@ -272,7 +291,7 @@ export class Pokemon implements TerrainAffectable {
     for (const k of Object.keys(stages) as StatName[]) {
       stages[k] = d.stat_stages?.[k] ?? 0;
     }
-    return new Pokemon({
+    const p = new Pokemon({
       playerId: d.player_id,
       name: d.name,
       nickname: d.nickname ?? '',
@@ -298,6 +317,8 @@ export class Pokemon implements TerrainAffectable {
       pathThisTurn: (d.path_this_turn ?? []).map((t) => [t[0], t[1]] as Tile),
       declaration: d.declaration ? TurnDeclaration.fromJSON(d.declaration) : null,
     });
+    p.frozenTurns = d.frozen_turns ?? 0;
+    return p;
   }
 
   static fromSpecies(

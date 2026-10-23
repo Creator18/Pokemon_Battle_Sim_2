@@ -762,6 +762,16 @@ export class PokemonFactory implements UnitFactory {
     });
   }
 
+  /** (The stylised stand-in has no quick step: a plain lunge.) */
+  playQuickStep(node: TransformNode, targetPos: Vector3): Promise<void> {
+    return this.playAttackLunge(node, targetPos);
+  }
+
+  playAerialAce(node: TransformNode, _target: TransformNode | null, targetPos: Vector3, _stop: Vector3): BeamPlay {
+    const hit = this.playAttackLunge(node, targetPos);
+    return { hit, contactEnds: hit, done: hit };
+  }
+
   playAttackLunge(node: TransformNode, targetPos: Vector3, _swipe?: boolean): Promise<void> {
     return new Promise((resolve) => {
       const start = node.position.clone();
@@ -784,6 +794,14 @@ export class PokemonFactory implements UnitFactory {
   async playKnockback(node: TransformNode, to: Vector3, flash?: [number, number, number]): Promise<void> {
     void this.playHitReact(node, flash);
     await arcTo(node, to, KNOCK_TIME, KNOCK_MIN_ARC);
+  }
+
+  playDodge(node: TransformNode, to: Vector3): Promise<void> {
+    return this.playMoveTo(node, [to]);
+  }
+
+  async playMissLook(_node: TransformNode, _target: TransformNode, during: Promise<void>): Promise<void> {
+    await during;
   }
 
   playHitReact(node: TransformNode, flash?: [number, number, number]): Promise<void> {
@@ -852,11 +870,32 @@ export class PokemonFactory implements UnitFactory {
   playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null): ClashPlay {
     const pa = this.playBeam(a, b, b.position.clone(), specA), pb = this.playBeam(b, a, a.position.clone(), specB);
     void winner;
-    return { hit: Promise.all([pa.hit, pb.hit]).then(() => {}), done: Promise.all([pa.done, pb.done]).then(() => {}) };
+    const met = Promise.all([pa.hit, pb.hit]).then(() => {});
+    return { met, hit: met, done: Promise.all([pa.done, pb.done]).then(() => {}) };
   }
 
   playPulse(node: TransformNode, target: TransformNode | null, targetPos: Vector3, _spec: PulseSpec): BeamPlay {
     return this.playBeam(node, target, targetPos, { element: _spec.element });
+  }
+
+  playRunInto(node: TransformNode, path: Vector3[], _targetPos: Vector3, _element?: string): Promise<void> {
+    return this.playMoveTo(node, path);
+  }
+
+  async playRamClash(a: TransformNode, b: TransformNode, _typeA: string, _typeB: string, hold = 1.4, until?: Promise<void>, at?: Vector3,
+    onward?: { node: TransformNode; to: Vector3; land?: boolean }, _won?: TransformNode | null): Promise<{ onward: Promise<void> }> {
+    const mid = at ?? a.position.add(b.position).scale(0.5);
+    await Promise.all([this.playMoveTo(a, [a.position.add(mid).scale(0.5)]), this.playMoveTo(b, [b.position.add(mid).scale(0.5)])]);
+    await (until ?? new Promise((r) => setTimeout(r, hold * 1000)));
+    return { onward: onward ? this.playMoveTo(onward.node, [onward.to]) : Promise.resolve() };
+  }
+
+  playStatChange(_node: TransformNode, _up: boolean): Promise<void> {
+    return Promise.resolve();
+  }
+
+  playSpin(node: TransformNode, targetPos: Vector3, element = 'Fire'): BeamPlay {
+    return this.playBeam(node, null, targetPos, { element });
   }
 
   playWind(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: WindSpec): BeamPlay {
@@ -890,6 +929,11 @@ export class PokemonFactory implements UnitFactory {
   isDown(node: TransformNode): boolean {
     return !node.isEnabled();
   }
+
+  private frozen = new Set<TransformNode>();
+  async freeze(node: TransformNode, _instant?: boolean): Promise<void> { this.frozen.add(node); }
+  async thaw(node: TransformNode, _how?: 'shatter' | 'melt'): Promise<void> { this.frozen.delete(node); }
+  isFrozen(node: TransformNode): boolean { return this.frozen.has(node); }
 
   revive(node: TransformNode): void {
     node.setEnabled(true);

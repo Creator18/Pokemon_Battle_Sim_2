@@ -9,6 +9,8 @@
 
 export interface LightningSpec {
   kind: 'bolt' | 'thunder' | 'discharge' | 'spark';
+  /** It missed (Thunder): the bolts fall, but none on the target. */
+  miss?: boolean;
 }
 
 export const LIGHTNING_MOVES: Record<string, LightningSpec> = {

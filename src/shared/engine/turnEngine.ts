@@ -18,6 +18,7 @@ import {
   tilesEqual,
   hexDistance,
   hexNeighbors,
+  hexLineTiles,
   getHexArea,
   getReachableTiles,
   getAttackableTiles,
@@ -38,19 +39,22 @@ import {
   MAP_TREE_COUNT,
   MAP_TREE_INTEGRITY,
   MAP_SPAWN_EXCLUSION,
+  MAP_WATER_PONDS,
+  MAP_WATER_POND_SIZE,
   COOLDOWN_ATTACK_FIRST,
-  COOLDOWN_MOVE_FIRST,
+  COOLDOWN_MOVE_FIRST, FREEZE_TURNS, FREEZE_TURNS_FIRE, FREEZE_TURNS_FIRE_HAIL, GRASSY_HEAL_FRACTION
 } from '../core/constants.ts';
 import { RNG, makeRng, shuffle } from '../rng.ts';
+import { TERRAIN_PULSE_POWER_MULT } from '../core/constants.ts';
 import { Pokemon } from '../model/pokemon.ts';
-import { TerrainManager } from '../terrain/terrainManager.ts';
+import { TerrainManager, isGrounded } from '../terrain/terrainManager.ts';
 import { getSpecies } from '../data/species.ts';
 import { getMove } from '../data/moves.ts';
 import { MoveCategory } from '../core/enums.ts';
 import { TurnDeclaration } from './declaration.ts';
 import { QueuedAction, buildQueue, qaEffectiveMoveRange } from './queue.ts';
-import { executeMove, payHpCost, MoveResult } from '../moves/execute.ts';
-import { chargeMultiplier, chargesUp } from '../moves/damage.ts';
+import { executeMove, payHpCost, burnGrass, newResult, MoveResult, scalesWithMomentum } from '../moves/execute.ts';
+import { chargeMultiplier, chargesUp, effectiveMoveType, terrainPulseType } from '../moves/damage.ts';
 import { beamsMeet, resolveClash, ClashOutcome } from '../moves/clash.ts';
 import type { MoveDefinition } from '../moves/moveDefinition.ts';
 import {
@@ -90,6 +94,56 @@ export interface TurnResolution {
   aoeTiles: Record<number, string[]>;
 }
 
+/** A ram clash's loser is knocked this many tiles back from the clash point. */
+const RAM_CLASH_KNOCK = 3;
+
+/**
+ * Where two rams from `a` and `b` meet: the tile midway along the line between
+ * them, and steps from it along the way from a to b (the hex direction nearest
+ * it) — negative back toward a.
+ */
+export function ramClashPoint(a: Tile, b: Tile): { tile: Tile; step: (k: number) => Tile } {
+  const line = hexLineTiles(a[0], a[1], b[0], b[1]);
+  const tile = line[Math.floor((line.length - 1) / 2)];
+  const plane = (t: Tile): [number, number] => [Math.sqrt(3) * (t[0] + t[1] / 2), 1.5 * t[1]];
+  const pa = plane(a), pb = plane(b);
+  const way: [number, number] = [pb[0] - pa[0], pb[1] - pa[1]];
+  let dir: Tile = [1, 0], best = -Infinity;
+  for (const d of [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]] as Tile[]) {
+    const p = plane(d);
+    const dot = p[0] * way[0] + p[1] * way[1];
+    if (dot > best) { best = dot; dir = d; }
+  }
+  return { tile, step: (k) => [tile[0] + dir[0] * k, tile[1] + dir[1] * k] };
+}
+
+/**
+ * `who` placed on `target` if it is free there — on the board, open to it, and
+ * clear of `others` and of `taken` tiles — or else on a free tile beside
+ * `target`, the farthest from `away` (its foes); null with nowhere.
+ */
+function placeNear(target: Tile, who: Pokemon, away: Pokemon[], tm: TerrainManager, taken: Tile[] = [], others: Pokemon[] = away): Tile | null {
+  const blocked = tm.movementBlockersFor(who);
+  const shut = new Set([...others.flatMap((p) => p.tiles), ...taken].map((t) => tileKey(t[0], t[1])));
+  const free = (t: Tile) => { const k = tileKey(t[0], t[1]); return HEX_GRID.has(k) && !blocked.has(k) && !shut.has(k); };
+  if (free(target)) return target;
+  const foes = away.length ? away.map((p) => p.tile) : others.map((p) => p.tile);
+  let pick: Tile | null = null, pd = -1;
+  for (const [q, r] of hexNeighbors(target[0], target[1])) {
+    const t: Tile = [q, r];
+    if (!free(t)) continue;
+    const d = foes.length ? Math.min(...foes.map((f) => hexDistance(f[0], f[1], q, r))) : 0;
+    if (d > pd) { pd = d; pick = t; }
+  }
+  return pick;
+}
+
+/** How many turns `p` stays frozen, left alone (FREEZE_TURNS; a Fire type FREEZE_TURNS_FIRE, or _HAIL in hail). */
+export function frozenFor(p: Pokemon, tm: TerrainManager): number {
+  if (!p.types.includes('Fire')) return FREEZE_TURNS;
+  return tm.isHail() ? FREEZE_TURNS_FIRE_HAIL : FREEZE_TURNS_FIRE;
+}
+
 // ── Map generation (RNG-injected) ────────────
 function generateBattlefieldTerrain(tm: TerrainManager, rng: RNG, grid = HEX_GRID): void {
   const rockTiles = getHexArea(MAP_ROCK_CENTER[0], MAP_ROCK_CENTER[1], MAP_ROCK_RADIUS, grid);
@@ -112,7 +166,26 @@ function generateBattlefieldTerrain(tm: TerrainManager, rng: RNG, grid = HEX_GRI
     }
   }
 
-  const eligible = [...grid].filter((k) => !excluded.has(k));
+  // Ponds: each grown from a free tile into its free neighbours.
+  const taken = new Set<string>(excluded);
+  for (let p = 0; p < MAP_WATER_PONDS; p++) {
+    const free = shuffle([...grid].filter((k) => !taken.has(k)), rng);
+    if (!free.length) break;
+    const pond = [free[0]];
+    taken.add(free[0]);
+    while (pond.length < MAP_WATER_POND_SIZE) {
+      const edge = shuffle(pond.flatMap((k) => {
+        const [q, r] = keyToTile(k);
+        return hexNeighbors(q, r).map(([nq, nr]) => tileKey(nq, nr)).filter((n) => grid.has(n) && !taken.has(n));
+      }), rng);
+      if (!edge.length) break;
+      pond.push(edge[0]);
+      taken.add(edge[0]);
+    }
+    for (const k of pond) tm.addTerrain(keyToTile(k), TerrainType.WATER, 0, 9999, 9999);
+  }
+
+  const eligible = [...grid].filter((k) => !taken.has(k));
   const shuffled = shuffle(eligible, rng);
   const treeCount = Math.min(MAP_TREE_COUNT, shuffled.length);
   for (let i = 0; i < treeCount; i++) {
@@ -202,6 +275,12 @@ export class TurnEngine {
     const decl = pokemon.declaration;
     if (!pokemon.isAlive || !decl) return;
 
+    if (pokemon.isFrozen) {
+      this.log.push(`${pokemon.logName} is frozen solid! Movement skipped this turn.`);
+      pokemon.pathThisTurn = [pokemon.tile];
+      this.resolvedActions.push(this.moveResolved(pokemon, pokemon.tile, pokemon.tile, [pokemon.tile], true));
+      return;
+    }
     if (hasStatusEffect(state, pokemon.playerId, 'flinched')) {
       this.log.push(`${pokemon.logName} flinched! Movement skipped this turn.`);
       clearStatusEffect(state, pokemon.playerId, 'flinched');
@@ -255,7 +334,7 @@ export class TurnEngine {
     this.applyStealthRockEntry(pokemon, tm);
 
     const move = getMove(decl.moveName);
-    if (wasStoppedEarly && move && !move.needsMomentum) {
+    if (wasStoppedEarly && move && !scalesWithMomentum(move)) {
       pokemon.applyEarlyStop(intendedTiles, actualTiles);
       this.log.push(
         `Early stop! ${pokemon.logName} blocked after ${actualTiles}/${intendedTiles} tiles. Attack boost x${pokemon.boostMult.toFixed(2)}.`,
@@ -322,6 +401,25 @@ export class TurnEngine {
     const move = getMove(decl.moveName);
     if (!move) return;
 
+    // Frozen solid: it cannot attack (nor does its beam meet anything).
+    if (pokemon.isFrozen) {
+      this.log.push(`${pokemon.logName} is frozen solid! It can't use ${move.name}.`);
+      this.resolvedActions.push({
+        playerId: pokemon.playerId,
+        actionType: ActionType.ATTACK,
+        moveName: decl.moveName,
+        actionOrder: decl.actionOrder,
+        fromTile: pokemon.tile,
+        toTile: null,
+        path: [],
+        result: null,
+        qaLandedAt: null,
+        skippedMovement: false,
+        skippedAttack: true,
+      });
+      return;
+    }
+
     // Taunt blocks terrain/status moves
     if (
       hasStatusEffect(state, pokemon.playerId, 'taunted') &&
@@ -349,12 +447,12 @@ export class TurnEngine {
     // Already fired, in a clash the other side started.
     if (this.attacked.has(pokemon.playerId)) return;
 
-    // Volt Tackle: force boost_mult = 1.0
-    if (move.needsMomentum) pokemon.boostMult = 1.0;
+    // Momentum moves (every physical attack): force boost_mult = 1.0
+    if (scalesWithMomentum(move)) pokemon.boostMult = 1.0;
 
     // Two beams fired at each other: they meet in a clash, resolved here for both.
     const defMove = defender.declaration ? getMove(defender.declaration.moveName) : undefined;
-    if (defMove && !this.attacked.has(defender.playerId) &&
+    if (defMove && !this.attacked.has(defender.playerId) && !defender.isFrozen &&
         beamsMeet(pokemon, move, decl.targetTile, defender, defMove, defender.declaration!.targetTile, tm)) {
       this.resolveClashAction(pokemon, move, defender, defMove, tm, state, rng);
       return;
@@ -368,6 +466,7 @@ export class TurnEngine {
       chargeTiles: chargesUp(move) ? this.unusedTiles(pokemon, tm) : 0,
       actionOrder: decl.actionOrder,
       defenderDeclaration: defender.declaration,
+      turnNumber: state.meta.turnNumber,
     });
     this.finishAttack(pokemon, defender, move, result, state, null);
   }
@@ -434,14 +533,32 @@ export class TurnEngine {
   ): void {
     this.attacked.add(a.playerId);
     this.attacked.add(b.playerId);
+    if (aMove.isRam && bMove.isRam) { this.resolveRamClash(a, aMove, b, bMove, tm, state, rng); return; }
     const outcome = resolveClash(
-      { playerId: a.playerId, move: aMove, charge: chargeMultiplier(this.unusedTiles(a, tm)) },
-      { playerId: b.playerId, move: bMove, charge: chargeMultiplier(this.unusedTiles(b, tm)) },
+      // (Terrain Pulse under a terrain clashes in the terrain's type, doubled.)
+      { playerId: a.playerId, move: aMove, charge: chargeMultiplier(this.unusedTiles(a, tm)),
+        type: effectiveMoveType(aMove, tm, a), powerMult: terrainPulseType(aMove, tm, a) ? TERRAIN_PULSE_POWER_MULT : 1 },
+      { playerId: b.playerId, move: bMove, charge: chargeMultiplier(this.unusedTiles(b, tm)),
+        type: effectiveMoveType(bMove, tm, b), powerMult: terrainPulseType(bMove, tm, b) ? TERRAIN_PULSE_POWER_MULT : 1 },
     );
     const clash = { ...outcome, players: [a.playerId, b.playerId] as [number, number] };
     const fmt = (p: Pokemon) => `${p.logName} ${outcome.outputs[p.playerId].toFixed(1)}`;
     this.log.push(`BEAM CLASH! ${aMove.name} meets ${bMove.name} — ${fmt(a)} vs ${fmt(b)}.`);
     if (outcome.winner === null) this.log.push('The beams are evenly matched — both disperse!');
+
+    // A Flamethrower in the clash burns the grass under its own beam while the
+    // beams hold (the board shows it), but only a tie leaves those fires: each
+    // keeps its half, split at the middle. A Flamethrower that loses is put
+    // out, its grass unburnt; one that wins burns its whole line with its hit.
+    const fireA = aMove.name === 'Flamethrower', fireB = bMove.name === 'Flamethrower';
+    if ((fireA || fireB) && outcome.winner === null) {
+      const split = { a: [a.tile[0], a.tile[1]] as [number, number], b: [b.tile[0], b.tile[1]] as [number, number],
+        oa: fireA ? a.playerId : -1, ob: fireB ? b.playerId : -1 };
+      const lit = newResult();
+      if (fireA) burnGrass(a, b.tile, tm, HEX_GRID, lit, { upTo: 0.5, split });
+      if (fireB) burnGrass(b, a.tile, tm, HEX_GRID, lit, { upTo: 0.5, split });
+      this.log.push(...lit.logLines);
+    }
 
     for (const [self, other, move] of [[a, b, aMove], [b, a, bMove]] as Array<[Pokemon, Pokemon, MoveDefinition]>) {
       const decl = self.declaration!;
@@ -481,6 +598,80 @@ export class TurnEngine {
     }
   }
 
+  /**
+   * Two ram attacks charged at each other: they meet head-on between them.
+   * The stronger (power × type effectiveness, as a beam clash) wins: its hit
+   * lands (× the margin, as a beam clash's), it takes the loser's tile, and
+   * the loser is knocked RAM_CLASH_KNOCK tiles back (or aside, with no room).
+   * A tie: neither lands, and both are knocked a tile back from the other.
+   */
+  private resolveRamClash(a: Pokemon, aMove: MoveDefinition, b: Pokemon, bMove: MoveDefinition, tm: TerrainManager, state: BattleState, rng: RNG): void {
+    const outcome = resolveClash(
+      { playerId: a.playerId, move: aMove, charge: 1, type: effectiveMoveType(aMove, tm, a) },
+      { playerId: b.playerId, move: bMove, charge: 1, type: effectiveMoveType(bMove, tm, b) },
+    );
+    const clash = { ...outcome, players: [a.playerId, b.playerId] as [number, number] };
+    const at = ramClashPoint(a.tile, b.tile);
+    const fmt = (p: Pokemon) => `${p.logName} ${outcome.outputs[p.playerId].toFixed(1)}`;
+    this.log.push(`RAM CLASH! ${aMove.name} meets ${bMove.name} head-on — ${fmt(a)} vs ${fmt(b)}.`);
+    // (Each action keeps where it charged from and at: the clash point is between them.)
+    const was = { [a.playerId]: a.tile, [b.playerId]: b.tile };
+    const spent = (self: Pokemon, other: Pokemon, result: MoveResult | null) => {
+      const decl = self.declaration!;
+      self.applyCooldown(decl.moveName, decl.actionOrder);
+      this.resolvedActions.push({
+        playerId: self.playerId, actionType: ActionType.ATTACK, moveName: decl.moveName, actionOrder: decl.actionOrder,
+        fromTile: was[self.playerId], toTile: was[other.playerId], path: [], result, qaLandedAt: null,
+        skippedMovement: false, skippedAttack: false, clash,
+      });
+    };
+    if (outcome.winner === null) {
+      // A tie: both rebound a tile, away from each other.
+      this.log.push('The rams are evenly matched — both are knocked back!');
+      // Each a tile back from the clash point, on its own side.
+      const toA = a.huge ? null : placeNear(at.step(-1), a, [b], tm);
+      const toB = b.huge ? null : placeNear(at.step(1), b, toA ? [a] : [a], tm, toA ? [toA] : []);
+      for (const [self, other, to] of [[a, b, toA], [b, a, toB]] as Array<[Pokemon, Pokemon, Tile | null]>) {
+        const r = newResult();
+        if (to && tileKey(to[0], to[1]) !== tileKey(self.tile[0], self.tile[1])) {
+          const from = self.tile;
+          self.moveTo(to);
+          r.knockback = { playerId: self.playerId, from, to };
+          this.log.push(`${self.logName} is knocked back to ${tileKey(to[0], to[1])}!`);
+        }
+        spent(self, other, r);
+      }
+      return;
+    }
+    const [win, winMove, lose] = outcome.winner === a.playerId ? [a, aMove, b] : [b, bMove, a];
+    // Steps from the clash point toward the loser's side.
+    const ahead = win === a ? 1 : -1;
+    this.log.push(`${win.logName}'s ${winMove.name} overpowers it (margin ${(outcome.margin * 100).toFixed(0)}%)!`);
+    const decl = win.declaration!;
+    const loserAt = lose.tile;
+    const result = executeMove(winMove, win, lose, tm, rng, {
+      targetTile: decl.targetTile, straightTiles: win.straightTilesThisTurn, tilesMoved: decl.tilesToMove(),
+      clashMult: outcome.margin, actionOrder: decl.actionOrder, defenderDeclaration: lose.declaration, ramClash: true,
+    });
+    if (result.hit) {
+      // The winner drives on a tile past the clash point; the loser is thrown
+      // RAM_CLASH_KNOCK tiles back from it (or, no room, to a tile beside where it would land).
+      const loseTo = lose.huge || !lose.isAlive ? null : placeNear(at.step(ahead * RAM_CLASH_KNOCK), lose, [win], tm);
+      // (Ahead may be where the loser stood: it is gone from there.)
+      const winTo = win.huge ? null : placeNear(at.step(ahead), win, [], tm, loseTo ? [loseTo] : lose.tiles, []);
+      if (loseTo) {
+        lose.moveTo(loseTo);
+        result.knockback = { playerId: lose.playerId, from: loserAt, to: loseTo };
+        this.log.push(`${lose.logName} is thrown back to ${tileKey(loseTo[0], loseTo[1])}!`);
+      }
+      if (winTo) result.qaLandedAt = winTo;
+    }
+    // (Its action records where it charged from: it moves on after.)
+    this.finishAttack(win, lose, winMove, result, state, clash);
+    if (result.qaLandedAt) win.moveTo(result.qaLandedAt);
+    spent(lose, win, null);
+  }
+
   private checkDestinyBond(p1: Pokemon, p2: Pokemon): void {
     for (const [attacker, defender] of [
       [p1, p2],
@@ -504,6 +695,21 @@ export class TurnEngine {
       const poke = pid === 1 ? p1 : p2;
       this.log.push(`${poke.logName} is pelted by hail! -${dmg} HP.`);
       if (!poke.isAlive) this.log.push(`${poke.logName} fainted from hail!`);
+    }
+    // The weather: hail and a sandstorm buffet everyone they do not spare.
+    for (const [pid, dmg, kind] of tm.applyWeatherChip(list)) {
+      const poke = pid === 1 ? p1 : p2;
+      this.log.push(kind === 'hail' ? `${poke.logName} is buffeted by the hail! -${dmg} HP.` : `${poke.logName} is buffeted by the sandstorm! -${dmg} HP.`);
+      if (!poke.isAlive) this.log.push(`${poke.logName} fainted from the ${kind}!`);
+    }
+    // Grassy Terrain heals the grounded.
+    if (tm.fieldTerrain() === TerrainType.GRASSY_TERRAIN) {
+      for (const poke of list) {
+        if (!poke.isAlive || !isGrounded(poke) || poke.currentHp >= poke.maxHp) continue;
+        const heal = Math.min(poke.maxHp - poke.currentHp, Math.max(1, Math.trunc(poke.maxHp * GRASSY_HEAL_FRACTION)));
+        poke.currentHp += heal;
+        this.log.push(`${poke.logName} is healed by the grassy terrain! +${heal} HP.`);
+      }
     }
     for (const [pid, , , newStage, clamped] of tm.applyResonanceDrain(list)) {
       const poke = pid === 1 ? p1 : p2;
@@ -554,14 +760,25 @@ export class TurnEngine {
     const p2 = state.p2!;
     const tm = state.terrain;
 
+    // Left alone, the frozen break free as the turn begins once they have been
+    // frozen through their turns (FREEZE_TURNS; a Fire type sooner, unless in hail).
+    for (const p of [p1, p2]) {
+      if (!p.isAlive || !p.isFrozen) continue;
+      p.frozenTurns += 1;
+      if (p.frozenTurns > frozenFor(p, tm)) {
+        p.thaw();
+        this.log.push(`${p.logName} broke free of the ice!`);
+      }
+    }
+
     if (!state.meta.battleOver) {
-      const queue = buildQueue(p1, p2, rng);
+      const queue = buildQueue(p1, p2, rng, tm);
       for (const action of queue) {
         if (this.determineWinner(p1, p2) !== -1) break;
         const other = action.playerId === 1 ? p2 : p1;
         if (action.actionType === ActionType.MOVE) {
           const move = getMove(action.pokemon.declaration!.moveName);
-          if (move && move.quickPriority && action.pokemon.declaration!.actionOrder === ActionOrder.MOVE_FIRST) {
+          if (move && tm.hasPriority(move) && action.pokemon.declaration!.actionOrder === ActionOrder.MOVE_FIRST) {
             const override = qaEffectiveMoveRange(action.pokemon.effectiveSpeed);
             this.resolveMoveAction(action, tm, other, state, override);
           } else {

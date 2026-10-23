@@ -123,11 +123,12 @@ class PointGrid {
   private key(x: number, y: number, z: number) {
     return `${Math.floor(x / this.size)},${Math.floor(y / this.size)},${Math.floor(z / this.size)}`;
   }
-  /** Index of the nearest point (searching rings of cells outward). */
-  nearest(x: number, y: number, z: number): number {
+  /** Index of the nearest point (searching rings of cells outward), or -1 if none is within `within`. */
+  nearest(x: number, y: number, z: number, within = Infinity): number {
     const cx = Math.floor(x / this.size), cy = Math.floor(y / this.size), cz = Math.floor(z / this.size);
     let best = -1, bd = Infinity;
-    for (let r = 0; r < 64; r++) {
+    const rings = Math.min(64, Math.ceil(within / this.size) + 1);
+    for (let r = 0; r < rings; r++) {
       for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) for (let k = -r; k <= r; k++) {
         if (Math.max(Math.abs(i), Math.abs(j), Math.abs(k)) !== r) continue; // this ring only
         const c = this.cells.get(`${cx + i},${cy + j},${cz + k}`);
@@ -141,7 +142,7 @@ class PointGrid {
       // Anything in a further ring is at least r cells away.
       if (best >= 0 && Math.sqrt(bd) <= r * this.size) break;
     }
-    return best;
+    return best >= 0 && bd <= within * within ? best : -1;
   }
 }
 
@@ -340,4 +341,150 @@ export function smoothOver(target: Float32Array, g: SurfaceGraph, iters: number,
 
 export function smoothScratch(g: SurfaceGraph) {
   return { a: new Float32Array(g.groups * 3), b: new Float32Array(g.groups * 3), count: new Float32Array(g.groups) };
+}
+
+// ── Keeping every piece on the body ─────────────────────────────────────
+//
+// A model is several pieces of surface: the body, and smaller ones set into
+// it (a spike pushed into a wrist, an eye, a horn). Morphed, each piece
+// travels on its own, and a small one can drift off its part. So, as the
+// model stands, each piece is tied to the piece it is set into (or touches)
+// and how close to it it sits; every frame of the morph, a piece further
+// off than that is moved back, whole, just far enough to touch again —
+// parent pieces first, so what is set into them follows. A piece apart
+// from the body in the model itself (made to float) is left as it is.
+
+/** How near (× the body's height) a piece must sit to another, as the model stands, to count as set into it. */
+const ATTACH_REACH = 0.015;
+/** Its leeway past how near it sat (× the height). */
+const ATTACH_SLACK = 0.004;
+
+/** Each vertex's connected piece (welded groups joined by triangles), and the pieces' vertices. */
+export function piecesOf(g: SurfaceGraph): { piece: Int32Array; verts: Int32Array[] } {
+  const parent = Int32Array.from({ length: g.groups }, (_, i) => i);
+  const find = (x: number): number => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  for (let q = 0; q < g.groups; q++) for (let o = g.start[q]; o < g.start[q + 1]; o++) {
+    const a = find(q), b = find(g.nbr[o]);
+    if (a !== b) parent[a] = b;
+  }
+  const ids = new Map<number, number>();
+  const piece = new Int32Array(g.group.length);
+  const lists: number[][] = [];
+  for (let i = 0; i < piece.length; i++) {
+    const r = find(g.group[i]);
+    let id = ids.get(r);
+    if (id === undefined) { ids.set(r, (id = lists.length)); lists.push([]); }
+    piece[i] = id;
+    lists[id].push(i);
+  }
+  return { piece, verts: lists.map((l) => Int32Array.from(l)) };
+}
+
+/**
+ * One piece tied to the piece it is set into: its vertices, and where the
+ * two meet — the closest few pairs of their vertices as the model stands
+ * (`pairs`: its vertex, the parent's, …) — and how near it may sit.
+ */
+export interface Tie { verts: Int32Array; pairs: Int32Array; allow: number }
+
+/** Where two pieces meet: the closest pairs kept (each with its own vertex of the piece). */
+const TIE_PAIRS = 6;
+
+/**
+ * Tie each piece of a surface (as it stands: `pos`) to the piece it is set
+ * into, body outward — each next the piece nearest those already tied —
+ * in the order they must be kept on. `height`: the body's.
+ */
+export function tiePieces(pos: Float32Array, g: SurfaceGraph, height: number): Tie[] {
+  const { piece, verts } = piecesOf(g);
+  const n = verts.length;
+  if (n < 2) return [];
+  const reach = ATTACH_REACH * height, inv = 1 / reach, r2 = reach * reach;
+  // Every vertex in a grid of `reach` cells (numeric keys).
+  const key = (x: number, y: number, z: number) =>
+    ((Math.floor(x * inv) + 1024) * 2048 + (Math.floor(y * inv) + 1024)) * 2048 + (Math.floor(z * inv) + 1024);
+  const cells = new Map<number, number[]>();
+  const count = pos.length / 3;
+  for (let i = 0; i < count; i++) {
+    const k = key(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+    let c = cells.get(k);
+    if (!c) cells.set(k, (c = []));
+    c.push(i);
+  }
+  // For each vertex, its nearest vertex of each other piece within reach:
+  // candidate meeting pairs, by (piece, other piece). Only the smaller
+  // pieces' vertices look (the body is never tied to anything: every meeting
+  // with it is found from the other piece's side), so a dense body costs little.
+  const main = verts.reduce((m, v, i) => (v.length > verts[m].length ? i : m), 0);
+  const meets = new Map<number, { d: number; i: number; j: number }[]>();
+  const nearestOf = new Map<number, { d: number; j: number }>();
+  for (let i = 0; i < count; i++) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2], me = piece[i];
+    if (me === main) continue;
+    const cx = Math.floor(x * inv), cy = Math.floor(y * inv), cz = Math.floor(z * inv);
+    nearestOf.clear();
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+      const cell = cells.get(((cx + a + 1024) * 2048 + (cy + b + 1024)) * 2048 + (cz + c + 1024));
+      if (!cell) continue;
+      for (const j of cell) {
+        const other = piece[j];
+        if (other === me) continue;
+        const dx = pos[j * 3] - x, dy = pos[j * 3 + 1] - y, dz = pos[j * 3 + 2] - z;
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d > r2) continue;
+        const was = nearestOf.get(other);
+        if (!was || d < was.d) nearestOf.set(other, { d, j });
+      }
+    }
+    for (const [other, { d, j }] of nearestOf) {
+      const k = me * n + other;
+      let list = meets.get(k);
+      if (!list) meets.set(k, (list = []));
+      list.push({ d: Math.sqrt(d), i, j });
+    }
+  }
+  for (const list of meets.values()) list.sort((a, b) => a.d - b.d);
+  const gap = (q: number, p: number) => meets.get(q * n + p)?.[0].d ?? Infinity;
+  // Body outward: each next the untied piece nearest any tied one.
+  const tied = new Set([main]), ties: Tie[] = [];
+  for (;;) {
+    let pick = -1, to = -1, best = Infinity;
+    for (let q = 0; q < n; q++) {
+      if (tied.has(q)) continue;
+      for (const p of tied) { const d = gap(q, p); if (d < best) { best = d; pick = q; to = p; } }
+    }
+    if (pick < 0) break; // the rest float apart in the model itself
+    tied.add(pick);
+    const pairs = meets.get(pick * n + to)!.slice(0, TIE_PAIRS).flatMap(({ i, j }) => [i, j]);
+    ties.push({ verts: verts[pick], pairs: Int32Array.from(pairs), allow: best + ATTACH_SLACK * height });
+  }
+  return ties;
+}
+
+/** How far apart a tie's meeting pairs are at their closest in `pos`, and which pair. */
+function meeting(pos: Float32Array, t: Tie): [number, number] {
+  let best = Infinity, at = -1;
+  for (let o = 0; o < t.pairs.length; o += 2) {
+    const i = t.pairs[o] * 3, k = t.pairs[o + 1] * 3;
+    const dx = pos[k] - pos[i], dy = pos[k + 1] - pos[i + 1], dz = pos[k + 2] - pos[i + 2];
+    const d = dx * dx + dy * dy + dz * dz;
+    if (d < best) { best = d; at = o; }
+  }
+  return [Math.sqrt(best), at];
+}
+
+/** Keep every tied piece on the piece it is set into (in place): moved back, whole, if it has drifted off. */
+export function keepTied(pos: Float32Array, ties: Tie[]): void {
+  for (const t of ties) {
+    const [d, o] = meeting(pos, t);
+    if (!(d > t.allow) || o < 0) continue;
+    const i = t.pairs[o] * 3, k = t.pairs[o + 1] * 3, s = 1 - t.allow / d;
+    const dx = (pos[k] - pos[i]) * s, dy = (pos[k + 1] - pos[i + 1]) * s, dz = (pos[k + 2] - pos[i + 2]) * s;
+    for (const v of t.verts) { pos[v * 3] += dx; pos[v * 3 + 1] += dy; pos[v * 3 + 2] += dz; }
+  }
+}
+
+/** Gaps past their leeway (× the height) of tied pieces in `pos` — 0 when every piece is on. */
+export function tieGaps(pos: Float32Array, ties: Tie[], height: number): number[] {
+  return ties.map((t) => Math.max(0, meeting(pos, t)[0] - t.allow) / height);
 }

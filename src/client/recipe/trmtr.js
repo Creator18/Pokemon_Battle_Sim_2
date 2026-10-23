@@ -66,6 +66,23 @@ export function uvTransform(mat) {
  * are selected by the mask's R, G, B, A. BY THEIR OWN NUMBER — an eye material
  * declares 1, 2, 3, 4 and 6 — and only 1..4 are reachable from a 4-channel mask.
  */
+/**
+ * What a material lights by itself (unlit, added over the shading): the base
+ * and each paint layer's EmissionColor × EmissionIntensity (layer 0 the base,
+ * 1–4 the _lym mask's R/G/B/A), and the highlight — EmissionColorLayer5 ×
+ * EmissionIntensityLayer5 where the HighlightMaskMap says (an eye's catchlight).
+ * null where it gives no light.
+ */
+export function emissionColors(mat) {
+  const lit = (c, k) => {
+    const v = mat.floats[k] ?? 0;
+    return c && v > 0 ? c.slice(0, 3).map((x) => x * v) : null;
+  };
+  const layers = [lit(mat.colors.EmissionColor, 'EmissionIntensity')];
+  for (let i = 1; i <= 4; i++) layers[i] = lit(mat.colors[`EmissionColorLayer${i}`], `EmissionIntensityLayer${i}`);
+  return { layers, highlight: lit(mat.colors.EmissionColorLayer5, 'EmissionIntensityLayer5') };
+}
+
 export function layerColors(mat) {
   const out = [(mat.colors.BaseColor || [1, 1, 1, 1]).slice(0, 3)];
   for (let i = 1; i <= 4; i++) {

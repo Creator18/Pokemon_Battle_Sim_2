@@ -18,12 +18,20 @@ export interface BallSpec {
   element: string;
   /** Its own colours, over the type's. */
   colours?: BallColours;
+  /** Its noise the Flying coat's tornado spheres, two at a slant, round a stable white core that grows inside them (BallShot.noise). */
+  tornado?: boolean;
+  /** Its burst on the target a sphere of flame (FireFx.FireSphere) instead of its noise swelling out (Fire Blast). */
+  burst?: 'fire';
 }
 
 export const BALL_MOVES: Record<string, BallSpec> = {
   'Shadow Ball': { element: 'Ghost' },
+  'Aeroblast': { element: 'Flying', tornado: true },
+  'Moonblast': { element: 'Fairy', tornado: true },
+  'Fire Blast': { element: 'Fire', tornado: true, burst: 'fire' },
+  'Focus Blast': { element: 'Fighting' },
   // Lucario's aura: a white sphere in a dark-blue network, light-blue rings.
-  'Aura Sphere': { element: 'Fighting', colours: { heavy: [0.04, 0.12, 0.55], light: [0.45, 0.78, 1.0], fill: [1, 1, 1] } },
+  'Aura Sphere': { element: 'Fighting', colours: { heavy: [0.04, 0.12, 0.55], light: [0.45, 0.78, 1.0], fill: [1, 1, 1] }, tornado: true },
 };
 
 export function ballFor(moveName: string | null | undefined): BallSpec | null {

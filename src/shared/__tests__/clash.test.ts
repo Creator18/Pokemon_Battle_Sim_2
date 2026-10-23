@@ -4,7 +4,7 @@ import { TurnDeclaration } from '../engine/declaration.ts';
 import { ActionOrder } from '../core/enums.ts';
 import { HEX_GRID, keyToTile, Tile } from '../core/hex.ts';
 import { chargeMultiplier } from '../moves/damage.ts';
-import { resolveClash, beamOutput } from '../moves/clash.ts';
+import { resolveClash, beamOutput, clashes } from '../moves/clash.ts';
 import { getMove } from '../data/moves.ts';
 
 const A: Tile = [-2, 3], B: Tile = [1, 3]; // three tiles apart on an open row
@@ -125,5 +125,75 @@ describe('Dragon Rage', () => {
     s.declare(2, new TurnDeclaration('Swords Dance', ActionOrder.ATTACK_FIRST, null, []));
     s.resolveTurn();
     expect(s.state.p2!.maxHp - s.state.p2!.currentHp).toBe(40);
+  });
+});
+
+describe('Ball clashes', () => {
+  it('a ball meets a beam head-on: the stronger wins and hits', () => {
+    // Shadow Ball (Ghost 80) vs Psybeam (Psychic 65): Ghost is super effective on Psychic, ×2.
+    const s = setup('Gengar', 'Alakazam', ['Shadow Ball', 'Psybeam']);
+    s.declare(1, fire('Shadow Ball', B));
+    s.declare(2, fire('Psybeam', A));
+    const res = s.resolveTurn();
+    const c = res.resolvedActions.find((a) => a.clash)!.clash!;
+    expect(c.winner).toBe(1);
+    expect(s.state.p2!.currentHp).toBeLessThan(s.state.p2!.maxHp);
+    expect(s.state.p1!.currentHp).toBe(s.state.p1!.maxHp);
+  });
+
+  it('two equal balls meet and both burst', () => {
+    const s = setup('Lucario', 'Lucario', ['Aura Sphere', 'Swords Dance']);
+    s.declare(1, fire('Aura Sphere', B));
+    s.declare(2, fire('Aura Sphere', A));
+    const res = s.resolveTurn();
+    expect(res.resolvedActions.find((a) => a.clash)!.clash!.winner).toBeNull();
+    expect(s.state.p1!.currentHp).toBe(s.state.p1!.maxHp);
+    expect(s.state.p2!.currentHp).toBe(s.state.p2!.maxHp);
+  });
+
+  it('a ball meets a bolt (Thunderbolt) too', () => {
+    const s = setup('Gengar', 'Raichu', ['Shadow Ball', 'Thunderbolt']);
+    s.declare(1, fire('Shadow Ball', B));
+    s.declare(2, fire('Thunderbolt', A));
+    const res = s.resolveTurn();
+    expect(res.resolvedActions.some((a) => a.clash)).toBe(true);
+  });
+});
+
+describe('Pulse clashes', () => {
+  it('a pulse meets a beam head-on: the stronger wins and hits', () => {
+    // Dark Pulse (Dark 80) vs Psybeam (Psychic 65): Dark is super effective on Psychic, ×2.
+    const s = setup('Absol', 'Alakazam', ['Dark Pulse', 'Psybeam']);
+    s.declare(1, fire('Dark Pulse', B));
+    s.declare(2, fire('Psybeam', A));
+    const res = s.resolveTurn();
+    const c = res.resolvedActions.find((a) => a.clash)!.clash!;
+    expect(c.winner).toBe(1);
+    expect(s.state.p2!.currentHp).toBeLessThan(s.state.p2!.maxHp);
+    expect(s.state.p1!.currentHp).toBe(s.state.p1!.maxHp);
+  });
+
+  it('a pulse meets a ball, and another pulse', () => {
+    for (const [p1, m1, p2, m2] of [['Absol', 'Dark Pulse', 'Gengar', 'Shadow Ball'], ['Absol', 'Dark Pulse', 'Alakazam', 'Psychic']]) {
+      const s = setup(p1, p2, [m1, m2]);
+      s.declare(1, fire(m1, B));
+      s.declare(2, fire(m2, A));
+      expect(s.resolveTurn().resolvedActions.some((a) => a.clash)).toBe(true);
+    }
+  });
+
+  it('Boomburst (Normal 140) out-pulses Psybeam (Psychic 65)', () => {
+    const s = setup('Noivern', 'Meowstic', ['Boomburst', 'Psybeam']);
+    s.declare(1, fire('Boomburst', B));
+    s.declare(2, fire('Psybeam', A));
+    const res = s.resolveTurn();
+    expect(res.resolvedActions.find((a) => a.clash)!.clash!.winner).toBe(1);
+    expect(s.state.p2!.currentHp).toBeLessThan(s.state.p2!.maxHp);
+  });
+
+  it('Dragon Pulse is a beam, not a pulse; Metal Sound (no power) does not clash', () => {
+    expect(getMove('Dragon Pulse')!.isBeam).toBe(true);
+    expect(getMove('Dragon Pulse')!.isPulse).toBe(false);
+    expect(clashes(getMove('Metal Sound')!)).toBe(false);
   });
 });

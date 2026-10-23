@@ -76,15 +76,15 @@ async function pool(items, n, fn) {
 
 // ── moves the engine has ──
 const MOVES = {
-  terrain: ['Electro Web', 'Will-O-Wisp', 'Misty Terrain', 'Toxic Spikes', 'Sunny Day', 'Rain Dance', 'Smokescreen Field', 'Metal Sound Field', 'Perish Trap', 'Hail'],
-  status: ['Calm Mind', 'Swords Dance', 'Nasty Plot', 'Hypnosis', 'Pain Split', 'Destiny Bond', 'Taunt', 'Thunder Wave'],
+  terrain: ['Electro Web', 'Will-O-Wisp', 'Misty Terrain', 'Toxic Spikes', 'Sunny Day', 'Rain Dance', 'Smokescreen Field', 'Perish Trap', 'Hail'],
+  status: ['Calm Mind', 'Swords Dance', 'Nasty Plot', 'Hypnosis', 'Pain Split', 'Destiny Bond', 'Taunt', 'Thunder Wave', 'Metal Sound'],
   ranged: ['Gust', 'Twister', 'Dragon Pulse', 'Thunderbolt', 'Thunder', 'Shadow Ball', 'Flamethrower', 'Psychic', 'Moonblast', 'Aura Sphere', 'Sludge Bomb', 'Air Slash', 'Dark Pulse', 'Focus Blast', 'Hex', 'Discharge',
-    'Hyper Beam', 'Ice Beam', 'Aurora Beam', 'Solar Beam', 'Flash Cannon', 'Psybeam', 'Signal Beam', 'Charge Beam', 'Hydro Pump', 'Hydro Cannon', 'Steel Beam', 'Meteor Beam', 'Moongeist Beam', 'Light of Ruin'],
+    'Hyper Beam', 'Ice Beam', 'Aurora Beam', 'Solar Beam', 'Flash Cannon', 'Psybeam', 'Signal Beam', 'Charge Beam', 'Hydro Pump', 'Hydro Cannon', 'Steel Beam', 'Meteor Beam', 'Moongeist Beam', 'Light of Ruin', 'Tri Attack'],
   physical: ['Quick Attack', 'Iron Tail', 'Volt Tackle', 'Close Combat', 'Extreme Speed', 'Shadow Sneak', 'Sucker Punch', 'Night Slash', 'Psycho Cut', 'Fire Fang', 'Dragon Claw', 'Earthquake'],
 };
 /** Type-themed preferences across all categories (picked from in order). */
 const THEME = {
-  Normal: ['Hyper Beam', 'Quick Attack', 'Swords Dance', 'Smokescreen Field', 'Pain Split', 'Air Slash'],
+  Normal: ['Hyper Beam', 'Tri Attack', 'Quick Attack', 'Swords Dance', 'Smokescreen Field', 'Pain Split', 'Air Slash'],
   Fire: ['Flamethrower', 'Fire Fang', 'Will-O-Wisp', 'Sunny Day'],
   Water: ['Hydro Pump', 'Rain Dance', 'Hail', 'Calm Mind', 'Iron Tail'],
   Electric: ['Thunderbolt', 'Discharge', 'Charge Beam', 'Electro Web', 'Thunder Wave', 'Rain Dance', 'Quick Attack'],
@@ -100,7 +100,7 @@ const THEME = {
   Ghost: ['Shadow Ball', 'Moongeist Beam', 'Hex', 'Shadow Sneak', 'Will-O-Wisp', 'Destiny Bond', 'Perish Trap'],
   Dragon: ['Dragon Claw', 'Dragon Pulse', 'Twister','Swords Dance', 'Flamethrower', 'Rain Dance'],
   Dark: ['Dark Pulse', 'Night Slash', 'Sucker Punch', 'Nasty Plot', 'Taunt', 'Perish Trap'],
-  Steel: ['Flash Cannon', 'Steel Beam', 'Iron Tail', 'Metal Sound Field', 'Swords Dance', 'Focus Blast'],
+  Steel: ['Flash Cannon', 'Steel Beam', 'Iron Tail', 'Metal Sound', 'Swords Dance', 'Focus Blast'],
   Fairy: ['Moonblast', 'Light of Ruin', 'Misty Terrain', 'Calm Mind', 'Psychic'],
 };
 const FALLBACK = {

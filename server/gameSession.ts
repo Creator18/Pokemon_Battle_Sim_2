@@ -307,6 +307,9 @@ export class GameSession {
   }
 }
 
+/** The stats a stage change can move (the rest of statChanges are statuses). */
+const STAGED = new Set(['attack', 'defense', 'sp_atk', 'sp_def', 'speed']);
+
 /** Map the engine's internal ResolvedAction to the protocol wire shape. */
 function toWire(a: ResolvedAction): ResolvedActionWire {
   const tile = (t: readonly [number, number] | null): [number, number] | null =>
@@ -323,6 +326,15 @@ function toWire(a: ResolvedAction): ResolvedActionWire {
     knockback: a.result?.knockback
       ? { playerId: a.result.knockback.playerId, from: tile(a.result.knockback.from)!, to: tile(a.result.knockback.to)! }
       : null,
+    dodge: a.result?.dodge
+      ? { playerId: a.result.dodge.playerId, from: tile(a.result.dodge.from)!, to: tile(a.result.dodge.to)! }
+      : null,
+    statuses: (a.result?.statChanges ?? [])
+      .filter(([, e]) => e === 'frozen' || e === 'shattered' || e === 'thawed')
+      .map(([pid, e]) => ({ playerId: pid, status: e as 'frozen' | 'shattered' | 'thawed' })),
+    stages: [...(a.result?.statChanges ?? []), ...(a.result?.selfStatChanges ?? [])]
+      .filter(([, stat, delta]) => STAGED.has(stat) && delta !== 0)
+      .map(([pid, stat, delta]) => ({ playerId: pid, stat, delta })),
     clash: a.clash ? { players: a.clash.players, winner: a.clash.winner, outputs: a.clash.outputs, charges: a.clash.charges, margin: a.clash.margin } : null,
     skippedMovement: a.skippedMovement,
     skippedAttack: a.skippedAttack,

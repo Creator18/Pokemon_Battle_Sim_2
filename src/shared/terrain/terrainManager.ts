@@ -15,6 +15,8 @@ import {
   ICE_CHIP_DAMAGE_PCT,
   RESONANCE_SPDEF_DROP,
   PERISH_COUNTDOWN_TURNS,
+  GRASS_FIRE_SUN_EXTRA,
+  WEATHER_CHIP_FRACTION,
 } from '../core/constants.ts';
 
 /** Minimal interface a Pokemon must satisfy for terrain per-turn effects. */
@@ -39,9 +41,21 @@ export interface TerrainEntityJSON {
   perish_counters: Record<string, number>;
   /** Tilted ground: the quake's centre, which the tile leans toward. */
   origin?: [number, number];
+  /** A burn zone lit by burning grass (and whether Sunny Day has already held it a turn longer). */
+  grass_fire?: boolean;
+  sun_extended?: boolean;
+  /** A grass fire from a tied beam clash: split across the line between the two beams' users (see GrassFireSplit). */
+  split?: GrassFireSplit;
 }
 
-const PERMANENT = new Set<TerrainType>([TerrainType.ROCK, TerrainType.TREE]);
+/**
+ * Two fires meeting on a tile (a tied beam clash): the line runs from `a` to
+ * `b` (the two users' tiles) and is split at its middle; on `a`'s side burns
+ * player `oa`'s fire, on `b`'s player `ob`'s (-1: no fire on that side).
+ */
+export interface GrassFireSplit { a: [number, number]; b: [number, number]; oa: number; ob: number }
+
+const PERMANENT = new Set<TerrainType>([TerrainType.ROCK, TerrainType.TREE, TerrainType.WATER]);
 
 export class TerrainEntity {
   tile: Tile;
@@ -53,6 +67,11 @@ export class TerrainEntity {
   perishCounters: Map<number, number>;
   /** Tilted ground: the quake's centre, which the tile leans toward. */
   origin: Tile | null = null;
+  /** A burn zone lit by burning grass: Sunny Day can hold it GRASS_FIRE_SUN_EXTRA turn longer, once. */
+  grassFire = false;
+  sunExtended = false;
+  /** Fires meeting on it (a tied clash): GrassFireSplit. */
+  split: GrassFireSplit | null = null;
 
   constructor(
     tile: Tile,
@@ -125,6 +144,8 @@ export class TerrainEntity {
       integrity: this.integrity,
       perish_counters: perish,
       ...(this.origin ? { origin: [this.origin[0], this.origin[1]] as [number, number] } : {}),
+      ...(this.grassFire ? { grass_fire: true, sun_extended: this.sunExtended } : {}),
+      ...(this.split ? { split: { ...this.split } } : {}),
     };
   }
 
@@ -142,6 +163,9 @@ export class TerrainEntity {
       perish,
     );
     if (data.origin) e.origin = [data.origin[0], data.origin[1]];
+    e.grassFire = !!data.grass_fire;
+    e.sunExtended = !!data.sun_extended;
+    if (data.split) e.split = { ...data.split };
     return e;
   }
 }
@@ -149,9 +173,29 @@ export class TerrainEntity {
 /** A terrain removed during a tick: [tile | null, typeValue]. null = global. */
 export type TerrainRemoval = [Tile | null, string];
 
+/** The weathers: one at a time (a new one replaces the last). */
+export const WEATHERS: readonly TerrainType[] = [TerrainType.SUNNY_ZONE, TerrainType.RAIN_ZONE, TerrainType.HAIL, TerrainType.SANDSTORM];
+/** The terrains: one at a time. */
+export const FIELD_TERRAINS: readonly TerrainType[] = [
+  TerrainType.ELECTRIC_TERRAIN, TerrainType.GRASSY_TERRAIN, TerrainType.MISTY_TERRAIN, TerrainType.PSYCHIC_TERRAIN,
+];
+/** Each terrain's type (Terrain Pulse takes it; its moves are boosted). */
+export const TERRAIN_TYPE_OF: Partial<Record<TerrainType, string>> = {
+  [TerrainType.ELECTRIC_TERRAIN]: 'Electric',
+  [TerrainType.GRASSY_TERRAIN]: 'Grass',
+  [TerrainType.MISTY_TERRAIN]: 'Fairy',
+  [TerrainType.PSYCHIC_TERRAIN]: 'Psychic',
+};
+
 export class TerrainManager {
   private entities: Map<string, TerrainEntity> = new Map();
   private globals: Map<string, TerrainEntity> = new Map();
+  /** Tiles whose grass has burned away ("q,r"): bare, scorched earth for the rest of the battle. */
+  private scorched = new Set<string>();
+
+  scorch(tile: Tile): void { this.scorched.add(tileKey(tile[0], tile[1])); }
+  isScorched(tile: Tile): boolean { return this.scorched.has(tileKey(tile[0], tile[1])); }
+  get scorchedKeys(): string[] { return [...this.scorched]; }
 
   // ── Add / Remove ──────────────────────────
   addTerrain(
@@ -166,8 +210,10 @@ export class TerrainManager {
     const hp = integrity ?? p.defaultIntegrity;
     const entity = new TerrainEntity(tile, terrainType, owner, dur, hp);
     if (p.isGlobal) {
-      if (terrainType === TerrainType.SUNNY_ZONE) this.globals.delete(TerrainType.RAIN_ZONE);
-      else if (terrainType === TerrainType.RAIN_ZONE) this.globals.delete(TerrainType.SUNNY_ZONE);
+      // One weather and one terrain at a time: a new one replaces the last.
+      for (const group of [WEATHERS, FIELD_TERRAINS]) {
+        if (group.includes(terrainType)) for (const other of group) this.globals.delete(other);
+      }
       this.globals.set(terrainType, entity);
     } else {
       this.entities.set(tileKey(tile[0], tile[1]), entity);
@@ -200,6 +246,25 @@ export class TerrainManager {
   isRainy(): boolean {
     return this.globals.has(TerrainType.RAIN_ZONE);
   }
+  isHail(): boolean {
+    return this.globals.has(TerrainType.HAIL);
+  }
+  isSandstorm(): boolean {
+    return this.globals.has(TerrainType.SANDSTORM);
+  }
+  /** The terrain on the field, or null. */
+  /**
+   * Whether a move strikes first here: a priority move does, Grassy Glide
+   * only in Grassy Terrain.
+   */
+  hasPriority(move: { name: string; quickPriority: boolean }): boolean {
+    if (!move.quickPriority) return false;
+    return move.name !== 'Grassy Glide' || this.fieldTerrain() === TerrainType.GRASSY_TERRAIN;
+  }
+
+  fieldTerrain(): TerrainType | null {
+    return FIELD_TERRAINS.find((t) => this.globals.has(t)) ?? null;
+  }
   globalFireMult(): number {
     if (this.isSunny()) return 1.3;
     if (this.isRainy()) return 0.7;
@@ -217,6 +282,11 @@ export class TerrainManager {
     const toRemove: string[] = [];
     for (const [key, entity] of this.entities) {
       entity.tick();
+      // A grass fire burns on a turn longer under the sun (once).
+      if (entity.grassFire && entity.isExpired && !entity.sunExtended && this.isSunny()) {
+        entity.turnsLeft = GRASS_FIRE_SUN_EXTRA;
+        entity.sunExtended = true;
+      }
       if (entity.isDestroyed || (entity.isExpired && !entity.isPermanent)) {
         toRemove.push(key);
         removed.push([keyToTile(key), entity.terrainType]);
@@ -271,6 +341,25 @@ export class TerrainManager {
       if (p.types.includes('Ice')) continue;
       const damage = Math.max(1, Math.trunc(p.maxHp * ICE_CHIP_DAMAGE_PCT));
       results.push([p.playerId, p.takeDamage(damage)]);
+    }
+    return results;
+  }
+
+  /**
+   * Hail and a sandstorm, at a turn's end: WEATHER_CHIP_FRACTION of max HP
+   * off every Pokémon it does not spare (hail: Ice types; sand: Rock, Ground
+   * and Steel types). [playerId, damage, 'hail' | 'sandstorm'].
+   */
+  applyWeatherChip(list: readonly TerrainAffectable[]): Array<[number, number, string]> {
+    const results: Array<[number, number, string]> = [];
+    const hail = this.isHail(), sand = this.isSandstorm();
+    if (!hail && !sand) return results;
+    for (const p of list) {
+      if (!p.isAlive) continue;
+      if (hail && p.types.includes('Ice')) continue;
+      if (sand && p.types.some((t) => t === 'Rock' || t === 'Ground' || t === 'Steel')) continue;
+      const damage = Math.max(1, Math.trunc(p.maxHp * WEATHER_CHIP_FRACTION));
+      results.push([p.playerId, p.takeDamage(damage), hail ? 'hail' : 'sandstorm']);
     }
     return results;
   }
@@ -417,8 +506,9 @@ export class TerrainManager {
     return list;
   }
 
-  static fromJSON(list: readonly TerrainEntityJSON[]): TerrainManager {
+  static fromJSON(list: readonly TerrainEntityJSON[], scorched: readonly string[] = []): TerrainManager {
     const tm = new TerrainManager();
+    for (const k of scorched) tm.scorched.add(k);
     for (const data of list) {
       const entity = TerrainEntity.fromJSON(data);
       if (entity.isGlobal) tm.globals.set(entity.terrainType, entity);
@@ -431,4 +521,12 @@ export class TerrainManager {
 /** Flying types cross movement-blocking terrain (rocks, trees) and can stand on it. */
 export function canFly(p: { types: readonly string[] }): boolean {
   return p.types.includes('Flying');
+}
+
+/**
+ * Touching the ground — what a terrain acts on. Not a Flying type (the only
+ * ones that ever hover, over rocks and trees).
+ */
+export function isGrounded(p: { types: readonly string[] }): boolean {
+  return !canFly(p);
 }

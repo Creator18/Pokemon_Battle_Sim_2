@@ -24,6 +24,7 @@ import { PulseFx } from './client/vfx/PulseFx.ts';
 import { WindFx } from './client/vfx/WindFx.ts';
 import { LightningFx } from './client/vfx/LightningFx.ts';
 import { SlashFx } from './client/vfx/SlashFx.ts';
+import { FieldFx } from './client/vfx/FieldFx.ts';
 import { BattleCamera } from './client/camera/BattleCamera.ts';
 import { NetClient } from './client/net/NetClient.ts';
 import { GameController } from './client/GameController.ts';
@@ -62,6 +63,10 @@ function boot(): void {
   const lightning = new LightningFx(scene, camera.camera, { shake: (m, ms) => vfx.shake(m, ms) }); // bolts and earthing
   const slashes = new SlashFx(scene, camera.camera); // claw marks
   const factory = new RecipeFactory(scene, new PokemonFactory(scene), fx, beams, dash, pulses, wind, lightning, slashes);
+  // The weather and the terrain over the whole field: the sky, fog, grade and their particles.
+  const field = new FieldFx(scene, { pipeline: camera.pipeline, sky: environment.sky, keyLight: camera.keyLight, fill: camera.fill,
+    lightning, wind, tileTop: (q, r) => board.tileTop(q, r) });
+  board.onField((weather, terrain) => field.set(weather, terrain));
 
   const net = new NetClient(); // ws://<host>:8080 by default
 
@@ -71,7 +76,7 @@ function boot(): void {
   // Dev-only inspection handle (scene, camera, models) for debugging and
   // scripted checks; stripped from production builds.
   if (import.meta.env.DEV) {
-    (window as unknown as { __pbw?: unknown }).__pbw = { scene, camera, factory, board, vfx, fx, beams, dash, pulses, wind, lightning, slashes, net, controller };
+    (window as unknown as { __pbw?: unknown }).__pbw = { scene, camera, factory, board, vfx, fx, beams, dash, pulses, wind, lightning, slashes, field, net, controller };
   }
 
   engine.runRenderLoop(() => scene.render());

@@ -1,28 +1,31 @@
 /**
- * SlashFx — claw marks (EFFECTS.md Part 5 §1, `slash.rs` / `dragon_claw.rs`),
- * from the slash in a Shadertoy screen effect: only the slash itself (its
- * glow, its core and its length fade), three side by side for a claw, one
- * longer one for a blade (user).
+ * SlashFx — a follow-through slash, built the way animators build one:
  *
- * Three straight, parallel gashes hang in the air at the near side of what
- * was struck, cut the way the striking part was moving as it landed (user):
- * each draws itself along its length in that direction, over FORM s. (With
- * no part to follow, 45° across the striker's front: the left hand's from
- * upper left to lower right, seen from behind, the right hand's the other
- * way.) The middle one is the longest, so the set reads as a rake of claws,
- * and they bow forward — hollow towards the striker, bulging towards what
- * was hit. They fade in about half a second, lavender running to white at
- * the core.
+ *  1. Anticipation — the body's wind-up (its swipe clip); nothing drawn yet.
+ *  2. The smear — a crescent arc tracing the striking edge's path: its
+ *     leading edge (the head) fast and thick, hot white on its outer rim,
+ *     the trail behind it tapering to nothing. It shows where the edge has
+ *     just been, not a shape set down at once.
+ *  3. Contact — the head tears through what was struck early in the arc
+ *     (CONTACT of the way along it): sparks off that point.
+ *  4. Follow-through — the head carries on well past what was struck,
+ *     slowing as it goes (an ease-out): most of the arc lies after contact.
+ *  5. Dissipation — the tail catches up with the head, so the trail erodes
+ *     from its oldest end forward, thinning and drifting a little outward as
+ *     it goes — one whole piece throughout; gone in about LIFE s.
  *
- * Each gash wears its own coat of the type's aura (user): round the core,
- * the aura's fill, then its outline colour, then its glow — and sparks fly
- * off each gash's front as it draws. (The source's smoke was dropped, by the user.)
- *
- * The source sampled the marks into points (its renderer had no full-screen
- * pass); here they are 3D: each gash a tapering tube along its bowed line,
- * its coat inverted-hull shells round it, so the set reads from any side.
- * Lengths are in units of the striker's height (H). The marks keep to the
- * striker's frame and travel with it.
+ * The arc runs in the plane of the swing: through the near side of what was
+ * struck, its tangent there the way the striking part was moving as it landed
+ * (`swing`, in the striker's front; 45° across by the hand without it), its
+ * centre back toward the striker (the shoulder the edge swings about). Its
+ * flat face is turned toward the striker all along it: its width laid across
+ * the path, square to the way back to the striker. A
+ * claw rakes three side by side (the middle reaching furthest), a blade cuts
+ * one, wider. Each is shaped as a tornado stripe — the tornado's voronoi
+ * streak, a random one each time, laid through the arc's crescent — cel
+ * shaded as the tornado is, in its type's aura colours (inked, its outline
+ * colour, its fill, a white-hot core), over a soft glow of its own light. Lengths are in units of the striker's height (H); the
+ * arcs keep to the striker's frame.
  */
 
 import { Scene } from '@babylonjs/core/scene';
@@ -37,141 +40,165 @@ import type { Camera } from '@babylonjs/core/Cameras/camera';
 
 import { auraGlow, type RGB } from './auraPalette.ts';
 import { GlowSparks } from './beam/GlowSparks.ts';
+import { randomStripe, STRIPE_SLICES, type Stripe } from './stripeShape.ts';
 
-// ── the cut (units of the striker's height H) ───────────────────────
-/** The middle gash's length; the outer two are 13% shorter. */
-const LEN = 1.8;
-/** Gap between neighbouring gashes, across the cut. */
-const GAP = 0.28;
-/** A blade's single cut is this much longer than a claw's middle mark. */
-const SINGLE_LEN = 1.4;
-/** How far the cut bows forward at its middle (0 at its ends). */
-const BOW = 0.22;
-/**
- * Where it hangs: at what was struck's near side (TARGET_BODY × its height
- * short of its middle, less the bow), at TARGET_UP of its height — but never
- * nearer the striker than MIN_AHEAD × H, so it never cuts through the striker.
- * With nothing struck, AT_AHEAD × H in front, at AT_UP × H.
- */
+// ── the arc (units of the striker's height H) ───────────────────────
+/** Its radius (the edge's reach about the shoulder it swings round), at most the distance to what was struck. */
+const RADIUS = 0.75;
+/** How far it sweeps before contact and after it (rad): the follow-through the longer. */
+const BEFORE = 1.25, AFTER = 1.75;
+/** Where on the arc it strikes (its share of the way along). */
+const CONTACT = BEFORE / (BEFORE + AFTER);
+/** Its crescent's widest (radially, inward from its rim): a claw's arcs, and a blade's one. */
+const WIDTH = 0.16, BLADE_WIDTH = 0.26;
+/** A claw's rake: the gap between its arcs (across the swing's plane), and how much shorter the outer two reach. */
+const GAP = 0.2, OUTER_REACH = 0.9;
+/** Where it hangs, as the old claw marks did: at the near side of what was struck, at its height × TARGET_UP; never nearer the striker than MIN_AHEAD. */
 const TARGET_BODY = 0.3, TARGET_UP = 0.5, MIN_AHEAD = 0.55, AT_AHEAD = 0.9, AT_UP = 0.55;
 
-// ── a gash and its coat ─────────────────────────────────────────────
-/** Its core's radius (× H) at the middle, tapering to TIP_R of it at the ends. */
-const GASH_R = 0.01, TIP_R = 0.2;
-/** Its aura coat, as multiples of the core's radius: the fill, the outline round it, the glow round that. */
-const FILL_R = 1.6, LINE_R = 4.6, GLOW_R = 10.4;
+// ── timeline (s from the blow) ──────────────────────────────────────
+/** The head's sweep: the whole arc in HEAD_T s, eased out — fast through contact, slowing in the follow-through. */
+const HEAD_T = 0.2;
+/** The tail: setting off TAIL_DELAY s in, catching the head over TAIL_T s. */
+const TAIL_DELAY = 0.05, TAIL_T = 0.34;
+/** Its whole life (s), and how far it drifts outward over it (× its radius). */
+const LIFE = TAIL_DELAY + TAIL_T + 0.02, DRIFT = 0.08;
+
+// ── its look ────────────────────────────────────────────────────────
 /**
- * The outline border ripples (user): its thickness swings by WAVE_AMP, in
- * WAVES waves along the gash, travelling back along it — against the way it
- * was drawn — at WAVE_SPEED rad/s.
+ * Its shape: a tornado stripe, taken whole off the tornado (stripeShape.ts:
+ * the coat's own stripe field, its separate stripes found, a long one picked
+ * at random for each arc), its outline traced along its length and laid along
+ * the slash — its jagged edges the stripe's own, one piece along its length.
  */
-const WAVE_AMP = 0.35, WAVES = 3, WAVE_SPEED = 18;
-/** How strong the glow is at its brightest (it fades to its rim). */
-const GLOW_GAIN = 0.85;
-/** The slash's own light: an added bloom in its core colour, BLOOM_R × the core's radius, BLOOM_GAIN strong. */
-const BLOOM_R = 14.4, BLOOM_GAIN = 0.7;
-/** Below this brightness a gash is not drawn. */
-const CUT = 0.13;
+/** Its cel bands, nested inside its outline, from its edge (0) in to its middle line (1): inked to INK_W, its outline colour to LINE_W, its fill to FILL_W, then its white-hot core. */
+const STRIPE_INK_W = 0.1, STRIPE_LINE_W = 0.34, STRIPE_FILL_W = 0.8;
+/** The band it is drawn in: this much wider than a plain crescent, the jagged oval filling it. */
+const STRIPE_ROOM = 1.6;
+/**
+ * Its volume: two sheets bowed apart across the swing's plane, meeting at its
+ * edges (a blade's lens-shaped section), THICK × its width at its fullest; lit
+ * by the scene's key light (LIGHT) in cel steps — its shadowed side a band
+ * darker (below SHADE), its lit top catching a white highlight (above GLINT).
+ */
+const THICK = 0.32, SHADE = 0.15, GLINT = 0.78;
+/** With volume (its two bowed sheets, lit), or flat: one sheet, its cel bands alone. */
+const VOLUME = false;
+const LIGHT = [0.3, 0.8, -0.5];
+/** Its glow: this much wider than the crescent, this strong at its brightest (added light). */
+const GLOW_WIDE = 1.9, GLOW_GAIN = 0.45;
 
 // ── sparks ──────────────────────────────────────────────────────────
-/** Off each gash as it lands: how many, how fast (× H per s) and how long they live (s). */
-const SPARKS = 26, SPARK_SPEED: [number, number] = [2.2, 4.6], SPARK_LIFE: [number, number] = [0.3, 0.6];
-
-// ── timeline (s from the blow) ──────────────────────────────────────
-/** The marks: snap on over the first 3% of MARK_WINDOW, fade out by 80% of it. */
-const MARK_WINDOW = 0.7, MARK_FADE = 0.8;
-/** How long a gash takes to draw itself along its length, in the swing's direction (s). */
-const FORM = 0.12;
-/** How long after the blow the sparks are still flying (s). */
-const SPARK_TAIL = SPARK_LIFE[1] + 0.1;
-
-const ss = (e0: number, e1: number, x: number) => {
-  const k = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
-  return k * k * (3 - 2 * k);
-};
+/** Off the contact point as the head tears through: how many (per arc), how fast (× H per s), how long they live (s). */
+const SPARKS = 18, SPARK_SPEED: [number, number] = [2.2, 4.6], SPARK_LIFE: [number, number] = [0.25, 0.5];
 
 // ── shaders ─────────────────────────────────────────────────────────
-// A tube along one gash: uv.x runs along it, uv.y round it. The line:
-// origin + (dir·l + nrm·off + fwd·bow(l))·H, with dir and nrm at 45° across
-// the striker's front (side: which hand) and fwd its facing.
-Effect.ShadersStore.slashGashVertexShader = /* glsl */ `
+// One arc as a strip: uv.x along it (its start before contact to its end
+// after), uv.y across it (0 its inner edge, 1 its rim). Its crescent spans
+// only between the tail and the head: fullest between them, tapering alike to
+// a point at each.
+const PROFILE = /* glsl */ `
+float profile(float s) {
+  // (s: 0 at the tail, 1 at the head.) The room its stripe is drawn in: full
+  // nearly all along, eased off only at the very ends — the stripe's own
+  // outline (its tips included) is the slash's shape.
+  float k = clamp(s, 0.0, 1.0);
+  return pow(4.0 * k * (1.0 - k), 0.2);
+}`;
+
+Effect.ShadersStore.slashArcVertexShader = /* glsl */ `
 precision highp float;
 attribute vec2 uv;
 uniform mat4 viewProjection;
-uniform vec3 origin, dirv, nrmv, fwd;
-uniform float H, len, off, radius, tip, inner, wave, time;
-varying vec3 vPos, vNrm;
-varying float vFade, vU;
+uniform vec3 centre, ax, ay, across, toward;
+uniform float H, radius, width, off, head, tail, drift, wide, sheet;
+varying float vS, vV, vU;
+varying vec3 vN;
+${PROFILE}
 void main(void) {
-  vec3 dir = dirv, nrm = nrmv;
-  float l = (uv.x - 0.5) * len;
-  vU = uv.x;
-  float e = abs(l) / (len * 0.5);
-  float fade = smoothstep(0.0, 1.0, clamp((0.9 - e) / 0.9, 0.0, 1.0));
-  float k = clamp(2.0 * l / len, -1.0, 1.0);
-  vec3 c = origin + (dir * l + nrm * off + fwd * ${BOW.toFixed(3)} * (1.0 - k * k)) * H;
-  float th = uv.y * 6.2831853;
-  vec3 n = cos(th) * nrm + sin(th) * fwd;
-  // The outline's border (from inner out to radius) ripples back along the gash.
-  float r = inner + (radius - inner) * (1.0 + wave * sin((l / len) * ${(2 * Math.PI).toFixed(4)} * ${WAVES.toFixed(1)} + time * ${WAVE_SPEED.toFixed(1)}));
-  vPos = c + n * r * H * mix(tip, 1.0, fade);
-  vNrm = n;
-  vFade = fade;
-  gl_Position = viewProjection * vec4(vPos, 1.0);
+  float phi = mix(${(-BEFORE).toFixed(3)}, ${AFTER.toFixed(3)}, uv.x);
+  float s = (uv.x - tail) / max(head - tail, 1e-4);
+  float w = width * ${STRIPE_ROOM.toFixed(2)} * profile(s) * H;
+  float R = radius * H * (1.0 + drift);
+  vec3 radial = cos(phi) * ax + sin(phi) * ay;
+  // Its path: the arc in the swing's plane (its rim's line), a claw's arcs side by side across it.
+  vec3 rimAt = centre + R * radial + across * off * H;
+  // Its flat face turned toward the striker: its width laid across the path,
+  // square to the way back to the striker (and toward the arc's inside).
+  vec3 tang = -sin(phi) * ax + cos(phi) * ay;
+  vec3 wd = normalize(cross(tang, normalize(toward - rimAt)));
+  if (dot(wd, radial) > 0.0) wd = -wd;
+  vec3 face = normalize(cross(wd, tang));
+  // (Its rim on the path; inward by its width. The glow reaches out past the rim too.)
+  float k = wide > 1.0 ? -(uv.y - 0.5) * wide : 1.0 - uv.y;
+  // Its volume: this sheet bowed out from its face (sheet: +1 or -1), the two meeting at its edges.
+  float bulge = ${(VOLUME ? THICK : 0).toFixed(2)} * w * sin(3.14159265 * uv.y);
+  vec3 p = rimAt + wd * k * w + face * sheet * bulge;
+  // (Its surface's normal: its face, leaning toward its rim or its inner edge as the bow falls away.)
+  float slope = ${THICK.toFixed(2)} * 3.14159265 * cos(3.14159265 * uv.y);
+  vN = normalize(face * sheet + wd * sheet * slope);
+  vS = s; vV = uv.y; vU = uv.x;
+  gl_Position = viewProjection * vec4(p, 1.0);
 }`;
 
-Effect.ShadersStore.slashGashFragmentShader = /* glsl */ `
+Effect.ShadersStore.slashArcFragmentShader = /* glsl */ `
 precision highp float;
-varying vec3 vPos, vNrm;
-varying float vFade, vU;
-uniform vec3 eye, core, tint;
-uniform float power, layer, drawn;
-// colour(c): the core colour toward white only at the very top (c^3).
-vec3 colour(float c) { float w = c * c * c; return core * c + (vec3(1.0) - core) * w; }
+varying float vS, vV, vU;
+uniform vec3 rim, fill, line;
+uniform float age, glow;
+uniform float sTop[${STRIPE_SLICES}], sBot[${STRIPE_SLICES}];
+varying vec3 vN;
 void main(void) {
-  float top = vFade * power;
-  // Drawn so far: from its start, along the swing.
-  if (top <= ${CUT.toFixed(2)} || vU > drawn) discard;
-  float facing = abs(dot(normalize(vNrm), normalize(eye - vPos)));
-  if (layer < 0.5) {
-    // The gash: brightest where it faces the eye, white only at that plateau.
-    float b = top * (0.45 + 0.55 * pow(facing, 0.6));
-    gl_FragColor = vec4(colour(0.52 + 0.48 * b), 1.0);
-  } else if (layer < 1.5) {
-    // A band of its aura coat (an inverted hull: only its back faces show, round what is inside it).
-    gl_FragColor = vec4(tint, 1.0);
-  } else if (layer < 2.5) {
-    // The coat's glow: strongest against the coat, fading to its rim.
-    float a = pow(facing, 1.8) * ${GLOW_GAIN.toFixed(2)} * top;
+  if (vS < 0.0 || vS > 1.0) discard;
+  if (glow > 0.5) {
+    // Its light: soft, strongest along its middle, fading with it.
+    float a = (1.0 - abs(vV - 0.5) * 2.0) * ${GLOW_GAIN.toFixed(2)} * clamp(vS * 1.5, 0.0, 1.0) * (1.0 - age);
     if (a < 0.01) discard;
-    gl_FragColor = vec4(tint, a);
-  } else {
-    // Its light (added): a bloom in the core's colour round the whole coat.
-    float a = pow(facing, 2.2) * ${BLOOM_GAIN.toFixed(2)} * top;
-    if (a < 0.01) discard;
-    gl_FragColor = vec4(colour(0.8) * a, a);
+    gl_FragColor = vec4(fill * a, a);
+    return;
   }
+  // Its shape: a tornado stripe, taken whole off the tornado (stripeShape.ts):
+  // its top and bottom edge in each slice along it, pinned along the arc (its
+  // whole sweep) — so it holds still while the head reveals it and the tail
+  // takes it away, never stretching or squirming; one piece along its length,
+  // its edges the stripe's own.
+  float x = clamp(vU, 0.0, 1.0) * ${(STRIPE_SLICES - 1).toFixed(1)};
+  int i0 = int(floor(x));
+  int i1 = min(i0 + 1, ${STRIPE_SLICES - 1});
+  float fr = x - float(i0);
+  float top = mix(sTop[i0], sTop[i1], fr), bot = mix(sBot[i0], sBot[i1], fr);
+  float y = (vV - 0.5) * 2.0;
+  if (y > top || y < bot) discard;
+  // Cel bands, as the tornado's, nested inside its outline: inked at its edge,
+  // its outline colour, its fill, its white-hot core along its middle.
+  // (Lit by the key light in cel steps when it has volume — a band darker on
+  // its shadowed side, a white glint on its lit top.)
+  float inward = min(top - y, y - bot) / max(0.5 * (top - bot), 1e-3);
+  float band = inward < ${STRIPE_INK_W.toFixed(2)} ? 0.0 : inward < ${STRIPE_LINE_W.toFixed(2)} ? 1.0 : inward < ${STRIPE_FILL_W.toFixed(2)} ? 2.0 : 3.0;
+  float lit = dot(normalize(vN), normalize(vec3(${LIGHT.map((x) => x.toFixed(2)).join(', ')})));
+  if (${VOLUME ? 'true' : 'false'} && band > 0.5 && lit < ${SHADE.toFixed(2)}) band -= 1.0;
+  vec3 c = band < 0.5 ? line * 0.3 : band < 1.5 ? line : band < 2.5 ? fill : rim;
+  if (${VOLUME ? 'true' : 'false'} && band > 1.5 && lit > ${GLINT.toFixed(2)}) c = vec3(1.0);
+  gl_FragColor = vec4(c, 1.0);
 }`;
 
 // ── colours ─────────────────────────────────────────────────────────
-/** Dragon's core, as the source set it: lavender, white only at the top. */
-const DRAGON_CORE: RGB = [0.72, 0.55, 1.0];
+interface SlashColours { rim: RGB; fill: RGB; line: RGB }
 
-interface SlashColours { core: RGB; fill: RGB; line: RGB; glow: RGB }
-
-/** A claw in its type's aura colours (auraPalette.auraGlow): its coat the aura's fill, outline and glow. */
+/** A slash in its type's aura colours (auraPalette.auraGlow): a white-hot rim over the aura's fill, its outline colour inside. */
 function coloursFor(element: string): SlashColours {
-  const [outer, , line, fill] = auraGlow(element);
-  return { core: element === 'Dragon' ? DRAGON_CORE : fill, fill, line, glow: outer };
+  const [, , line, fill] = auraGlow(element);
+  const rim = fill.map((x) => 0.25 * x + 0.75) as RGB;
+  return { rim, fill, line };
 }
 
 // ── API ─────────────────────────────────────────────────────────────
 export interface ClawShot {
   /** The type whose colours it wears. */
   element: string;
-  /** The striker's height (H): the marks are sized to it. */
+  /** The striker's height (H): the slash is sized to it. */
   height: number;
-  /** 3: a claw's rake (the default); 1: a blade's single, longer cut. */
+  /** 3: a claw's rake (the default); 1: a blade's single, wider cut. */
   marks?: 1 | 3;
   /**
    * Which way the striking part was moving as it landed, in the striker's
@@ -183,82 +210,82 @@ export interface ClawShot {
   /** Where the striker stands this frame, and which way it faces (yaw, 0 = +Z). */
   feet(): Vector3;
   facing(): number;
-  /** What it struck: where it stands, and its height (the cut hangs at its near side). */
+  /** What it struck: where it stands, and its height (the slash tears through its near side). */
   target?(): { at: Vector3; height: number } | null;
 }
 
-interface Part { mesh: Mesh; mat: ShaderMaterial }
+interface Part { mesh: Mesh; mat: ShaderMaterial; reach: number }
+
+const easeOutCubic = (x: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+const easeInOut = (x: number) => { const k = Math.min(1, Math.max(0, x)); return k * k * (3 - 2 * k); };
 
 export class SlashFx {
   constructor(private readonly scene: Scene, private readonly camera: Camera) {}
 
-  /** Slash marks (a claw's three, a blade's one) from a blow landing now; resolves when they and their sparks have gone. */
+  /** A follow-through slash (a claw's three arcs, a blade's one) from a blow landing now; resolves when it and its sparks have gone. */
   claw(shot: ClawShot): Promise<void> {
     const scene = this.scene;
     const col = coloursFor(shot.element);
     const H = shot.height;
+    const marks = shot.marks ?? 3;
     const parts: Part[] = [];
-    const tube = (name: string, len: number, off: number, radius: number, layer: number, tint: RGB, hull: boolean, index: number, add = false) => {
-      const mesh = MeshBuilder.CreateGround(name, { width: 1, height: 1, subdivisions: 48 }, scene);
+    const arc = (name: string, off: number, reach: number, width: number, glow: boolean, stripe: Stripe, sheet = 1) => {
+      const mesh = MeshBuilder.CreateGround(name, { width: 1, height: 1, subdivisions: 64 }, scene);
       mesh.isPickable = false;
       mesh.alwaysSelectAsActiveMesh = true; // placed in its shader
-      const mat = new ShaderMaterial(`${name}Mat`, scene, { vertex: 'slashGash', fragment: 'slashGash' }, {
+      const mat = new ShaderMaterial(`${name}Mat`, scene, { vertex: 'slashArc', fragment: 'slashArc' }, {
         attributes: ['position', 'uv'],
-        uniforms: ['viewProjection', 'origin', 'dirv', 'nrmv', 'fwd', 'H', 'len', 'off', 'radius', 'tip', 'inner', 'wave', 'time', 'eye', 'core', 'tint', 'power', 'layer', 'drawn'],
-        needAlphaBlending: true,
+        uniforms: ['viewProjection', 'centre', 'ax', 'ay', 'across', 'toward', 'H', 'radius', 'width', 'off', 'head', 'tail', 'drift', 'wide',
+          'rim', 'fill', 'line', 'age', 'glow', 'sTop', 'sBot', 'sheet'],
+        needAlphaBlending: glow,
       });
-      // A coat band is an inverted hull (its back faces only); the gash and its glow show their front faces.
-      mat.backFaceCulling = true;
-      mat.sideOrientation = hull ? Constants.MATERIAL_CounterClockWiseSideOrientation : Constants.MATERIAL_ClockWiseSideOrientation;
-      mat.alphaMode = add ? Constants.ALPHA_ONEONE : Constants.ALPHA_COMBINE; // the bloom adds light
-      mat.disableDepthWrite = true;
+      mat.backFaceCulling = false;
+      // (Its sheets solid, sorted by depth between themselves; its glow added over, not hiding them.)
+      mat.disableDepthWrite = glow;
+      mat.alphaMode = glow ? Constants.ALPHA_ONEONE : Constants.ALPHA_DISABLE;
       mat.setFloat('H', H);
-      mat.setFloat('len', len);
+      mat.setFloat('width', width);
       mat.setFloat('off', off);
-      mat.setFloat('radius', radius);
-      mat.setFloat('tip', TIP_R);
-      mat.setFloat('layer', layer);
-      mat.setFloat('inner', 0);
-      mat.setFloat('wave', 0);
-      mat.setColor3('core', new Color3(...col.core));
-      mat.setColor3('tint', new Color3(...tint));
+      mat.setFloat('wide', glow ? GLOW_WIDE : 1);
+      mat.setFloat('glow', glow ? 1 : 0);
+      // (Its stripe: its own, off the tornado.)
+      mat.setFloats('sTop', Array.from(stripe.top));
+      mat.setFloats('sBot', Array.from(stripe.bottom));
+      // (Which of its two sheets: bowed out one way across the plane or the other.)
+      mat.setFloat('sheet', glow ? 0 : sheet);
+      mat.setColor3('rim', new Color3(...col.rim));
+      mat.setColor3('fill', new Color3(...col.fill));
+      mat.setColor3('line', new Color3(...col.line));
       mesh.material = mat;
-      mesh.alphaIndex = index;
-      parts.push({ mesh, mat });
+      mesh.alphaIndex = glow ? 19 : 20;
+      parts.push({ mesh, mat, reach });
     };
-
-    // Each gash in its coat, drawn outside in: its light, the glow, the outline, the fill, the core.
-    const lines: { len: number; off: number }[] = [];
-    const marks = shot.marks ?? 3;
-    for (let i = 0; i < marks; i++) {
-      // A claw's rake: the middle mark longest; a blade: one long cut.
-      const k = marks === 1 ? 0 : i - 1;
-      const len = marks === 1 ? LEN * SINGLE_LEN : LEN * (1 - 0.13 * Math.abs(k)), off = k * GAP;
-      lines.push({ len, off });
-      tube(`slashBloom${i}`, len, off, GASH_R * BLOOM_R, 3, col.core, false, 19, true);
-      tube(`slashGlow${i}`, len, off, GASH_R * GLOW_R, 2, col.glow, false, 20);
-      tube(`slashLine${i}`, len, off, GASH_R * LINE_R, 1, col.line, true, 21);
-      // Its border ripples, from the fill out.
-      parts[parts.length - 1].mat.setFloat('inner', GASH_R * FILL_R);
-      parts[parts.length - 1].mat.setFloat('wave', WAVE_AMP);
-      tube(`slashFill${i}`, len, off, GASH_R * FILL_R, 1, col.fill, true, 22);
-      tube(`slashCore${i}`, len, off, GASH_R, 0, col.core, false, 23);
-    }
-
-    // Sparks off every gash, in its colours.
-    const sparks = new GlowSparks(scene, this.camera, SPARKS * 3 + 8, {
-      size: 0.014 * H, lengthPerSpeed: 0.035, tint: col.fill, tintMix: 0.7, gravity: 2.5 * H, drag: 2.2,
-      turbulence: 0.6 * H, splitChance: 0.25, splitCount: 2, secondary: col.core, intensity: 1.3,
+    // A claw's rake (the middle reaching furthest) or a blade's one wide cut: each over its own glow.
+    const rake: { off: number; reach: number }[] = marks === 1 ? [{ off: 0, reach: 1 }]
+      : [-1, 0, 1].map((k) => ({ off: k * GAP, reach: k === 0 ? 1 : OUTER_REACH }));
+    const width = marks === 1 ? BLADE_WIDTH : WIDTH;
+    rake.forEach(({ off, reach }, i) => {
+      // (Each arc a stripe of its own, off the tornado.)
+      const stripe = randomStripe();
+      arc(`slashGlow${i}`, off, reach, width, true, stripe);
+      // (Its two sheets, bowed apart: its volume.)
+      arc(`slashArc${i}`, off, reach, width, false, stripe, 1);
+      if (VOLUME) arc(`slashArcB${i}`, off, reach, width, false, stripe, -1);
     });
 
-    // The cut's direction in the striker's front (x: its right, y: up), and across it.
+    const sparks = new GlowSparks(scene, this.camera, SPARKS * rake.length + 8, {
+      size: 0.014 * H, lengthPerSpeed: 0.035, tint: col.fill, tintMix: 0.7, gravity: 2.5 * H, drag: 2.2,
+      turbulence: 0.6 * H, splitChance: 0.25, splitCount: 2, secondary: col.rim, intensity: 1.3,
+    });
+
+    // The swing's direction in the striker's front (x: its right, y: up).
     const [sx, sy] = (() => {
       const s = shot.swing;
       const n = s ? Math.hypot(s[0], s[1]) : 0;
       return s && n > 1e-6 ? [s[0] / n, s[1] / n] : [-shot.side * Math.SQRT1_2, -Math.SQRT1_2]; // the left hand's: right and down
     })();
     const t0 = performance.now();
-    let last = t0, drawnBefore = 0;
+    let last = t0, struck = false;
     return new Promise((resolve) => {
       let obs: Observer<Scene> | null = null;
       const place = () => {
@@ -270,52 +297,55 @@ export class SlashFx {
         const fwd = new Vector3(Math.sin(yaw), 0, Math.cos(yaw));
         const right = new Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
         const feet = shot.feet();
-        // At the near side of what was struck, clear of the striker.
+        // Contact at the near side of what was struck, clear of the striker.
         let ahead = AT_AHEAD * H, up = AT_UP * H;
         const tgt = shot.target?.();
         if (tgt) {
           const d = tgt.at.subtract(feet);
           d.y = 0;
-          ahead = Math.max(MIN_AHEAD * H, d.length() - TARGET_BODY * tgt.height - BOW * H);
+          ahead = Math.max(MIN_AHEAD * H, d.length() - TARGET_BODY * tgt.height);
           up = TARGET_UP * tgt.height;
         }
-        const origin = feet.add(new Vector3(0, up, 0)).add(fwd.scale(ahead));
-        const tm = t / MARK_WINDOW;
-        const power = ss(0, 0.03, tm) * (1 - ss(0.03, MARK_FADE, tm));
-        // Each gash draws itself along the swing, fast at first.
-        const drawn = 1 - Math.pow(1 - Math.min(1, t / FORM), 2);
-        const dir = right.scale(sx).add(Vector3.Up().scale(sy));
-        const nrm = right.scale(-sy).add(Vector3.Up().scale(sx));
-        const eye = this.camera.globalPosition;
-        for (const { mesh, mat } of parts) {
-          mat.setVector3('origin', origin);
-          mat.setVector3('dirv', dir);
-          mat.setVector3('nrmv', nrm);
-          mat.setVector3('fwd', fwd);
-          mat.setVector3('eye', eye);
-          mat.setFloat('power', power);
-          mat.setFloat('drawn', drawn);
-          mat.setFloat('time', t);
-          mesh.setEnabled(power > CUT);
+        const contact = feet.add(new Vector3(0, up, 0)).add(fwd.scale(ahead));
+        // The swing's plane: forward (out to the contact) and the swing's way; its centre back toward the shoulder.
+        const dir = right.scale(sx).add(Vector3.Up().scale(sy)).normalize();
+        const across = Vector3.Cross(fwd, dir).normalize();
+        const R = Math.min(RADIUS, ahead / H);
+        const centre = contact.subtract(fwd.scale(R * H));
+        // (Its flat face turned toward the striker's chest.)
+        const toward = feet.add(new Vector3(0, 0.55 * H, 0));
+        // The head sweeps out fast and slows (the follow-through); the tail catches it up.
+        const head = easeOutCubic(t / HEAD_T);
+        const tail = easeInOut((t - TAIL_DELAY) / TAIL_T);
+        const age = Math.min(1, t / LIFE);
+        for (const { mesh, mat, reach } of parts) {
+          mat.setVector3('centre', centre);
+          mat.setVector3('ax', fwd);
+          mat.setVector3('ay', dir);
+          mat.setVector3('across', across);
+          mat.setVector3('toward', toward);
+          mat.setFloat('radius', R * reach);
+          mat.setFloat('head', head);
+          mat.setFloat('tail', tail);
+          mat.setFloat('drift', DRIFT * easeInOut(age));
+          mat.setFloat('age', age);
+          mesh.setEnabled(t < LIFE && head > tail + 1e-3);
         }
-        // Sparks fly off each gash's front as it draws: outward from it, and on toward what was hit.
-        if (drawn > drawnBefore) {
-          const from = drawnBefore;
-          drawnBefore = drawn;
-          for (const { len, off } of lines) {
-            for (let n = Math.round(SPARKS * (drawn - from)); n > 0; n--) {
-              const l = (from + Math.random() * (drawn - from) - 0.5) * len;
-              const k = (2 * l) / len;
-              const at = origin.add(dir.scale(l * H)).add(nrm.scale(off * H)).add(fwd.scale(BOW * (1 - k * k) * H));
+        // Contact: as the head tears through, sparks off the point it hit — out along the swing, and back off the target.
+        if (!struck && head >= CONTACT) {
+          struck = true;
+          for (const { off, reach } of rake) {
+            const at = centre.add(fwd.scale(R * reach * H)).add(across.scale(off * H));
+            for (let n = 0; n < SPARKS; n++) {
               const th = Math.random() * Math.PI * 2;
-              const out = nrm.scale(Math.cos(th)).add(fwd.scale(Math.sin(th) * 0.6 + 0.5)).add(dir.scale((Math.random() - 0.5) * 0.8));
+              const out = dir.scale(0.9 + Math.random() * 0.6).add(across.scale(Math.cos(th) * 0.6)).add(fwd.scale(Math.sin(th) * 0.4 - 0.2));
               const speed = (SPARK_SPEED[0] + Math.random() * (SPARK_SPEED[1] - SPARK_SPEED[0])) * H;
               sparks.spawn(at, out.normalize().scale(speed), SPARK_LIFE[0] + Math.random() * (SPARK_LIFE[1] - SPARK_LIFE[0]));
             }
           }
         }
         sparks.update(dt);
-        if (t >= Math.max(MARK_WINDOW, SPARK_TAIL)) {
+        if (t >= LIFE + SPARK_LIFE[1] + 0.1) {
           if (obs) scene.onBeforeRenderObservable.remove(obs);
           for (const { mesh, mat } of parts) { mat.dispose(); mesh.dispose(); }
           sparks.dispose();

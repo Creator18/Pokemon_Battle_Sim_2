@@ -11,7 +11,8 @@
       "always_hits": false,
       "needs_momentum": false,
       "quick_priority": false,
-      "description": "Electric blast. AOE radius 1 (7 tiles). Requires line of sight."
+      "description": "Electric blast. AOE radius 1 (7 tiles). Requires line of sight.",
+      "is_beam": true
     },
     "Thunder": {
       "category": "special",
@@ -50,8 +51,27 @@
       "always_hits": false,
       "needs_momentum": false,
       "quick_priority": false,
-      "description": "Ghost energy projectile. Single target, range 4. 20% chance to lower target's Sp. Def by 1 stage."
+      "description": "Ghost energy projectile. Single target, range 4. 20% chance to lower target's Sp. Def by 1 stage.",
+      "is_ball": true
     },
+    "Aeroblast": {
+        "category": "special",
+        "base_power": 100,
+        "move_type": "Flying",
+        "is_ranged": true,
+        "requires_los": true,
+        "bypasses_los": false,
+        "aoe_radius": 0,
+        "always_hits": false,
+        "needs_momentum": false,
+        "quick_priority": false,
+        "description": "A ball of wind wrapped in two slanted whirlwinds, fired at the target. Single target.",
+        "is_ball": true
+    },
+    "Fire Blast": {"category": "special", "base_power": 110, "move_type": "Fire", "is_ranged": true, "requires_los": true, "bypasses_los": false, "aoe_radius": 0, "always_hits": false, "needs_momentum": false, "quick_priority": false, "description": "A ball of fire wrapped in two slanted whirlwinds; it bursts into a sphere of flame on the target. Single target.", "is_ball": true},
+    "Mystical Fire": {"category": "special", "base_power": 75, "move_type": "Fire", "is_ranged": true, "requires_los": true, "bypasses_los": false, "aoe_radius": 0, "always_hits": false, "needs_momentum": false, "quick_priority": false, "description": "A billowing stream of mystical flame, fire and psychic power together. Single target, range 4.", "is_beam": true},
+    "Fire Spin": {"category": "special", "base_power": 35, "move_type": "Fire", "is_ranged": true, "requires_los": true, "bypasses_los": false, "aoe_radius": 0, "always_hits": false, "needs_momentum": false, "quick_priority": false, "description": "Rings of fire spin up round the target's tile, setting its grass alight. Single target, range 4."},
+    "Whirlpool": {"category": "special", "base_power": 35, "move_type": "Water", "is_ranged": true, "requires_los": true, "bypasses_los": false, "aoe_radius": 0, "always_hits": false, "needs_momentum": false, "quick_priority": false, "description": "Rings of water spin up round the target's tile. Single target, range 4."},
     "Flamethrower": {
       "category": "special",
       "base_power": 90,
@@ -77,7 +97,8 @@
       "always_hits": false,
       "needs_momentum": false,
       "quick_priority": false,
-      "description": "Psychic force blast. AOE radius 1 (7 tiles). 10% chance to lower target's Sp. Def. Requires line of sight."
+      "description": "Psychic force blast. AOE radius 1 (7 tiles). 10% chance to lower target's Sp. Def. A pulse: can clash. Requires line of sight.",
+      "is_pulse": true
     },
     "Moonblast": {
       "category": "special",
@@ -90,7 +111,7 @@
       "always_hits": false,
       "needs_momentum": false,
       "quick_priority": false,
-      "description": "Fairy power drawn from moonlight. Single target, range 4. 30% chance to lower target's Sp. Atk by 1."
+      "description": "Fairy power drawn from moonlight. Single target, range 4. 30% chance to lower target's Sp. Atk by 1.", "is_ball": true
     },
     "Aura Sphere": {
       "category": "special",
@@ -103,7 +124,8 @@
       "always_hits": true,
       "needs_momentum": false,
       "quick_priority": false,
-      "description": "Focused aura blast. Single target, range 4. Never misses. Bypasses barriers and fog."
+      "description": "Focused aura blast. Single target, range 4. Never misses. Bypasses barriers and fog.",
+      "is_ball": true
     },
     "Sludge Bomb": {
       "category": "special",
@@ -142,7 +164,36 @@
       "always_hits": false,
       "needs_momentum": false,
       "quick_priority": false,
-      "description": "Dark energy wave. Single target, range 4. 20% chance to flinch (skip target's movement phase next turn). Requires line of sight."
+      "description": "Dark energy wave. Single target, range 4. 20% chance to flinch (skip target's movement phase next turn). A pulse: can clash. Requires line of sight.",
+      "is_pulse": true
+    },
+    "Terrain Pulse": {
+      "category": "special",
+      "base_power": 50,
+      "move_type": "Normal",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "description": "A pulse drawn from the terrain. Under a terrain (its user on the ground) it takes the terrain's type and its power doubles to 100. A pulse: can clash. Requires line of sight.",
+      "is_pulse": true
+    },
+    "Boomburst": {
+      "category": "special",
+      "base_power": 140,
+      "move_type": "Normal",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "description": "A terrible blast of sound. Single target. A pulse: can clash. Requires line of sight.",
+      "is_pulse": true
     },
     "Focus Blast": {
       "category": "special",
@@ -155,7 +206,8 @@
       "always_hits": false,
       "needs_momentum": false,
       "quick_priority": false,
-      "description": "Maximum power fighting energy sphere. Single target, range 5. 70% accuracy — high risk, massive reward. Requires line of sight."
+      "description": "Maximum power fighting energy sphere. Single target, range 5. 70% accuracy \u2014 high risk, massive reward. Requires line of sight.",
+      "is_ball": true
     },
     "Hex": {
       "category": "special",
@@ -249,7 +301,7 @@
       "needs_momentum": false,
       "quick_priority": false,
       "is_beam": true,
-      "description": "A freezing beam. A beam: can clash. Requires line of sight."
+      "description": "A freezing beam. 10% chance to freeze the target. A beam: can clash. Requires line of sight."
     },
     "Aurora Beam": {
       "category": "special",
@@ -435,6 +487,34 @@
       "description": "A shock wave of rage fired as a beam: always deals exactly 40 HP. Can clash (as 40 power). Requires line of sight.",
       "is_beam": true,
       "fixed_damage": 40
+    },
+    "Tri Attack": {
+      "category": "special",
+      "base_power": 80,
+      "move_type": "Normal",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "is_beam": true,
+      "description": "Three energies fired together as one beam. 20% chance to burn, paralyze or freeze the target. Can clash. Requires line of sight."
+    },
+    "Nihil Light": {
+      "category": "special",
+      "base_power": 100,
+      "move_type": "Dragon",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "description": "Mega Zygarde's signature: a beam of nihil light. Single target, requires line of sight. Clashes as beams do.",
+      "is_beam": true
     }
   }
 }

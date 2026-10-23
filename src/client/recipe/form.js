@@ -18,7 +18,7 @@
 
 import { openFb, half } from './fb.js';
 import { quatFromEuler } from './quat.js';
-import { readTrmtr, uvTransform, layerColors } from './trmtr.js';
+import { readTrmtr, uvTransform, layerColors, emissionColors } from './trmtr.js';
 
 /** @param files Map<string, Uint8Array> of `<id>.trskl|.trmsh|.trmbf|.trmtr` */
 export function parseForm(id, files) {
@@ -57,6 +57,9 @@ export function parseForm(id, files) {
     albedo: m.textures.BaseColorMap ? basename(m.textures.BaseColorMap) : null,
     mask: m.textures.LayerMaskMap ? basename(m.textures.LayerMaskMap) : null,
     alpha: m.alpha,
+    // What it lights by itself (an eye's catchlight), and the mask the highlight follows.
+    emission: emissionColors(m),
+    highlight: m.textures.HighlightMaskMap ? basename(m.textures.HighlightMaskMap) : null,
   }));
   const matByName = new Map(materials.map((m) => [m.name, m]));
 
@@ -151,10 +154,14 @@ export function parseForm(id, files) {
   return { id, bones, shapes: out, materials };
 }
 
-/** Texture names a parsed form needs: every material's albedo and mask. */
+/** Texture names a parsed form needs: every material's albedo and mask (and its highlight mask, if it lights one). */
 export function textureNames(form) {
   const s = new Set();
-  for (const m of form.materials) { if (m.albedo) s.add(m.albedo); if (m.mask) s.add(m.mask); }
+  for (const m of form.materials) {
+    if (m.albedo) s.add(m.albedo);
+    if (m.mask) s.add(m.mask);
+    if (m.highlight && m.emission?.highlight) s.add(m.highlight);
+  }
   return [...s];
 }
 

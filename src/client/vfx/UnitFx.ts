@@ -79,7 +79,32 @@ const FOCUS_STAND = 0.4, FOCUS_BAND = 0.7, FOCUS_OVER = 0.5;
 /** Bone flags the part mask's shader takes (four to a vec4). */
 const PART_BONES = 256;
 const ZERO_FLAGS: number[] = new Array(PART_BONES).fill(0);
-const JFA_STEPS = [64, 32, 16, 8, 4, 2, 1, 1]; // half-res px; reach ≤ 127 half px (+1 pass for accuracy)
+const JFA_STEPS = [128, 64, 32, 16, 8, 4, 2, 1, 1]; // half-res px; reach ≤ 255 half px (+1 pass for accuracy): a ram clash's drawn-out aura reaches far
+
+/**
+ * How far a whole-body aura shows out from the body at its widest — its
+ * outline (the standoff at its pulse's swell, a fire's tongues) and the glow
+ * that spills past it (the outer glow fades out 4.6 half-bands past the hot
+ * line: glowAt) — in the same units as `height`, the body's height as drawn
+ * (the aura is sized to it).
+ */
+export function auraReach(height: number, fire = false): number {
+  const line = STAND * (1 + SWELL * PULSE) * (fire ? 1 + AMP : 1);
+  const glow = THICK * (1 + SWELL * PULSE) * 0.5 * AURA_GLOW_SEEN;
+  return (line + glow) * height / 2;
+}
+/**
+ * How far out a body aura's bright outline stands (world units) on a body
+ * `height` tall, at its pulse's swell: what is seen of it (its glow past
+ * that hardly shows).
+ */
+export function auraLineReach(height: number): number {
+  return STAND * (1 + SWELL * PULSE) * height / 2;
+}
+/** How fast an aura grows to (or shrinks back from) its grown size (/s). */
+const AURA_GROW_RATE = 7;
+/** How far out (in half-bands past the hot line) the outer glow still shows: it fades out at 4.6. */
+const AURA_GLOW_SEEN = 1.8;
 
 export interface AuraOptions {
   /** Pokémon type whose palette to use. */
@@ -101,6 +126,20 @@ export interface AuraOptions {
   fill?: boolean;
   /** The edge shivers in and out round the body (default: with 'tongues'). */
   shiver?: boolean;
+  /**
+   * Charging up an electric attack (Thunderbolt): more lightning earthing
+   * off the body to the ground, in thin strokes. UnitFx itself ignores it.
+   */
+  charging?: boolean;
+  /**
+   * Its beam's heavy and light noise bursts off the body, again and again,
+   * as it does off the Water coat (Flame Charge's fire). UnitFx itself ignores it.
+   */
+  noiseBurst?: boolean;
+  /** A whole-body Flying aura comes with its tornado (the factory's windCoat); false: without it. */
+  wind?: boolean;
+  /** A fire aura's fire sphere in another flame's colours than the aura's own (Brave Bird: a fire aura of the usual colours, its sphere blue fire). */
+  noiseElement?: string;
   /**
    * A strike: the factory works out which body part leads it (true: the
    * attack clip; 'swipe': a claw or a slash, the swipe where it has one) and
@@ -131,6 +170,8 @@ export interface AuraHandle {
   readonly lit: Promise<void>;
   /** Let it go out; resolves when it is gone. */
   release(): Promise<void>;
+  /** Where it has one (the Water coat): burst it off on a hit instead; resolves when it is gone. */
+  burst?(): Promise<void>;
 }
 
 interface Aura {
@@ -169,6 +210,13 @@ interface Unit {
   parts: Map<string, Float32Array>;
   /** The vertex region last uploaded to its meshes (AuraOptions.region), by key. */
   region: string | null;
+  /** Its aura's size (× its own) and the size it eases to: grown out, a ram clash's standoff. */
+  grow: number;
+  growTo: number;
+  /** Its aura drawn out on one side (world, unit: the way it streams), and how far (× its standoff, eased to `stretchTo`). */
+  stretchWay: Vector3 | null;
+  stretch: number;
+  stretchTo: number;
 }
 
 // ── shaders ────────────────────────────────────────────────────────────
@@ -274,6 +322,16 @@ varying vec2 vUV;
 uniform sampler2D textureSampler; // nearest-pixel field (half res)
 uniform sampler2D sceneSampler;   // the finished frame
 uniform sampler2D maskSampler;
+uniform sampler2D noiseSampler;   // the auras' noise, drawn on its own (premultiplied): laid over after tone mapping
+uniform sampler2D overSampler;    // drawn over everything, owned by no unit (addOver with no owner, premultiplied): laid over last
+// Each unit's own layers (premultiplied), so the two stack by distance as
+// wholes: the farther's sphere back (addBack), aura, sphere front (addOver),
+// then the nearer's, the same.
+uniform sampler2D back0Sampler, front0Sampler, back1Sampler, front1Sampler;
+vec3 overOf(vec3 col, vec4 c) {
+  float a = clamp(c.a, 0.0, 1.0);
+  return a > 0.002 ? mix(col, clamp(c.rgb / max(c.a, 1e-3), 0.0, 1.0), a) : col;
+}
 uniform vec2 fieldScale;          // full px per field px
 uniform vec2 res;                 // this pass's size (gl_FragCoord units)
 uniform float time;
@@ -283,6 +341,8 @@ uniform vec4 flags[2];    // lobes (fire), shiver, front-of-other, active
 uniform vec4 flash[2];    // rgb, amount
 uniform vec4 extra[2];    // airborne, extras, zigzag (Electric: the outline is lightning), fill
 uniform vec4 focus[2];    // focused on a body part: -, -, -, on (the field then grows from the part)
+uniform vec4 stretch[2];  // drawn out one way: screen dir (unit, gl px axes), how far (× its standoff), -
+uniform float nearSlot;   // the slot nearest the camera: its aura drawn last, over the other's
 uniform vec3 hue[2];
 uniform vec3 glowCol[8];  // per slot: outer glow, inner glow, line, fill
 uniform vec4 shiverPts[36]; // 72 per slot, 4 per vec4
@@ -317,6 +377,7 @@ float shiverAt(int slot, float theta) {
 }
 
 float h1(float x) { return fract(sin(x) * 43758.5453); }
+
 
 
 
@@ -360,15 +421,28 @@ bool ringAt(int i, vec2 q, vec2 uv, out float off, out float lineAt, out float h
     standHere = max(standHere + shiverAt(i, theta) * ${FLICKER.toFixed(2)} * sh.z * up, 0.5 * standHere);
   // A coat on a hand hugs it closer than an aura round a body.
   if (foc) standHere *= ${FOCUS_STAND.toFixed(2)};
+  // Drawn out one way (a ram clash: streaming back from the clash point):
+  // standing farther out where q lies off the body that way, and not at all
+  // the other way, so its front edge stays put.
+  float drawn = 1.0;
+  if (stretch[i].z > 0.0 && off < 1e8) {
+    vec2 v = q - (seed + 0.5) * fieldScale;
+    float vl = length(v);
+    if (vl > 0.5) { float c = max(dot(v / vl, stretch[i].xy), 0.0); drawn = 1.0 + stretch[i].z * c * c; }
+  }
+  standHere *= drawn;
   // In the air the outline rounds under the body, bowed down under the
   // middle, and stops below the sole.
   if (extra[i].x > 0.5 && extra[i].y < 0.5) {
     float span = max(0.5 * (b.z - b.x), 1.0);
     float u = clamp((q.x - mid.x) / span, -1.0, 1.0);
-    float sole = b.y - ${AIR_SOLE.toFixed(2)} * sh.w - ${GROUND_BOW.toFixed(2)} * sh.w * (1.0 - u * u);
+    // (Drawn out, a ram clash: the cut drops as far as the aura reaches, or it
+    // would slice the drawn-out part flat.)
+    float reachMax = sh.w * (1.0 + max(stretch[i].z, 0.0));
+    float sole = b.y - ${AIR_SOLE.toFixed(2)} * reachMax - ${GROUND_BOW.toFixed(2)} * reachMax * (1.0 - u * u);
     if (q.y < sole) return false;
   }
-  float here = sh.z * beat * up * (foc ? ${FOCUS_BAND.toFixed(2)} : 1.0);
+  float here = sh.z * beat * up * (foc ? ${FOCUS_BAND.toFixed(2)} : 1.0) * drawn;
   lineAt = standHere - 0.5 * here;
   halfW = max(0.5 * here, 1.0);
   if (extra[i].z > 0.5) {
@@ -408,8 +482,16 @@ void main(void) {
   vec4 near = texture2D(textureSampler, vUV);
   vec2 p = gl_FragCoord.xy;
 
-  for (int i = 0; i < 2; i++) {
-    if (flags[i].w < 0.5) continue;
+  for (int k = 0; k < 2; k++) {
+    // The farther one first, the nearer last: where their auras meet, the
+    // nearer's lies over the farther's.
+    int i = nearSlot < 0.5 ? 1 - k : k;
+    // Its spheres' far sides first, under its aura (over the farther unit's all).
+    col = overOf(col, i == 0 ? texture2D(back0Sampler, vUV) : texture2D(back1Sampler, vUV));
+    if (flags[i].w < 0.5) {
+      col = overOf(col, i == 0 ? texture2D(front0Sampler, vUV) : texture2D(front1Sampler, vUV));
+      continue;
+    }
     float mine = i == 0 ? m.r : m.g;
     float other = i == 0 ? m.g : m.r;
     vec4 sh = shape[i];
@@ -494,7 +576,18 @@ void main(void) {
       float L = dot(col, LUM);
       col = mix(col, flash[i].rgb * (0.86 + 0.28 * L), flash[i].a * clamp(mine * 1.5, 0.0, 1.0));
     }
+    // And its spheres' near sides, over its aura.
+    col = overOf(col, i == 0 ? texture2D(front0Sampler, vUV) : texture2D(front1Sampler, vUV));
   }
+  // The auras' noise over it all, in its own colours (never tone mapped nor
+  // fogged, as the aura is not): its linear colours to display (the gamma
+  // the scene's own pass would give them, without its tone mapping), added
+  // on as light — brightening what is behind it, never dimmed by it.
+  vec4 nz = texture2D(noiseSampler, vUV);
+  float na = clamp(nz.a, 0.0, 1.0);
+  if (na > 0.002) col = min(col + pow(clamp(nz.rgb / max(nz.a, 1e-3), 0.0, 1.0), vec3(1.0 / 2.2)) * na, vec3(1.0));
+  // Over it all, what no unit owns (a burst on the target: Fire Blast's): laid on as it is.
+  col = overOf(col, texture2D(overSampler, vUV));
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -533,7 +626,7 @@ export class UnitFx {
   private uniforms = {
     box: new Float32Array(8), shape: new Float32Array(8), flags: new Float32Array(8),
     flash: new Float32Array(8), extra: new Float32Array(8), focus: new Float32Array(8), hue: new Float32Array(6), glow: new Float32Array(24),
-    shiver: new Float32Array(144),
+    shiver: new Float32Array(144), stretch: new Float32Array(8),
   };
 
   constructor(private readonly scene: Scene, private readonly camera: Camera) {
@@ -557,6 +650,48 @@ export class UnitFx {
       m.backFaceCulling = false;
       return m;
     });
+
+    // The auras' noise, drawn on its own (its meshes kept out of the scene's
+    // own pass), the bodies only as depth so it hides behind them; laid over
+    // the frame by the composite after tone mapping.
+    this.noise = new RenderTargetTexture('unitFxNoise', { ratio: 1 }, scene, false, true,
+      Constants.TEXTURETYPE_HALF_FLOAT, false, Texture.BILINEAR_SAMPLINGMODE, true);
+    this.noise.clearColor = new Color4(0, 0, 0, 0);
+    this.noise.activeCamera = camera;
+    this.noise.renderParticles = false;
+    this.noise.renderSprites = false;
+    this.depthOnly = new StandardMaterial('unitFxNoiseDepth', scene);
+    this.depthOnly.disableColorWrite = true;
+    this.depthOnly.disableLighting = true;
+    this.depthOnly.fogEnabled = false;
+    const show = (on: boolean) => { for (const m of this.noiseMeshes) m.isVisible = on; };
+    this.noise.onBeforeRenderObservable.add(() => show(true));
+    this.noise.onAfterRenderObservable.add(() => show(false));
+    // What is drawn over the auras (addOver), likewise on its own, the bodies as depth.
+    this.over = new RenderTargetTexture('unitFxOver', { ratio: 1 }, scene, false, true,
+      Constants.TEXTURETYPE_HALF_FLOAT, false, Texture.BILINEAR_SAMPLINGMODE, true);
+    this.over.clearColor = new Color4(0, 0, 0, 0);
+    this.over.activeCamera = camera;
+    this.over.renderParticles = false;
+    this.over.renderSprites = false;
+    const showOver = (on: boolean) => { for (const [m, at] of this.layered) if (at.layer < 0) m.isVisible = on; };
+    this.over.onBeforeRenderObservable.add(() => showOver(true));
+    this.over.onAfterRenderObservable.add(() => showOver(false));
+    // Each unit's own layers: its spheres' far sides (0, 2) and near sides (1, 3).
+    this.layers = [0, 1, 2, 3].map((k) => {
+      const rt = new RenderTargetTexture(`unitFxLayer${k}`, { ratio: 1 }, scene, false, true,
+        Constants.TEXTURETYPE_HALF_FLOAT, false, Texture.BILINEAR_SAMPLINGMODE, true);
+      rt.clearColor = new Color4(0, 0, 0, 0);
+      rt.activeCamera = camera;
+      rt.renderParticles = false;
+      rt.renderSprites = false;
+      const showIn = (on: boolean) => { for (const [m, at] of this.layered) if (this.layerOf(at) === k) m.isVisible = on; };
+      rt.onBeforeRenderObservable.add(() => showIn(true));
+      rt.onAfterRenderObservable.add(() => showIn(false));
+      return rt;
+    });
+    this.mask.onBeforeRenderObservable.add(() => show(true));
+    this.mask.onAfterRenderObservable.add(() => show(false));
 
     this.partMask = new RenderTargetTexture('unitFxPartMask', { ratio: 1 }, scene, false, true,
       Constants.TEXTURETYPE_UNSIGNED_BYTE, false, Texture.BILINEAR_SAMPLINGMODE, true);
@@ -599,22 +734,28 @@ export class UnitFx {
       this.passes.push(pp);
     }
     this.composite = new PostProcess('unitFxComposite', 'unitFxComposite',
-      ['fieldScale', 'res', 'time', 'box', 'shape', 'flags', 'flash', 'extra', 'focus', 'hue', 'glowCol', 'shiverPts'],
-      ['sceneSampler', 'maskSampler'], half.ratio, null, Texture.NEAREST_SAMPLINGMODE, engine as never, false,
+      ['fieldScale', 'res', 'time', 'box', 'shape', 'flags', 'flash', 'extra', 'focus', 'hue', 'glowCol', 'shiverPts', 'nearSlot', 'stretch'],
+      ['sceneSampler', 'maskSampler', 'noiseSampler', 'overSampler', 'back0Sampler', 'front0Sampler', 'back1Sampler', 'front1Sampler'], half.ratio, null, Texture.NEAREST_SAMPLINGMODE, engine as never, false,
       null, Constants.TEXTURETYPE_HALF_FLOAT);
     this.composite.onApply = (e) => {
       const u = this.uniforms;
       e.setTextureFromPostProcess('sceneSampler', seed);
       e.setTexture('maskSampler', this.mask);
+      e.setTexture('noiseSampler', this.noise);
+      e.setTexture('overSampler', this.over);
+      e.setTexture('back0Sampler', this.layers[0]); e.setTexture('front0Sampler', this.layers[1]);
+      e.setTexture('back1Sampler', this.layers[2]); e.setTexture('front1Sampler', this.layers[3]);
       e.setFloat2('fieldScale', engine.getRenderWidth() / this.composite.width, engine.getRenderHeight() / this.composite.height);
       e.setFloat('time', this.time);
       e.setFloat2('res', this.composite.width, this.composite.height);
       e.setFloatArray4('box', u.box);
       e.setFloatArray4('shape', u.shape);
+      e.setFloatArray4('stretch', u.stretch);
       e.setFloatArray4('flags', u.flags);
       e.setFloatArray4('flash', u.flash);
       e.setFloatArray4('extra', u.extra);
       e.setFloatArray4('focus', u.focus);
+      e.setFloat('nearSlot', this.nearSlot);
       e.setFloatArray3('hue', u.hue);
       e.setFloatArray3('glowCol', u.glow);
       e.setFloatArray4('shiverPts', u.shiver);
@@ -629,8 +770,9 @@ export class UnitFx {
     const used = new Set([...this.units.values()].map((u) => u.slot));
     const slot = [0, 1].find((s) => !used.has(s));
     if (slot === undefined) return;
-    this.units.set(root, { slot, root, meshes, props, skeleton, skin: new SkinSampler(meshes, skeleton), airborne: false, extras: new Set(), auras: [], flash: null, white: 0, parts: new Map(), region: null });
+    this.units.set(root, { slot, root, meshes, props, skeleton, skin: new SkinSampler(meshes, skeleton), airborne: false, extras: new Set(), auras: [], flash: null, white: 0, parts: new Map(), region: null, grow: 1, growTo: 1, stretchWay: null, stretch: 0, stretchTo: 0 });
     this.refreshMaskList();
+    this.refreshNoiseList();
     for (const u of this.units.values()) {
       this.mask.setMaterialForRendering([...u.meshes, ...u.props], this.maskMats[u.slot]);
       this.partMask.setMaterialForRendering([...u.meshes, ...u.props], this.partMats[u.slot]);
@@ -685,7 +827,125 @@ export class UnitFx {
     };
   }
 
+  /**
+   * An aura's noise (its bursts off the outline): drawn over every aura as an
+   * overlay is, and in its own colours — kept out of the scene's pass and laid
+   * over the frame after tone mapping and fog, as the aura itself is.
+   * `mask` paints pure blue in the mask (as addOverlay's). Returns the undo.
+   */
+  addNoise(mesh: AbstractMesh, mask: Material): () => void {
+    const undoOverlay = this.addOverlay(mesh, mask);
+    this.noiseMeshes.add(mesh);
+    mesh.isVisible = false;
+    if (mesh.material) mesh.material.fogEnabled = false;
+    this.refreshNoiseList();
+    return () => {
+      undoOverlay();
+      this.noiseMeshes.delete(mesh);
+      mesh.isVisible = true;
+      this.refreshNoiseList();
+    };
+  }
+
+  /**
+   * Light laid over the frame as the auras' noise is (after tone mapping and
+   * fog, the bodies hiding what is behind them) but under no aura's mask: a
+   * volume of fire rising off a Pokémon (FireFx). Returns the undo.
+   */
+  addLight(mesh: AbstractMesh): () => void {
+    this.noiseMeshes.add(mesh);
+    mesh.isVisible = false;
+    this.refreshNoiseList();
+    return () => {
+      this.noiseMeshes.delete(mesh);
+      mesh.isVisible = true;
+      this.refreshNoiseList();
+    };
+  }
+
+  /**
+   * Drawn over every aura, as it is (blended over, not added as light): the
+   * near side of an inked fire sphere, the aura between its far side (in the
+   * scene) and this. The bodies hide what is behind them. Returns the undo.
+   */
+  /**
+   * `owner`: the unit it belongs to (a sphere round it): then it goes in that
+   * unit's own front layer, so that where the two units overlap the nearer's
+   * whole stack — sphere back, aura, sphere front — lies over the farther's.
+   * With no owner, over everything.
+   */
+  addOver(mesh: AbstractMesh, owner?: TransformNode): () => void {
+    return this.addLayered(mesh, { owner: owner ?? null, front: true, layer: owner ? 0 : -1 });
+  }
+
+  /**
+   * A sphere's far side, owned by `owner`: drawn in that unit's back layer —
+   * under its aura, over the farther unit's whole stack. Returns the undo.
+   */
+  addBack(mesh: AbstractMesh, owner: TransformNode): () => void {
+    return this.addLayered(mesh, { owner, front: false, layer: 0 });
+  }
+
+  /**
+   * Something belonging to no unit (a ball attack's ball in flight): each
+   * frame drawn over the auras while it is nearer the camera than every unit,
+   * under them otherwise — whatever is nearer the camera shows over. Returns the undo.
+   */
+  addFree(mesh: AbstractMesh): () => void {
+    this.free.set(mesh, false);
+    return () => {
+      if (this.free.get(mesh)) { this.layered.delete(mesh); mesh.isVisible = true; this.refreshNoiseList(); }
+      this.free.delete(mesh);
+    };
+  }
+
+  private addLayered(mesh: AbstractMesh, at: { owner: TransformNode | null; front: boolean; layer: number }): () => void {
+    this.layered.set(mesh, at);
+    mesh.isVisible = false;
+    this.refreshNoiseList();
+    return () => {
+      this.layered.delete(mesh);
+      mesh.isVisible = true;
+      this.refreshNoiseList();
+    };
+  }
+
+  /** The layer (0..3) a layered mesh is drawn in now: its owner's slot, its side (-1: the unowned top layer). */
+  private layerOf(at: { owner: TransformNode | null; front: boolean; layer: number }): number {
+    if (at.layer < 0 || !at.owner) return -1;
+    const u = this.units.get(at.owner);
+    return (u ? u.slot : 0) * 2 + (at.front ? 1 : 0);
+  }
+
+  private refreshNoiseList(): void {
+    const bodies = [...this.units.values()].flatMap((u) => [...u.meshes, ...u.props]);
+    // (Drawn every frame the composite is on — with nothing left in it, it
+    // comes out clear: never a stale frame of noise left hanging in the air.)
+    this.noise.renderList = [...bodies, ...this.noiseMeshes];
+    this.noise.setMaterialForRendering(bodies, this.depthOnly);
+    const lists: AbstractMesh[][] = [[], [], [], [], []];
+    for (const [m, at] of this.layered) lists[this.layerOf(at) + 1].push(m);
+    this.over.renderList = [...bodies, ...lists[0]];
+    this.over.setMaterialForRendering(bodies, this.depthOnly);
+    this.layers.forEach((rt, k) => {
+      rt.renderList = [...bodies, ...lists[k + 1]];
+      rt.setMaterialForRendering(bodies, this.depthOnly);
+    });
+  }
+
   private overlays = new Set<AbstractMesh>();
+  /** The auras' noise (addNoise): drawn in `noise`, not the scene's pass. */
+  private noiseMeshes = new Set<AbstractMesh>();
+  private noise: RenderTargetTexture;
+  /** Drawn over the auras (addOver), or under one (addBack): in `over` or a unit's layer, not the scene's pass. */
+  private layered = new Map<AbstractMesh, { owner: TransformNode | null; front: boolean; layer: number }>();
+  private over: RenderTargetTexture;
+  private layers: RenderTargetTexture[] = [];
+  /** Things of no unit's, sorted against the units each frame (addFree): whether each is over the auras now. */
+  private free = new Map<AbstractMesh, boolean>();
+  private depthOnly: StandardMaterial;
+  /** The slot nearest the camera this frame (its aura drawn last). */
+  private nearSlot = 1;
 
   private refreshMaskList(): void {
     this.mask.renderList = [...[...this.units.values()].flatMap((u) => [...u.meshes, ...u.props, ...u.extras]), ...this.overlays];
@@ -706,6 +966,27 @@ export class UnitFx {
 
   /** Flash the body `rgb` (display colour): `hold` s at `peak`, then `fade` s out. */
   /** Hold the unit glowing white by `amount` (0..1) until set again (evolution). */
+  /**
+   * Grow the unit's aura to `k` × its own size (1: back to its own), eased
+   * in over a moment: its outline and glow standing that much farther out.
+   */
+  growAura(root: TransformNode, k: number): void {
+    const u = this.units.get(root);
+    if (u) u.growTo = Math.max(0.2, k);
+  }
+
+  /**
+   * Draw the unit's aura out the way `way` points (world; null or 0 to let it
+   * go), `amount` × its standoff farther on that side, eased in: it streams
+   * that way, the other side as it was.
+   */
+  stretchAura(root: TransformNode, way: Vector3 | null, amount = 0): void {
+    const u = this.units.get(root);
+    if (!u) return;
+    if (way) u.stretchWay = way.clone();
+    u.stretchTo = way ? Math.max(0, amount) : 0;
+  }
+
   setWhite(root: TransformNode, amount: number): void {
     const u = this.units.get(root);
     if (u) u.white = Math.max(0, Math.min(1, amount));
@@ -722,7 +1003,7 @@ export class UnitFx {
     const opts: Required<AuraOptions> = { edge: 'tongues', reach: 'body', ignite: IGNITE, die: DIE,
       // Every aura is a filled shape: the outline in the type's colour, a
       // lighter shade inside it (auraGlow).
-      fill: true, shiver: (options.edge ?? 'tongues') === 'tongues', strike: false as boolean | string, blade: false, focus: '', region: null, ...options };
+      fill: true, shiver: (options.edge ?? 'tongues') === 'tongues', strike: false as boolean | string, blade: false, focus: '', region: null, charging: false, noiseBurst: false, wind: true, noiseElement: '', ...options };
     const pal = auraPalette(opts.element);
     let onLit = () => {};
     let onGone = () => {};
@@ -745,14 +1026,33 @@ export class UnitFx {
     U.flags.fill(0);
     U.flash.fill(0);
     U.shape.fill(0);
+    U.stretch.fill(0);
     U.focus.fill(0);
     this.usePart = [0, 0];
 
     const camPos = this.camera.globalPosition;
     const others = [...this.units.values()];
+    // The one nearest the camera (its aura drawn over the other's).
+    let nearest = -1, nd = Infinity;
+    for (const o of others) { const dd = Vector3.DistanceSquared(camPos, o.root.getAbsolutePosition()); if (dd < nd) { nd = dd; nearest = o.slot; } }
+    this.nearSlot = nearest < 0 ? 1 : nearest;
+    // What belongs to no unit (a ball in flight): over the auras while it is
+    // nearer the camera than every unit, under them (in the scene) otherwise.
+    let moved = false;
+    for (const [m, over] of this.free) {
+      const now = Vector3.DistanceSquared(camPos, m.getAbsolutePosition()) < nd;
+      if (now === over) continue;
+      this.free.set(m, now);
+      if (now) { this.layered.set(m, { owner: null, front: true, layer: -1 }); m.isVisible = false; }
+      else { this.layered.delete(m); m.isVisible = true; }
+      moved = true;
+    }
+    if (moved) this.refreshNoiseList();
     for (const u of this.units.values()) {
       const s = u.slot;
       // Clocks.
+      u.grow += (u.growTo - u.grow) * Math.min(1, dt * AURA_GROW_RATE);
+      u.stretch += (u.stretchTo - u.stretch) * Math.min(1, dt * AURA_GROW_RATE);
       for (const a of u.auras) {
         if (!a.releasing) {
           a.lit = Math.min(1, a.lit + dt / a.opts.ignite);
@@ -796,21 +1096,25 @@ export class UnitFx {
         const half = Math.max(1, (box[3] - box[1]) / 2);
         let stand: number, band: number;
         if (aura.opts.reach === 'body') {
-          stand = Math.max(1, STAND * half * power);
-          band = Math.max(THICK_MIN, THICK * half);
+          stand = Math.max(1, STAND * half * power * u.grow);
+          band = Math.max(THICK_MIN, THICK * half * u.grow);
         } else {
           stand = Math.max(1, TIGHT_STAND * half * power);
           band = Math.max(THICK_MIN * 0.67, stand * BEAM_BAND);
         }
         const standMax = stand * (1 + SWELL * PULSE);
         U.shape.set([power, stand, band, standMax], s * 4);
+        if (u.stretchWay && u.stretch > 1e-3 && aura.opts.reach === 'body') {
+          const d = this.screenWay(u, u.stretchWay);
+          if (d) U.stretch.set([d[0], d[1], u.stretch, 0], s * 4);
+        }
         U.hue.set(aura.hue, s * 3);
         aura.glow.forEach((c, k) => U.glow.set(c, (s * 4 + k) * 3));
         const t = this.time - aura.t0;
         for (let k = 0; k < FLICKER_POINTS; k++) U.shiver[s * FLICKER_POINTS + k] = shiver(k, t);
       }
     }
-    this.setActive(active);
+    this.setActive(active || this.noiseMeshes.size > 0 || this.layered.size > 0);
     const targets = this.scene.customRenderTargets;
     const want = active && (this.usePart[0] > 0 || this.usePart[1] > 0);
     const i = targets.indexOf(this.partMask);
@@ -839,6 +1143,20 @@ export class UnitFx {
    * CPU with this frame's bone matrices — exact to a pixel or two, where the
    * bones alone miss the wingtips and the top of the head.
    */
+  /** `way` (world) as a unit direction on screen from the unit's middle (gl px axes, y up); null if edge-on. */
+  private screenWay(u: Unit, way: Vector3): [number, number] | null {
+    const engine = this.scene.getEngine();
+    const w = engine.getRenderWidth(), h = engine.getRenderHeight();
+    const vpm = this.camera.getViewMatrix().multiply(this.camera.getProjectionMatrix());
+    const vp = this.camera.viewport.toGlobal(w, h);
+    const c = u.root.getAbsolutePosition();
+    const a = Vector3.Project(c, Matrix.IdentityReadOnly, vpm, vp);
+    const b = Vector3.Project(c.add(way), Matrix.IdentityReadOnly, vpm, vp);
+    const dx = b.x - a.x, dy = -(b.y - a.y);
+    const l = Math.hypot(dx, dy);
+    return l < 1e-3 ? null : [dx / l, dy / l];
+  }
+
   private screenBox(u: Unit): [number, number, number, number] {
     const engine = this.scene.getEngine();
     const w = engine.getRenderWidth(), h = engine.getRenderHeight();
@@ -878,10 +1196,14 @@ export class UnitFx {
     const targets = this.scene.customRenderTargets;
     if (on) {
       if (!targets.includes(this.mask)) targets.push(this.mask);
+      if (!targets.includes(this.noise)) targets.push(this.noise);
+      for (const rt of [this.over, ...this.layers]) if (!targets.includes(rt)) targets.push(rt);
       for (const pp of this.passes) this.camera.attachPostProcess(pp);
     } else {
-      const i = targets.indexOf(this.mask);
-      if (i >= 0) targets.splice(i, 1);
+      for (const rt of [this.mask, this.noise, this.over, ...this.layers]) {
+        const i = targets.indexOf(rt);
+        if (i >= 0) targets.splice(i, 1);
+      }
       for (const pp of this.passes) this.camera.detachPostProcess(pp);
     }
   }
@@ -896,5 +1218,17 @@ export class UnitFx {
     if (pi >= 0) this.scene.customRenderTargets.splice(pi, 1);
     this.partMask.dispose();
     this.partMats.forEach((m) => m.dispose());
+    const ni = this.scene.customRenderTargets.indexOf(this.noise);
+    if (ni >= 0) this.scene.customRenderTargets.splice(ni, 1);
+    this.noise.dispose();
+    const oi = this.scene.customRenderTargets.indexOf(this.over);
+    if (oi >= 0) this.scene.customRenderTargets.splice(oi, 1);
+    this.over.dispose();
+    for (const rt of this.layers) {
+      const li = this.scene.customRenderTargets.indexOf(rt);
+      if (li >= 0) this.scene.customRenderTargets.splice(li, 1);
+      rt.dispose();
+    }
+    this.depthOnly.dispose();
   }
 }

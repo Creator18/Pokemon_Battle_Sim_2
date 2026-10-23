@@ -14,7 +14,14 @@ import type { Observer } from '@babylonjs/core/Misc/observable';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import { PointerEventTypes } from '@babylonjs/core/Events/pointerEvents';
 import type { PickingInfo } from '@babylonjs/core/Collisions/pickingInfo';
-import { flareTexture } from './textures.ts';
+import { flareTexture, smokeTexture } from './textures.ts';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
+import { pondWaterMaterial } from './waterMaterial.ts';
+import { grassPatches } from './grass.ts';
+import { lowPolyTree } from './trees.ts';
+import { grassFireMaterial, fireLookKey, type FireLook } from './grassFire.ts';
+import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
+import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
 
 import {
   HEX_GRID,
@@ -23,10 +30,13 @@ import {
   tileKey,
   footprint,
   TerrainType,
+  isGrassTile,
+  tileTint,
+  hexLineTiles,
   type BattleStateJSON,
   type TerrainEntityJSON,
 } from '../../shared/index.ts';
-import { axialToWorld, HEX_SIZE, TILE_SCALE } from '../hexWorld.ts';
+import { axialToWorld, HEX_SIZE, HEX_GAP, TILE_SCALE } from '../hexWorld.ts';
 import { HIGHLIGHT_COLORS, hexToRgb, ENV, type HighlightType } from '../theme.ts';
 
 const TILE_HEIGHT = 0.4;
@@ -66,6 +76,135 @@ const TREE_FALL = Math.PI / 2 - 0.08, TREE_TOPPLE = 0.7, TREE_LIE = 0.5, TREE_SI
 const easeOutCubic = (x: number) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
 const easeInQuad = (x: number) => Math.min(1, Math.max(0, x)) ** 2;
 
+/** A grass fire's smoke: puffs a second off each tile, and how opaque each starts (thin: just for effect). */
+const SMOKE_RATE = 6, SMOKE_ALPHA = 0.95;
+
+/** Triangles along each side of a pond tile's surface (the waves rise on its vertices). */
+const POND_DIVS = 18;
+/** How far in from a shore side (× the tile's circumradius) the waves reach full height. */
+const POND_SHORE = 0.35;
+
+/**
+ * A pond tile's surface: a flat-top hex of circumradius `R` cut into a fine
+ * triangle grid (POND_DIVS a side), each vertex carrying a `fade` — 0 on any
+ * side facing land (`shore[k]`: the side from corner k to k + 1), rising to 1
+ * POND_SHORE × R in — so the waves stand up inside and lie flat at the shore.
+ * Its corners sit where a 6-sided cylinder's do, so neighbours meet exactly.
+ */
+function pondMesh(name: string, R: number, shore: readonly boolean[], scene: Scene): Mesh {
+  const corner = (k: number): [number, number] => [R * Math.cos((k * Math.PI) / 3), R * Math.sin((k * Math.PI) / 3)];
+  const inR = (R * Math.sqrt(3)) / 2;
+  const fadeAt = (x: number, z: number): number => {
+    let f = 1;
+    for (let k = 0; k < 6; k++) {
+      if (!shore[k]) continue;
+      const a = ((k * 60 + 30) * Math.PI) / 180;
+      const d = inR - (x * Math.cos(a) + z * Math.sin(a)); // in from side k
+      const t = Math.min(1, Math.max(0, d / (POND_SHORE * R)));
+      f = Math.min(f, t * t * (3 - 2 * t));
+    }
+    return f;
+  };
+  const positions: number[] = [], fade: number[] = [], indices: number[] = [];
+  const N = POND_DIVS;
+  for (let k = 0; k < 6; k++) {
+    const [ax, az] = corner(k), [bx, bz] = corner(k + 1);
+    const base = positions.length / 3;
+    const at = (i: number, j: number) => base + (i * (i + 1)) / 2 + j; // row i (0 = centre) has i + 1 points
+    for (let i = 0; i <= N; i++) {
+      for (let j = 0; j <= i; j++) {
+        // From the centre out to row i, across from corner k to corner k + 1.
+        const u = i / N, v = i ? j / i : 0;
+        const x = u * (ax + (bx - ax) * v), z = u * (az + (bz - az) * v);
+        positions.push(x, 0, z);
+        fade.push(fadeAt(x, z));
+      }
+    }
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j <= i; j++) {
+        indices.push(at(i, j), at(i + 1, j + 1), at(i + 1, j));
+        if (j < i) indices.push(at(i, j), at(i, j + 1), at(i + 1, j + 1));
+      }
+    }
+  }
+  const vd = new VertexData();
+  vd.positions = positions;
+  vd.indices = indices;
+  const mesh = new Mesh(name, scene);
+  vd.applyToMesh(mesh);
+  mesh.setVerticesData('fade', fade, false, 1);
+  // Shaped in the shader: never culled for its flat bounds.
+  mesh.alwaysSelectAsActiveMesh = true;
+  return mesh;
+}
+
+/**
+ * A rock cut to its hex: a faceted, low-poly boulder of a random shape on a
+ * hex tile of circumradius `R`, never past the tile. Its surface is ROCK_RINGS
+ * rings of ROCK_POINTS points; at every point the hex's own outline (scaled
+ * by ROCK_FOOT) is the limit, and the rock fills some share of it: a profile
+ * up its height (a foot, a random waist, a crown drawn in), cut into by a
+ * few random lumps and clefts round it (low-frequency waves in angle, their
+ * phases drifting with height), leaning a little one way. The crown is an
+ * uneven, off-centre peak. All of it from `seed`, so each rock keeps its own
+ * shape. Flat-shaded, for the facets.
+ */
+const ROCK_FOOT = 0.94, ROCK_HEIGHT: [number, number] = [0.5, 0.85], ROCK_RINGS = 6, ROCK_POINTS = 24;
+function hexRock(name: string, R: number, seed: number, scene: Scene): Mesh {
+  let s = seed || 1;
+  const rand = () => { s = (Math.imul(s ^ (s >>> 15), 2246822507) + 0x9e3779b9) >>> 0; return s / 4294967296; };
+  const span = (lo: number, hi: number) => lo + (hi - lo) * rand();
+  const h = R * span(ROCK_HEIGHT[0], ROCK_HEIGHT[1]);
+  // The hex's edge at angle a (flat-top: corners at multiples of 60°).
+  const edge = (a: number) => {
+    const t = ((a % (Math.PI / 3)) + Math.PI / 3) % (Math.PI / 3) - Math.PI / 6;
+    return (R * Math.cos(Math.PI / 6)) / Math.cos(t);
+  };
+  // Its lumps and clefts: a few waves round it, of random count, size and phase.
+  const waves = Array.from({ length: 4 }, (_, i) => ({ n: 2 + i + Math.floor(rand() * 2), amp: span(0.04, 0.13) / (1 + i * 0.4), ph: rand() * 6.283, drift: span(-2, 2) }));
+  const bump = (a: number, y: number) => waves.reduce((acc, w) => acc + w.amp * Math.sin(w.n * a + w.ph + w.drift * y), 0);
+  // Its profile up the height: the foot full, a random waist, the crown drawn in.
+  const waist = span(0.3, 0.6), waistOut = span(0.95, 1.0), crown = span(0.35, 0.6), round = span(1.1, 1.8);
+  const profile = (y: number) => y < waist
+    ? 1 + (waistOut - 1) * (y / waist)
+    : waistOut + (crown - waistOut) * Math.pow((y - waist) / (1 - waist), round);
+  const leanA = rand() * 6.283, lean = span(0, 0.12) * R;
+  const positions: number[] = [], indices: number[] = [];
+  const at = (i: number, k: number) => i * ROCK_POINTS + (k % ROCK_POINTS);
+  for (let i = 0; i < ROCK_RINGS; i++) {
+    const y = i / (ROCK_RINGS - 1) * 0.9; // the last ring sits under the crown
+    for (let k = 0; k < ROCK_POINTS; k++) {
+      const a = (k / ROCK_POINTS) * Math.PI * 2 + (i ? span(-0.06, 0.06) : 0);
+      const limit = edge(a) * ROCK_FOOT;
+      const fill = Math.min(1, Math.max(0.35, profile(y) * (1 - Math.max(0, bump(a, y))) + (i ? span(-0.03, 0.03) : 0)));
+      let x = Math.cos(a) * limit * fill, z = Math.sin(a) * limit * fill;
+      // Lean the upper rings, then pull back inside the hex if the lean pushed out.
+      x += Math.cos(leanA) * lean * y; z += Math.sin(leanA) * lean * y;
+      const r = Math.hypot(x, z), cap = edge(Math.atan2(z, x)) * ROCK_FOOT;
+      if (r > cap) { x *= cap / r; z *= cap / r; }
+      positions.push(x, i ? h * y * span(0.92, 1.08) : 0, z);
+    }
+  }
+  for (let i = 0; i < ROCK_RINGS - 1; i++) {
+    for (let k = 0; k < ROCK_POINTS; k++) indices.push(at(i, k), at(i, k + 1), at(i + 1, k), at(i, k + 1), at(i + 1, k + 1), at(i + 1, k));
+  }
+  // The crown: an uneven, off-centre peak.
+  const top = positions.length / 3;
+  positions.push(Math.cos(leanA) * lean + span(-0.12, 0.12) * R, h * span(0.95, 1.05), Math.sin(leanA) * lean + span(-0.12, 0.12) * R);
+  const last = ROCK_RINGS - 1;
+  for (let k = 0; k < ROCK_POINTS; k++) indices.push(at(last, k), at(last, k + 1), top);
+  const vd = new VertexData();
+  vd.positions = positions;
+  vd.indices = indices;
+  const normals: number[] = [];
+  VertexData.ComputeNormals(positions, indices, normals);
+  vd.normals = normals;
+  const mesh = new Mesh(name, scene);
+  vd.applyToMesh(mesh, true);
+  mesh.convertToFlatShadedMesh();
+  return mesh;
+}
+
 export class HexBoard {
   readonly root: TransformNode;
   private readonly scene: Scene;
@@ -74,6 +213,23 @@ export class HexBoard {
   private readonly zones = new Map<string, ZoneVisual>();
   private terrainProps = new Map<string, TransformNode>(); // rock/tree feature nodes keyed by "q,r"
   private weatherParticles: ParticleSystem | null = null;
+  /** The pond surface (made on the first pond), and each pond tile's surface mesh by "q,r". */
+  private pondMat: ShaderMaterial | null = null;
+  private ponds = new Map<string, Mesh>();
+  /** Grass on fire: the burning copy of each burning tile's grass, by "q,r", and their material (made on the first fire). */
+  private flames = new Map<string, Mesh>();
+  /** The thin smoke rising off each burning tile. */
+  private smokes = new Map<string, ParticleSystem>();
+  private fireMats = new Map<string, ShaderMaterial>();
+  /** The fire colour (an element: 'Fire', 'BlueFire'…) of the player whose fire lit a tile (setFireHue). */
+  private fireHue: (owner: number) => string = () => 'Fire';
+
+  /** How to colour a grass fire by who lit it (its owner's Fire: blue for blue flames). */
+  setFireHue(fn: (owner: number) => string): void { this.fireHue = fn; }
+
+  /** Told the weather and the terrain on the field at every sync (FieldFx.set). */
+  private fieldListener: ((weather: string | null, terrain: string | null) => void) | null = null;
+  onField(fn: (weather: string | null, terrain: string | null) => void): void { this.fieldListener = fn; }
 
   private mats: {
     tiles: StandardMaterial[]; // shared grassy/earthy tile tints (per-tile jitter)
@@ -81,6 +237,8 @@ export class HexBoard {
     trunk: StandardMaterial;
     canopy: StandardMaterial;
     edge: StandardMaterial;
+    /** Grass burned away: charred earth. */
+    scorched: StandardMaterial;
   };
 
   /** Ends the quake animation running, if any (its promises resolve; the state sync then sets the tiles). */
@@ -113,9 +271,15 @@ export class HexBoard {
       trunk: mat(scene, 'trunk', ENV.trunk),
       canopy: mat(scene, 'canopy', ENV.canopy[3], { emissive: '#152608' }),
       edge: mat(scene, 'edge', ENV.dirtEdge),
+      scorched: mat(scene, 'scorched', '#3D3128', { specular: 0.02 }),
     };
 
+    // Leaves are open fans of triangles: drawn and lit from both faces.
+    this.mats.canopy.backFaceCulling = false;
+    this.mats.canopy.twoSidedLighting = true;
+
     this.buildTiles();
+    this.plantGrass();
     this.installPicking();
   }
 
@@ -125,7 +289,8 @@ export class HexBoard {
       const pos = axialToWorld(q, r, 0);
       // Deterministic per-tile hash for stable material + tiny thickness jitter.
       const h = ((q * 73856093) ^ (r * 19349663)) >>> 0;
-      const matIdx = h % this.mats.tiles.length;
+      // Its tint (shared with the engine: grass grows on all but the earth tint, and burns).
+      const matIdx = tileTint(q, r);
       // Tiny thickness jitter for a natural, hand-placed feel. We keep the TOP
       // surface fixed at TILE_HEIGHT (so tileTop world coords are unchanged and
       // pokémon still land on centers); only the bottom sinks a hair.
@@ -148,6 +313,171 @@ export class HexBoard {
       tile.rotationQuaternion = Quaternion.Identity();
       this.tiles.set(key, tile);
     }
+  }
+
+  /**
+   * Low-poly grass on every grass-coloured tile (not the earthy ones): one of
+   * a few grass patches (grass.ts), instanced on the tile's top and turned by
+   * a multiple of 60° — on the tile, so it rides any heave. syncTerrain and
+   * setTilt hide it where the ground is bare (a pond, a rock, tilted earth).
+   */
+  private plantGrass(): void {
+    const patches = grassPatches(this.scene, (HEX_SIZE * Math.sqrt(3)) / 2);
+    for (const [key, tile] of this.tiles) {
+      const [q, r] = keyToTile(key);
+      if (!isGrassTile(q, r)) continue;
+      const h = ((q * 83492791) ^ (r * 2654435761)) >>> 0;
+      const grass = patches[h % patches.length].createInstance(`grass_${key}`);
+      grass.parent = tile;
+      const height = tile.getBoundingInfo().boundingBox.extendSize.y * 2;
+      grass.position.set(0, height / 2, 0);
+      grass.rotation.y = ((h >> 4) % 6) * (Math.PI / 3);
+      grass.isPickable = false;
+      tile.metadata.grass = grass;
+    }
+  }
+
+  /**
+   * A tile's grass on fire: a copy of its grass patch (same blades, same
+   * place) in the flame material (grassFire.ts), on the tile so it rides any
+   * heave, in its fire's look (`look`). The tile's ordinary grass is hidden
+   * while it burns (it is `bare`).
+   */
+  private setGrassAlight(key: string, tile: Mesh, look: FireLook): void {
+    const grass = tile.metadata.grass as InstancedMesh | undefined;
+    if (!grass) return;
+    const id = fireLookKey(look);
+    if (!this.fireMats.has(id)) this.fireMats.set(id, grassFireMaterial(this.scene, look));
+    // Burning already: it just takes the new look.
+    const lit = this.flames.get(key);
+    if (lit) { lit.material = this.fireMats.get(id)!; return; }
+    const flame = new Mesh(`grassFire_${key}`, this.scene, null, grass.sourceMesh, false, false);
+    flame.isVisible = true;
+    flame.material = this.fireMats.get(id)!;
+    flame.parent = tile;
+    flame.position.copyFrom(grass.position);
+    flame.rotation.copyFrom(grass.rotation);
+    flame.isPickable = false;
+    flame.alwaysSelectAsActiveMesh = true;
+    this.flames.set(key, flame);
+    this.smokes.set(key, this.makeSmoke(key, tile));
+  }
+
+  /**
+   * A thin smoke off a burning tile, just for effect (never enough to cloud
+   * the board): SMOKE_RATE soft grey puffs a second rising slowly from the
+   * flames, swelling as they climb and fading out, drifting with the wind.
+   */
+  private makeSmoke(key: string, tile: Mesh): ParticleSystem {
+    const ps = new ParticleSystem(`grassSmoke_${key}`, 40, this.scene);
+    ps.particleTexture = smokeTexture(this.scene);
+    ps.blendMode = ParticleSystem.BLENDMODE_STANDARD;
+    const top = tile.getBoundingInfo().boundingBox.extendSize.y;
+    ps.emitter = tile;
+    const r = HEX_SIZE * 0.55;
+    // Off the flames themselves, from in among the grass.
+    ps.minEmitBox = new Vector3(-r, top - 0.02, -r);
+    ps.maxEmitBox = new Vector3(r, top + 0.06, r);
+    // Dark grey: fades in off the flames, holds, then thins away as it climbs.
+    ps.addColorGradient(0, new Color4(0.12, 0.12, 0.12, 0));
+    ps.addColorGradient(0.15, new Color4(0.14, 0.14, 0.14, SMOKE_ALPHA));
+    ps.addColorGradient(0.55, new Color4(0.2, 0.2, 0.2, SMOKE_ALPHA * 0.7));
+    ps.addColorGradient(1, new Color4(0.26, 0.26, 0.26, 0));
+    ps.addSizeGradient(0, 0.5);
+    ps.addSizeGradient(1, 1.8);
+    ps.minLifeTime = 2.6;
+    ps.maxLifeTime = 3.8;
+    ps.emitRate = SMOKE_RATE;
+    ps.direction1 = new Vector3(-0.08, 1, -0.08);
+    ps.direction2 = new Vector3(0.08, 1, 0.08);
+    ps.minEmitPower = 0.35;
+    ps.maxEmitPower = 0.55;
+    // Drifts off with the grass's wind (grass.ts's WIND_DIR, roughly).
+    ps.gravity = new Vector3(0.09, 0.02, 0.05);
+    ps.minAngularSpeed = -0.4;
+    ps.maxAngularSpeed = 0.4;
+    ps.minInitialRotation = 0;
+    ps.maxInitialRotation = Math.PI * 2;
+    ps.start();
+    return ps;
+  }
+
+  /**
+   * Set alight, now, the grass fires `state` has that are not burning yet —
+   * as a Flamethrower lands, before the turn's full sync (syncTerrain) at
+   * its end. Only the fires: nothing else of the new state is shown early.
+   */
+  lightGrassFires(state: BattleStateJSON): void {
+    // Fires burning on the board that the state has not (a Flamethrower that
+    // lost its clash): put out, the grass back as it was.
+    const burning = new Set(state.terrain
+      .filter((t) => t.terrain_type === TerrainType.BURN_ZONE && t.grass_fire)
+      .map((t) => tileKey(t.tile[0], t.tile[1])));
+    for (const key of [...this.flames.keys()]) {
+      if (burning.has(key)) continue;
+      this.flames.get(key)!.dispose();
+      this.flames.delete(key);
+      this.smokes.get(key)?.dispose(false);
+      this.smokes.delete(key);
+      const tile = this.tiles.get(key);
+      if (tile) { tile.metadata.bare = false; this.showGrass(tile, true); }
+    }
+    for (const t of state.terrain) {
+      if (t.terrain_type !== TerrainType.BURN_ZONE || !t.grass_fire) continue;
+      const key = tileKey(t.tile[0], t.tile[1]);
+      const tile = this.tiles.get(key);
+      if (!tile) continue;
+      tile.metadata.bare = true;
+      this.showGrass(tile, true);
+      // New fires light; ones already burning take their final look (a clash's winner, or its split).
+      this.setGrassAlight(key, tile, this.fireLook(t));
+    }
+  }
+
+  /**
+   * A beam clash holding: the grass between the two beams' users burns now,
+   * each half in its own beam's fire (`fire`: whether that side's beam is a
+   * fire), on every grass tile there that `before` (the state the turn began
+   * from) had unburnt and bare of anything else. As the clash resolves,
+   * lightGrassFires gives them the outcome: recoloured, kept, or put out.
+   */
+  lightClashFires(before: BattleStateJSON, a: { tile: [number, number]; pid: number; fire: boolean }, b: { tile: [number, number]; pid: number; fire: boolean }): void {
+    if (!a.fire && !b.fire) return;
+    const scorched = new Set(before.scorched ?? []);
+    const taken = new Set(before.terrain.map((t) => tileKey(t.tile[0], t.tile[1])));
+    const look = this.splitLook({ a: a.tile, b: b.tile, oa: a.fire ? a.pid : -1, ob: b.fire ? b.pid : -1 });
+    const line = hexLineTiles(a.tile[0], a.tile[1], b.tile[0], b.tile[1]).slice(1, -1); // between the two
+    for (const [q, r] of line) {
+      const key = tileKey(q, r);
+      const tile = this.tiles.get(key);
+      if (!tile || !isGrassTile(q, r) || scorched.has(key) || taken.has(key)) continue;
+      tile.metadata.bare = true;
+      this.showGrass(tile, true);
+      this.setGrassAlight(key, tile, look);
+    }
+  }
+
+  /** How a grass fire looks: its lighter's fire, or a tied clash's two fires split at the middle. */
+  private fireLook(t: TerrainEntityJSON): FireLook {
+    return t.split ? this.splitLook(t.split) : { a: this.fireHue(t.owner) };
+  }
+
+  /** Two fires split across the middle of the line from `a` to `b` (owner -1: no fire on that side). */
+  private splitLook(s: { a: [number, number]; b: [number, number]; oa: number; ob: number }): FireLook {
+    const pa = this.tileTop(s.a[0], s.a[1]), pb = this.tileTop(s.b[0], s.b[1]);
+    const n = pb.subtract(pa);
+    n.y = 0;
+    return {
+      a: s.oa >= 0 ? this.fireHue(s.oa) : null,
+      b: s.ob >= 0 ? this.fireHue(s.ob) : null,
+      planeP: Vector3.Center(pa, pb),
+      planeN: n.normalize(),
+    };
+  }
+
+  /** Show a tile's grass unless its ground is bare (`tile.metadata.bare`) or tilted. */
+  private showGrass(tile: Mesh, flat: boolean): void {
+    tile.metadata.grass?.setEnabled(flat && !tile.metadata.bare);
   }
 
   /**
@@ -199,9 +529,15 @@ export class HexBoard {
     for (const z of this.zones.values()) {
       z.overlay.dispose();
       z.props.dispose();
-      z.particles?.dispose();
+      z.particles?.dispose(false); // (the texture is shared)
     }
     this.zones.clear();
+    for (const m of this.ponds.values()) m.dispose();
+    this.ponds.clear();
+    for (const m of this.flames.values()) m.dispose();
+    this.flames.clear();
+    for (const p of this.smokes.values()) p.dispose(false); // (the texture is shared)
+    this.smokes.clear();
 
     // Tilted ground (Earthquake's aftermath) leans in toward its quake's centre;
     // every other tile lies flat.
@@ -210,6 +546,21 @@ export class HexBoard {
     for (const t of state.terrain) {
       if (t.terrain_type === TerrainType.TILTED && t.origin) tilted.set(tileKey(t.tile[0], t.tile[1]), t.origin);
     }
+    // Bare ground (no grass): ponds, rocks, and grass burned away (scorched:
+    // charred earth). Grass still burning shows as flame (its own tufts), on
+    // its tint until the fire is out.
+    const fires = new Map(state.terrain
+      .filter((t) => t.terrain_type === TerrainType.BURN_ZONE && t.grass_fire)
+      .map((t) => [tileKey(t.tile[0], t.tile[1]), t] as [string, TerrainEntityJSON]));
+    const scorched = new Set(state.scorched ?? []);
+    const bare = new Set([...scorched, ...state.terrain
+      .filter((t) => t.terrain_type === TerrainType.WATER || t.terrain_type === TerrainType.ROCK)
+      .map((t) => tileKey(t.tile[0], t.tile[1]))]);
+    for (const [key, tile] of this.tiles) {
+      tile.metadata.bare = bare.has(key);
+      tile.metadata.material = scorched.has(key) && !fires.has(key) ? this.mats.scorched : this.mats.tiles[tileTint(...keyToTile(key))];
+      if (fires.has(key)) this.setGrassAlight(key, tile, this.fireLook(fires.get(key)!));
+    }
     for (const [key, tile] of this.tiles) {
       const origin = tilted.get(key);
       this.setTilt(tile, origin ? this.tiltToward(key, origin) : Quaternion.Identity(), 0);
@@ -217,24 +568,66 @@ export class HexBoard {
 
     let sunny = false;
     let rainy = false;
+    let weather: string | null = null;
+    let fieldTerrain: string | null = null;
+    const waterKeys = new Set(state.terrain.filter((t) => t.terrain_type === TerrainType.WATER).map((t) => tileKey(t.tile[0], t.tile[1])));
 
     for (const t of state.terrain) {
       if (t.terrain_type === TerrainType.TILTED) continue; // the tilt is its look
+      if (t.terrain_type === TerrainType.BURN_ZONE && t.grass_fire) continue; // its burning grass is its look
       const type = t.terrain_type as TerrainType;
       if (type === TerrainType.SUNNY_ZONE) {
         sunny = true;
+        weather = type;
         continue;
       }
       if (type === TerrainType.RAIN_ZONE) {
         rainy = true;
+        weather = type;
         continue;
       }
-      if (type === TerrainType.ROCK) this.buildRock(t);
+      // The rest of the field-wide effects: their look is FieldFx's.
+      if (type === TerrainType.HAIL || type === TerrainType.SANDSTORM) { weather = type; continue; }
+      if (type === TerrainType.ELECTRIC_TERRAIN || type === TerrainType.GRASSY_TERRAIN
+        || type === TerrainType.MISTY_TERRAIN || type === TerrainType.PSYCHIC_TERRAIN) { fieldTerrain = type; continue; }
+      if (type === TerrainType.WATER) this.buildPond(t, waterKeys);
+      else if (type === TerrainType.ROCK) this.buildRock(t);
       else if (type === TerrainType.TREE) this.buildTree(t);
       else this.buildZone(t);
     }
 
     this.applyWeather(sunny, rainy);
+    this.fieldListener?.(weather, fieldTerrain);
+  }
+
+  /**
+   * A pond tile: the water surface (waterMaterial) laid over the tile's top,
+   * on the tile itself so it rides any heave. It spans the tile's whole cell,
+   * gap and all, so neighbouring water tiles join with no seam (the cells show
+   * only when highlighted); all ponds share one material, so the waves run on
+   * unbroken across them.
+   */
+  private buildPond(t: TerrainEntityJSON, water: ReadonlySet<string>): void {
+    const [q, r] = t.tile;
+    const key = tileKey(q, r);
+    const tile = this.tiles.get(key);
+    if (!tile) return;
+    if (!this.pondMat) this.pondMat = pondWaterMaterial(this.scene);
+    // Which of its six sides face land: the waves calm to flat along those.
+    const here = axialToWorld(q, r, 0);
+    const shore = [false, false, false, false, false, false];
+    for (const [dq, dr] of [[1, 0], [1, -1], [0, -1], [-1, 0], [-1, 1], [0, 1]]) {
+      const d = axialToWorld(q + dq, r + dr, 0).subtract(here);
+      const side = (Math.round((Math.atan2(d.z, d.x) * 180 / Math.PI - 30) / 60) % 6 + 6) % 6;
+      if (!water.has(tileKey(q + dq, r + dr))) shore[side] = true;
+    }
+    const surface = pondMesh(`pond_${key}`, HEX_SIZE + HEX_GAP, shore, this.scene);
+    surface.parent = tile;
+    const height = tile.getBoundingInfo().boundingBox.extendSize.y * 2;
+    surface.position.set(0, height / 2 + 0.006, 0);
+    surface.material = this.pondMat;
+    surface.isPickable = false;
+    this.ponds.set(key, surface);
   }
 
   /** A tile's tilt: its surface leaning toward `origin`'s tile by QUAKE_TILT. */
@@ -255,6 +648,7 @@ export class HexBoard {
     tile.position.y = TILE_HEIGHT - height / 2 + lift;
     const flat = Math.abs(rot.w) > 0.99999;
     tile.material = flat ? tile.metadata.material : this.mats.edge;
+    this.showGrass(tile, flat);
   }
 
   /**
@@ -357,10 +751,10 @@ export class HexBoard {
     if (base) base.isVisible = true;
     const node = new TransformNode(`rockfeat_${key}`, this.scene);
     const p = this.tileTop(q, r);
-    const boulder = MeshBuilder.CreatePolyhedron(`rock_${key}`, { type: 2, size: 0.62 * TILE_SCALE }, this.scene);
+    // A boulder cut to its hex (hexRock), its own shape per tile.
+    const boulder = hexRock(`rock_${key}`, HEX_SIZE, ((q * 73856093) ^ (r * 19349663)) >>> 0, this.scene);
     boulder.material = this.mats.rock;
-    boulder.position = new Vector3(p.x, TILE_HEIGHT + 0.5 * TILE_SCALE, p.z);
-    boulder.rotation = new Vector3(Math.random(), Math.random() * Math.PI, Math.random());
+    boulder.position = new Vector3(p.x, TILE_HEIGHT, p.z);
     boulder.parent = node;
     boulder.receiveShadows = true;
     this.castShadow(boulder);
@@ -373,18 +767,15 @@ export class HexBoard {
     const key = tileKey(q, r);
     const node = new TransformNode(`treefeat_${key}`, this.scene);
     const p = this.tileTop(q, r);
-    const trunk = MeshBuilder.CreateCylinder(`trunk_${key}`, { diameterTop: 0.16, diameterBottom: 0.24, height: 0.7, tessellation: 6 }, this.scene);
+    // A low-poly pine of its own shape (trees.ts), turned at random.
+    const { trunk, canopy } = lowPolyTree(`tree_${key}`, ((q * 2654435761) ^ (r * 40503) ^ 0x5bd1e995) >>> 0, this.scene);
     trunk.material = this.mats.trunk;
-    trunk.position = new Vector3(p.x, TILE_HEIGHT + 0.35, p.z);
-    trunk.parent = node;
-    this.castShadow(trunk);
-    // Layered canopy cones.
-    for (let k = 0; k < 3; k++) {
-      const cone = MeshBuilder.CreateCylinder(`canopy_${key}_${k}`, { diameterTop: 0, diameterBottom: 0.9 - k * 0.18, height: 0.5, tessellation: 6 }, this.scene);
-      cone.material = this.mats.canopy;
-      cone.position = new Vector3(p.x, TILE_HEIGHT + 0.75 + k * 0.28, p.z);
-      cone.parent = node;
-      this.castShadow(cone);
+    canopy.material = this.mats.canopy;
+    for (const m of [trunk, canopy]) {
+      m.position = new Vector3(p.x, TILE_HEIGHT, p.z);
+      m.parent = node;
+      m.receiveShadows = true;
+      this.castShadow(m);
     }
     node.parent = this.root;
     // Sized to the tile: scaled about its foot.
@@ -464,30 +855,7 @@ export class HexBoard {
   }
 
   private applyWeather(sunny: boolean, rainy: boolean): void {
-    this.weatherParticles?.dispose();
-    this.weatherParticles = null;
-    if (rainy) {
-      const ps = new ParticleSystem('rain', 1200, this.scene);
-      ps.particleTexture = flareTexture(this.scene);
-      ps.color1 = new Color4(0.6, 0.75, 1, 0.6);
-      ps.color2 = new Color4(0.5, 0.6, 0.9, 0.4);
-      ps.emitter = new Vector3(0, 14, 0);
-      ps.minEmitBox = new Vector3(-12, 0, -12);
-      ps.maxEmitBox = new Vector3(12, 0, 12);
-      ps.minSize = 0.05;
-      ps.maxSize = 0.12;
-      ps.minLifeTime = 0.8;
-      ps.maxLifeTime = 1.2;
-      ps.emitRate = 900;
-      ps.direction1 = new Vector3(-0.2, -1, -0.2);
-      ps.direction2 = new Vector3(0.2, -1, 0.2);
-      ps.minEmitPower = 14;
-      ps.maxEmitPower = 20;
-      ps.gravity = new Vector3(0, -30, 0);
-      ps.start();
-      this.weatherParticles = ps;
-    }
-    // Sunny: tint handled by caller via getWeatherTint(); we expose flags.
+    // (The weather's look — rain, sun, hail, sand — is FieldFx's.)
     this.currentWeather = sunny ? 'sunny' : rainy ? 'rain' : 'none';
   }
 

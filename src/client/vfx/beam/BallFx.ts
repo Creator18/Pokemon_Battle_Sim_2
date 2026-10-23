@@ -48,6 +48,8 @@ const ORB_SPARKS = 70; //              thrown out of the burst
  */
 const RINGS = 8, RING_W = 0.22, HOT_RINGS = 3, HOT_W = 0.07;
 const NET_OUT = 1.3, HOT_OUT = 1.45;
+/** A ball whose noise is drawn elsewhere (BallShot.noise): how long that fades in, whole, before the ball starts to grow inside it (s). */
+export const NOISE_FIRST = 0.4;
 
 Effect.ShadersStore.ballOrbVertexShader = /* glsl */ `
 precision highp float;
@@ -65,8 +67,10 @@ Effect.ShadersStore.ballOrbFragmentShader = /* glsl */ `
 precision highp float;
 varying vec3 vP;
 uniform vec3 color, rim;
-uniform float time, cutoff, dark, freq, seed, rings, width;
+uniform float time, cutoff, dark, freq, seed, rings, width, rainbow;
 ${NOISE}
+// A fully saturated colour at hue h (0..1 round the wheel).
+vec3 hue(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
 float h1(float x) { return fract(sin(x * 127.1) * 43758.5453); }
 vec3 turn(vec3 p, vec3 k, float a) { float c = cos(a), s = sin(a); return p * c + cross(k, p) * s + k * dot(k, p) * (1.0 - c); }
 // The filled sphere: churning noise, as the beam's body.
@@ -75,9 +79,10 @@ float fill(vec3 p) {
   vec3 w = vec3(vn(q * 0.55 + vec3(5.3, 0.0, 0.0)), vn(q * 0.55 + vec3(1.7, 8.1, 0.0)), 0.0) - 0.5;
   return fbm(q + w * 1.6);
 }
-// The network: the strongest strand of any ring here.
-float strands(vec3 p) {
+// The network: the strongest strand of any ring here (which: that ring).
+float strands(vec3 p, out float which) {
   float best = 0.0;
+  which = 0.0;
   for (int k = 0; k < 8; k++) {
     if (float(k) >= rings) break;
     float f = float(k) * 7.31 + seed * 13.7;
@@ -94,17 +99,21 @@ float strands(vec3 p) {
     float l = lon - time * speed;
     // Broken into strands along the ring, thinning to the ring's edges.
     float n = fbm(vec3(cos(l) * freq, sin(l) * freq, d * 1.5 + f));
-    best = max(best, n * (1.0 - d * d));
+    float v = n * (1.0 - d * d);
+    if (v > best) { best = v; which = float(k); }
   }
   return best;
 }
 void main(void) {
   vec3 p = normalize(vP);
-  float n = rings > 0.0 ? strands(p) : fill(p);
+  float which = 0.0;
+  float n = rings > 0.0 ? strands(p, which) : fill(p);
   if (n < cutoff) discard;
   float t = clamp((n - cutoff) / max(1.0 - cutoff, 1e-3), 0.0, 1.0);
   vec3 col;
-  if (dark > 0.5) col = color;
+  // A rainbow network (a Mega Evolution's): each strand its own colour round the wheel.
+  if (rainbow > 0.5) col = mix(hue(fract(which / max(rings, 1.0) + seed * 0.1)), vec3(1.0), 0.12);
+  else if (dark > 0.5) col = color;
   else {
     float band = floor(t * 3.0 + 0.5) / 3.0;
     col = color * (0.85 + 0.45 * band);
@@ -129,7 +138,37 @@ export interface BallShot {
   feet?(): Vector3 | null;
   /** Draw a mesh over the caster's aura (UnitFx.addOverlay), with its mask material; returns the undo. */
   overlay?(mesh: AbstractMesh, maskMaterial: Material): () => void;
+  /** Arriving, it goes (no burst): in a clash it becomes its half of the clash's ball. */
+  vanish?: boolean;
+  /** Whole at once, right at `from` (no charge): thrown out of a clash it has won. */
+  instant?: boolean;
+  /** Its size, × a ball attack's (a ball that has won a clash is the clash's ball: BALL_TO_CLASH). */
+  scale?: number;
+  /**
+   * Its heavy and light noise drawn by this instead of its own network and
+   * rings (a Flying ball: tornado spheres, WindFx.orb), given their colours.
+   */
+  noise?: (heavy: RGB, light: RGB, free?: (mesh: AbstractMesh) => () => void) => BallNoise;
+  /** Its noise gone at once as it bursts (another burst takes its place: Fire Blast's sphere of flame). */
+  noiseGoesOnBurst?: boolean;
+  /** Sort a mesh of it against the units by camera distance (UnitFx.addFree), returning the undo: over their auras while nearer. */
+  free?: (mesh: AbstractMesh) => () => void;
 }
+
+/** A ball's heavy and light noise colours (its own, else its type's). */
+export function ballNoiseColours(element: string, colours?: BallColours): [RGB, RGB] {
+  const col = coloursFor(element);
+  return colours ? [colours.heavy, colours.light] : [col.dark, col.hot];
+}
+
+/** A ball's noise drawn elsewhere: each frame, where the ball is, its way, each layer's radius (world) and how strongly it shows. */
+export interface BallNoise {
+  update(at: Vector3, way: Vector3, radii: [number, number], show: [number, number]): void;
+  dispose(): void;
+}
+
+/** A ball × this is as big as a clash's ball. */
+export const BALL_TO_CLASH = 1 / 0.42;
 
 // The wind spiral in the aura mask: pure blue wherever it shows, so the aura
 // leaves it be (UnitFx.addOverlay).
@@ -140,6 +179,10 @@ Effect.ShadersStore.ballDustMaskFragmentShader = Effect.ShadersStore.beamDustFra
 export interface BallHandle {
   /** Let it fly (the body's release). */
   launch(): void;
+  /** Where it is this frame (charging at the mouth, or in flight). */
+  position(): Vector3;
+  /** Gone at once, no burst (it has met a clash: its half of the ball takes over). */
+  vanish(): void;
   /** Resolves on contact — where the hit lands. */
   readonly hit: Promise<void>;
   /** Resolves once the burst has dispersed and everything is gone. */
@@ -178,6 +221,8 @@ class Orb implements BallHandle {
   private dir = new Vector3(0, 0, 1);
   private layers: { mesh: Mesh; mat: ShaderMaterial; cutoff: number; r: number; burst: number; life: number }[] = [];
   private sparks: GlowSparks;
+  private noise: BallNoise | null = null;
+  private unfree: (() => void)[] = [];
   private light: Color3;
   private tick: Observer<Scene>;
   private finished = false;
@@ -199,13 +244,20 @@ class Orb implements BallHandle {
       { color: heavy, rim: heavy, dark: 1, freq: 2.4, cutoff: 0.32, disp: 0.12, r: BEAM_R[1] * NET_OUT, rings: RINGS, width: RING_W },
       { color: light, rim: light, dark: 0, freq: 2.0, cutoff: 0.5, disp: 0.08, r: BEAM_R[1] * HOT_OUT, rings: HOT_RINGS, width: HOT_W },
     ];
+    this.noise = shot.noise ? shot.noise(heavy, light, shot.free) : null;
+    if (this.noise) {
+      // Its noise drawn elsewhere: its core a stable white sphere — not torn,
+      // not churning.
+      for (const l of defs.slice(0, 2)) Object.assign(l, { color: [1, 1, 1] as RGB, rim: [1, 1, 1] as RGB, disp: 0, cutoff: -1 });
+    }
     defs.forEach((l, i) => {
       const mesh = MeshBuilder.CreateSphere(`ballOrb${i}`, { diameter: 2, segments: 24 }, scene);
       const mat = new ShaderMaterial(`ballOrbMat${i}`, scene, { vertex: 'ballOrb', fragment: 'ballOrb' }, {
         attributes: ['position'],
-        uniforms: ['world', 'viewProjection', 'time', 'disp', 'color', 'rim', 'cutoff', 'dark', 'freq', 'seed', 'rings', 'width'],
+        uniforms: ['world', 'viewProjection', 'time', 'disp', 'color', 'rim', 'cutoff', 'dark', 'freq', 'seed', 'rings', 'width', 'rainbow'],
       });
       mat.backFaceCulling = false;
+      mat.setFloat('rainbow', 0);
       mat.setColor3('color', new Color3(...l.color));
       mat.setColor3('rim', new Color3(...l.rim));
       mat.setFloat('dark', l.dark);
@@ -219,6 +271,7 @@ class Orb implements BallHandle {
       mesh.rotationQuaternion = new Quaternion();
       mesh.setEnabled(false);
       this.layers.push({ mesh, mat, cutoff: l.cutoff, r: l.r, burst: l.dark ? NET_BURST : ORB_BURST, life: l.dark ? NET_LIFE : 1 });
+      if (shot.free) this.unfree.push(shot.free(mesh));
     });
     this.sparks = new GlowSparks(scene, fx.camera, 160, {
       size: 0.016 * H, lengthPerSpeed: 0.04, tint: own ? own.light : col.main, tintMix: shot.element === 'Fire' ? 0.15 : 0.65,
@@ -264,8 +317,23 @@ class Orb implements BallHandle {
     this.tick = scene.onBeforeRenderObservable.add(() => this.update());
   }
 
+  position(): Vector3 {
+    return this.at.clone();
+  }
+
+  vanish(): void {
+    this.finish();
+  }
+
   launch(): void {
     if (this.flyT >= 0 || this.finished) return;
+    if (this.shot.instant) {
+      // Whole at once, right where it is thrown from.
+      this.at.copyFrom(this.shot.from());
+      this.chargeSize = 1;
+      const to = this.shot.target().subtract(this.at);
+      if (to.lengthSquared() > 1e-6) this.dir.copyFrom(to.normalize());
+    }
     this.flyT = 0;
     this.launchSize = this.chargeSize;
     this.launchT = this.time;
@@ -288,7 +356,7 @@ class Orb implements BallHandle {
     const dt = Math.min(0.1, this.fx.scene.getEngine().getDeltaTime() / 1000);
     this.time += dt;
     const H = this.shot.height;
-    let size = 1, dissolve = 0;
+    let size = 1, dissolve = 0, noiseSize = -1, noiseIn = 1;
 
     if (this.flyT < 0) {
       // Charging just ahead of the mouth, as a beam's ball does: it swells
@@ -298,7 +366,13 @@ class Orb implements BallHandle {
       const to = this.shot.target().subtract(from);
       if (to.lengthSquared() > 1e-6) this.dir.copyFrom(to.normalize());
       this.at.copyFrom(from.add(this.dir.scale(ROOT * H + CLASH_R * ORB_SIZE * BEAM_R[2] * H)));
-      size = this.chargeSize = 1.2 * (1 - Math.exp(-this.formT / CHARGE_TAU)) * (1 + BALL_PULSE * Math.sin(this.time * BALL_PULSE_RATE));
+      // (Its noise drawn elsewhere: that fades in first, whole, and the
+      // ball grows inside it after.)
+      const grow = this.noise ? Math.max(0, this.formT - NOISE_FIRST) : this.formT;
+      const pulse = 1 + BALL_PULSE * Math.sin(this.time * BALL_PULSE_RATE);
+      size = this.chargeSize = 1.2 * (1 - Math.exp(-grow / CHARGE_TAU)) * pulse;
+      noiseSize = 1.2 * pulse;
+      noiseIn = smoothstep(0, NOISE_FIRST, this.formT);
       this.owed += CHARGE_RATE * dt;
       for (; this.owed >= 1; this.owed -= 1) {
         const d = randomDir();
@@ -314,6 +388,7 @@ class Orb implements BallHandle {
       Vector3.LerpToRef(this.start, this.aimPoint(this.start), k, this.at);
       const moved = this.at.subtract(prev);
       if (moved.lengthSquared() > 1e-8) this.dir.copyFrom(moved.normalize());
+      if (k >= 1 && this.shot.vanish) { this.finish(); return; }
       if (k >= 1) {
         this.burstT = 0;
         this.resolveHit();
@@ -349,21 +424,31 @@ class Orb implements BallHandle {
     });
 
     // Not turned with its flight: the swirl is its own (the noise lives on the sphere).
+    const radii: [number, number] = [0, 0], show: [number, number] = [0, 0];
     this.layers.forEach((l, i) => {
       // Bursting, each layer swells and dissolves on its own clock.
-      let sz = size, gone = 0;
+      let sz = this.noise && i >= 2 && noiseSize >= 0 ? noiseSize : size, gone = 0;
       if (this.burstT >= 0) {
         const k = clamp01(this.burstT / (ORB_BURST_TIME * l.life));
         sz = 1 + (l.burst - 1) * easeOutCubic(k);
         gone = smoothstep(0.1, 1, k);
       }
+      const radius = Math.max(1e-3, l.r * CLASH_R * ORB_SIZE * H * (this.shot.scale ?? 1) * Math.max(0, sz));
+      // (Its noise layers drawn elsewhere, if they are: only its sphere here.)
+      if (this.noise && i >= 2) {
+        radii[i - 2] = radius;
+        show[i - 2] = sz > 0.02 && !(this.shot.noiseGoesOnBurst && this.burstT >= 0) ? (1 - gone) * noiseIn : 0;
+        l.mesh.setEnabled(false);
+        return;
+      }
       l.mesh.setEnabled(sz > 0.02 && gone < 0.999);
       l.mesh.position.copyFrom(this.at);
-      l.mesh.scaling.setAll(Math.max(1e-3, l.r * CLASH_R * ORB_SIZE * H * Math.max(0, sz)));
+      l.mesh.scaling.setAll(radius);
       const m = l.mat;
       m.setFloat('time', this.time + i * 1.7);
       m.setFloat('cutoff', l.cutoff + (1 - l.cutoff) * gone);
     });
+    this.noise?.update(this.at, this.dir, radii, show);
 
     const light = this.fx.light;
     light.position.copyFrom(this.at);
@@ -380,8 +465,141 @@ class Orb implements BallHandle {
     this.fx.light.intensity = 0;
     this.sparks.dispose();
     this.chargeSparks.dispose();
+    this.noise?.dispose();
+    for (const u of this.unfree) u();
     for (const d of this.dust) { d.undo(); d.mask.dispose(); }
     for (const l of [...this.layers, ...this.dust]) { l.mat.dispose(); l.mesh.dispose(); }
     this.resolveDone();
   }
+}
+
+/**
+ * Evolving (its white glow): the ball's wind spiral round the feet (none in
+ * the air) and its heavy-noise network bursting — without the ball — out of
+ * the body, again and again: a shell of the network's strands swelling from
+ * the body out to EVO_BURST × and tearing away as it goes, a new one every
+ * EVO_EVERY s, in EVO_NOISE (light blue); a Mega Evolution's in the colours
+ * of the rainbow at once — each strand of a shell its own colour, round the
+ * colour wheel (the shader's rainbow).
+ */
+const EVO_NOISE: RGB = [0.45, 0.68, 1.0];
+const EVO_EVERY = 0.38, EVO_LIFE = 0.95;
+/** How heavy a shell is as it leaves the body (its noise cutoff: higher, sparser strands). */
+const EVO_CUT = 0.5;
+/** Each shell from this × the body's height (radius) out to EVO_BURST × that. */
+const EVO_FROM = 0.5, EVO_BURST = 2.4;
+
+export interface EvolveShot {
+  /** The body's displayed height, this frame (it changes as it evolves). */
+  height(): number;
+  /** The body's middle, this frame. */
+  centre(): Vector3;
+  /** Where it stands, for the wind spiral; null in the air (none). */
+  feet(): Vector3 | null;
+  /** A Mega Evolution: each burst's strands in the colours of the rainbow. */
+  mega?: boolean;
+  /** Draw a mesh over the aura (UnitFx.addOverlay), with its mask material; returns the undo. */
+  overlay?(mesh: AbstractMesh, maskMaterial: Material): () => void;
+}
+
+export interface EvolveHandle {
+  /** No more bursts, and the spiral dies away; resolves once all of it is gone. */
+  stop(): Promise<void>;
+}
+
+export function evolveAura(fx: BeamFx, shot: EvolveShot): EvolveHandle {
+  const scene = fx.scene;
+  let time = 0, stopT = -1, nextBurst = 0;
+  const shells: { mesh: Mesh; mat: ShaderMaterial; born: number }[] = [];
+  const pool: { mesh: Mesh; mat: ShaderMaterial }[] = [];
+  const shell = () => {
+    const free = pool.pop();
+    if (free) return free;
+    const mesh = MeshBuilder.CreateSphere('evolveBurst', { diameter: 2, segments: 24 }, scene);
+    const mat = new ShaderMaterial('evolveBurstMat', scene, { vertex: 'ballOrb', fragment: 'ballOrb' }, {
+      attributes: ['position'],
+      uniforms: ['world', 'viewProjection', 'time', 'disp', 'color', 'rim', 'cutoff', 'dark', 'freq', 'seed', 'rings', 'width', 'rainbow'],
+    });
+    mat.backFaceCulling = false;
+    mat.setFloat('rainbow', shot.mega ? 1 : 0);
+    mat.setColor3('color', new Color3(...EVO_NOISE));
+    mat.setColor3('rim', new Color3(...EVO_NOISE));
+    mat.setFloat('dark', 1);
+    mat.setFloat('freq', 2.4);
+    mat.setFloat('disp', 0.12);
+    mat.setFloat('rings', RINGS);
+    mat.setFloat('width', RING_W);
+    mesh.material = mat;
+    mesh.isPickable = false;
+    mesh.rotationQuaternion = Quaternion.RotationYawPitchRoll(Math.random() * 6.28, Math.random() * 6.28, 0);
+    return { mesh, mat };
+  };
+  // The wind spiral round the feet, as the ball's (unit-sized: scaled by the height each frame).
+  const dust = [0, 1].map((i) => {
+    const rr = DUST_R * (i ? 1.25 : 1);
+    const mesh = MeshBuilder.CreateCylinder(`evolveDust${i}`, {
+      height: DUST_H * (i ? 0.8 : 1), diameterBottom: rr * 1.2, diameterTop: rr * 2.2, tessellation: 64, cap: 0,
+    }, scene);
+    const mk = (name: string, shader: string, colour: Color3, mode: number) => {
+      const m = new ShaderMaterial(name, scene, { vertex: shader, fragment: shader }, {
+        attributes: ['position', 'uv'], uniforms: ['world', 'viewProjection', 'color', 'time', 'pan', 'cutoff'], needAlphaBlending: true,
+      });
+      m.backFaceCulling = false;
+      m.disableDepthWrite = true;
+      m.alphaMode = mode;
+      m.setColor3('color', colour);
+      m.setFloat('pan', i ? -1.6 : 1.2);
+      return m;
+    };
+    const mat = mk(`evolveDustMat${i}`, 'beamDust', new Color3(0.98, 0.94, 0.86), Constants.ALPHA_PREMULTIPLIED);
+    const mask = mk(`evolveDustMask${i}`, 'ballDustMask', new Color3(1, 1, 1), Constants.ALPHA_MAXIMIZED);
+    mesh.material = mat;
+    mesh.isPickable = false;
+    mesh.setEnabled(false);
+    const undo = shot.overlay ? shot.overlay(mesh, mask) : () => {};
+    return { mesh, mat, mask, undo };
+  });
+  let resolveDone!: () => void;
+  const done = new Promise<void>((r) => { resolveDone = r; });
+  const tick = scene.onBeforeRenderObservable.add(() => {
+    const dt = Math.min(0.1, scene.getEngine().getDeltaTime() / 1000);
+    time += dt;
+    const H = shot.height(), c = shot.centre();
+    // A new shell bursts out of the body every so often (until stopped).
+    if (stopT < 0 && time >= nextBurst) {
+      const s = shell();
+      s.mat.setFloat('seed', Math.random() * 10);
+      shells.push({ ...s, born: time });
+      nextBurst = time + EVO_EVERY;
+    }
+    for (let i = shells.length - 1; i >= 0; i--) {
+      const s = shells[i];
+      const k = clamp01((time - s.born) / EVO_LIFE);
+      if (k >= 1) { s.mesh.setEnabled(false); pool.push(s); shells.splice(i, 1); continue; }
+      s.mesh.setEnabled(true);
+      s.mesh.position.copyFrom(c);
+      s.mesh.scaling.setAll(EVO_FROM * H * (1 + (EVO_BURST - 1) * easeOutCubic(k)));
+      s.mat.setFloat('time', time + s.born * 3.1);
+      // Heavy as it leaves the body, tearing to nothing as it swells.
+      s.mat.setFloat('cutoff', EVO_CUT + (1 - EVO_CUT) * smoothstep(0.1, 1, k));
+    }
+    // The spiral: up round the feet as it starts, dying away once stopped.
+    const feet = shot.feet();
+    const rise = easeOutCubic(time / DUST_RISE), fade = stopT < 0 ? 0 : smoothstep(0, DUST_FADE, time - stopT);
+    dust.forEach(({ mesh, mat, mask }, i) => {
+      const on = !!feet && fade < 1;
+      mesh.setEnabled(on);
+      if (!on || !feet) return;
+      mesh.position.set(feet.x, feet.y + DUST_H * H * 0.5 * (i ? 0.8 : 1), feet.z);
+      mesh.scaling.set(H * (0.4 + 0.6 * rise), H * rise, H * (0.4 + 0.6 * rise));
+      for (const m of [mat, mask]) { m.setFloat('time', time); m.setFloat('cutoff', 0.25 + 0.75 * fade); }
+    });
+    if (stopT >= 0 && !shells.length && fade >= 1) {
+      scene.onBeforeRenderObservable.remove(tick);
+      for (const s of pool) { s.mat.dispose(); s.mesh.dispose(); }
+      for (const d of dust) { d.undo(); d.mask.dispose(); d.mat.dispose(); d.mesh.dispose(); }
+      resolveDone();
+    }
+  });
+  return { stop: () => { if (stopT < 0) stopT = time; return done; } };
 }

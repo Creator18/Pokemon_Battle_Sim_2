@@ -1,6 +1,6 @@
 /**
- * Beam clashes. Two beams fired at each other in one turn meet head-on; the
- * stronger overall output wins:
+ * Clashes. Two beams (or bolts, balls or pulses — any mix) fired at each other in
+ * one turn meet head-on; the stronger overall output wins:
  *
  *   output = base power × charge (unused movement, chargeMultiplier)
  *            × type effectiveness of this beam's type against the other beam's
@@ -23,6 +23,9 @@ export interface ClashSide {
   move: MoveDefinition;
   /** Its charge multiplier (chargeMultiplier). */
   charge: number;
+  /** Its type as used now, if not its own (Terrain Pulse under a terrain), and its power × this. */
+  type?: string;
+  powerMult?: number;
 }
 
 export interface ClashOutcome {
@@ -36,14 +39,14 @@ export interface ClashOutcome {
   margin: number;
 }
 
-/** One beam's overall output against the other beam. */
-export function beamOutput(move: MoveDefinition, charge: number, against: MoveDefinition): number {
-  return move.basePower * charge * getTypeEffectiveness(moveType(move.name), [moveType(against.name)]);
+/** One beam's overall output against the other beam (each in its type as used now, if given). */
+export function beamOutput(move: MoveDefinition, charge: number, against: MoveDefinition, type?: string, againstType?: string, powerMult = 1): number {
+  return move.basePower * powerMult * charge * getTypeEffectiveness(type ?? moveType(move.name), [againstType ?? moveType(against.name)]);
 }
 
 export function resolveClash(a: ClashSide, b: ClashSide): ClashOutcome {
-  const oa = beamOutput(a.move, a.charge, b.move);
-  const ob = beamOutput(b.move, b.charge, a.move);
+  const oa = beamOutput(a.move, a.charge, b.move, a.type, b.type, a.powerMult);
+  const ob = beamOutput(b.move, b.charge, a.move, b.type, a.type, b.powerMult);
   const outputs = { [a.playerId]: oa, [b.playerId]: ob };
   const charges = { [a.playerId]: a.charge, [b.playerId]: b.charge };
   if (Math.abs(oa - ob) < 1e-9) return { winner: null, outputs, charges, margin: 0 };
@@ -51,9 +54,15 @@ export function resolveClash(a: ClashSide, b: ClashSide): ClashOutcome {
   return { winner: w, outputs, charges, margin: hi > 0 ? (hi - lo) / hi : 0 };
 }
 
+/** Can this move clash: a beam (or bolt), a ball attack, a pulse attack — or a ram attack (against another ram). */
+export function clashes(move: MoveDefinition): boolean {
+  return move.isBeam || move.isBall || move.isPulse || move.isRam;
+}
+
 /**
- * Do these two beams meet? Both are beams, and each is aimed at the other
- * where it stands now and can reach it (line of sight from where it fires).
+ * Do these two attacks meet? Both clash (beams, bolts, balls or pulses), and each is
+ * aimed at the other where it stands now and can reach it (line of sight from
+ * where it fires).
  */
 export function beamsMeet(
   a: Pokemon,
@@ -65,7 +74,9 @@ export function beamsMeet(
   tm: TerrainManager,
   grid: ReadonlySet<string> = HEX_GRID,
 ): boolean {
-  if (!aMove.isBeam || !bMove.isBeam || !aTarget || !bTarget) return false;
+  if (!clashes(aMove) || !clashes(bMove) || !aTarget || !bTarget) return false;
+  // (Rams clash with rams, ranged attacks with ranged attacks: never one with the other.)
+  if (aMove.isRam !== bMove.isRam) return false;
   if (!a.isAlive || !b.isAlive) return false;
   const covers = (p: Pokemon, t: Tile) => p.tiles.some((x) => tileKey(x[0], x[1]) === tileKey(t[0], t[1]));
   if (!covers(b, aTarget) || !covers(a, bTarget)) return false;

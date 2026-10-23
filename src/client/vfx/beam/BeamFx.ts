@@ -12,7 +12,8 @@
  *             element's bright colour, and a torn black outer skin, each
  *             panning its noise at its own speed for depth. The whole beam
  *             holds a steady thickness.
- *   swirls    three ribbons wound round the beam (vertex-shader helix),
+ *   swirls    three ribbons wound round the beam (vertex-shader helix) —
+ *             or, with SWIRL_TORNADO, a tornado wrapped round it instead,
  *             spinning fast.
  *   ball      the charging sphere: three nested spheres in the beam's own
  *             materials. During the wind-up it swells toward 120% while
@@ -76,8 +77,24 @@ const SPHERE_R = BEAM_R.map((r) => r * BALL_OVER);
 const EGG_BACK = 1.15, EGG_FRONT = 2.2, EGG_IN = 0.25;
 const EGG_TIP = OVAL_END / BALL_OVER;
 const SWIRL_R = 0.30, SWIRL_W = 0.05, SWIRLS = 3;
+/**
+ * The swirls a tornado instead (one tube round the beam, the aura tornado's
+ * streaks on it, winding round and running toward the target), not three
+ * ribbons: how many streaks round it (an integer, so they meet seamlessly),
+ * how far they wind per radius along, how fast they turn and run.
+ */
+const SWIRL_TORNADO = true, TORNADO_STREAKS = 4, TORNADO_TWIST = 0.55, TORNADO_SPIN = 9, TORNADO_FLOW = 3.2;
+/**
+ * On a billowing beam (burstAlong, Flamethrower) its tornado bursts, over and
+ * over: TORNADO_BURSTS swellings along it at once, each riding from the root
+ * to the front in TORNADO_RIDE s, swelling it to TORNADO_SWELL × its radius,
+ * its streaks tearing apart where it swells (as the puffs do).
+ */
+const TORNADO_BURSTS = 3, TORNADO_RIDE = 0.55, TORNADO_SWELL = 2.0;
+/** Beams whose tornado bursts too, though they do not billow (no puffs): their types. */
+const TORNADO_BURSTING = new Set(['Water']);
 export const DUST_R = 0.55, DUST_H = 0.32;
-const GROW = 0.32; //                 s, the front from the ball to the target
+const GROW = 0.6; //                   s, the front from the ball to the target (beams and bolts alike)
 /**
  * On contact the beam splits: ARCS thinner beams leave the contact point,
  * spread over the top and round the sides of the target (never under it, or
@@ -134,6 +151,11 @@ const PUFFS = 7, PUFF_RIDE = 0.7, PUFF_BURST = 2.2, PUFF_TEAR = 0.85;
 /** Its starting egg bursts in a loop too (as the tip does): shells swelling to ROOT_BURST × — forward only, their back held at the egg's, clear of the attacker. */
 const ROOT_BURST = 1.7;
 /** A billowing beam's column wears heavier dark noise: its cutoff × this. */
+/** A bolt's heavy noise round it (Ice Beam): its column's dark skin, this much thinner, and sparser. */
+const BOLT_SKIN_R = 0.7;
+const BOLT_SKIN = 1.08;
+/** A bolt's starting egg: its heavy noise lighter than a beam's egg (ROOT_SKIN). */
+const BOLT_ROOT_SKIN = 0.87;
 const BILLOW_SKIN = 0.8;
 /**
  * A tied clash's ball bursts as a ball attack's does (BallFx): its half
@@ -142,6 +164,12 @@ const BILLOW_SKIN = 0.8;
  * CLASH_BURST_SPARKS sparks thrown out of it.
  */
 const CLASH_BURST = 2.2, CLASH_BURST_TIME = 0.42, CLASH_NET_BURST = 4.5, CLASH_NET_LIFE = 1.6, CLASH_BURST_SPARKS = 40;
+/**
+ * A hemisphere burst on its own (BeamFx.hemiBurst): how long it takes to grow
+ * in (s); and the lighter version's — its time (× the clash's), its swell
+ * (× the clash's growth past full), and its dark skin's tear (sparser).
+ */
+const HEMI_GROW = 0.07, HEMI_LIGHT = 0.7, HEMI_LIGHT_SWELL = 0.45, HEMI_LIGHT_SKIN = 0.88;
 /**
  * Over each half, a little of the OTHER beam's dark noise: a sparse torn skin
  * (cutoff CLASH_MIX_CUT) in its colour, a shade outside its own skin
@@ -194,8 +222,8 @@ float fbm(vec3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { v += a
 const MASTER_FRAG = /* glsl */ `
 precision highp float;
 varying float vAlong, vTh;
-uniform vec3 color, rim;
-uniform float time, pan, cutoff, dark;
+uniform vec3 color, rim, color2, color3;
+uniform float time, pan, cutoff, dark, multi;
 uniform vec2 nscale;
 ${NOISE}
 void main(void) {
@@ -214,6 +242,11 @@ void main(void) {
   vec3 c;
   if (dark > 0.5) {
     c = color;
+    // A patchwork skin (BeamPalette.skins): its colours in drifting patches.
+    if (multi > 0.5) {
+      float m = vn(q * 0.32 + vec3(11.0, 3.0, 7.0));
+      c = m < 0.4 ? color : m < 0.6 ? color2 : color3;
+    }
   } else {
     // Posterized brightness, and a hot rim right at the torn edge (anime style).
     float band = floor(t * 3.0 + 0.5) / 3.0;
@@ -364,6 +397,69 @@ void main(void) {
   gl_FragColor = vec4(color * a, a);
 }`;
 
+// The swirls as a tornado: an open tube round the beam (its unit cylinder laid
+// along the aim, out to the swirls' radius), the aura tornado's voronoi
+// streaks on it, two-toned, winding round and running toward the target.
+Effect.ShadersStore.beamTornadoVertexShader = /* glsl */ `
+precision highp float;
+attribute vec3 position;
+uniform mat4 viewProjection;
+uniform vec3 origin, aim, side, upv, camPos;
+uniform float len, rad, time, burst;
+varying float vU, vAng, vAlong, vFacing, vBulge;
+void main(void) {
+  float u = position.y + 0.5;
+  vec3 n = normalize(position.x * side + position.z * upv);
+  // (Bursting: swellings riding it toward the front, none at its root.)
+  float w = fract(u * ${TORNADO_BURSTS.toFixed(1)} - time / ${TORNADO_RIDE.toFixed(2)});
+  float k = burst * pow(max(0.0, sin(3.14159265 * w)), 3.0) * smoothstep(0.0, 0.15, u);
+  vBulge = k;
+  vec3 c = origin + aim * u * len + n * rad * (1.0 + ${(TORNADO_SWELL - 1).toFixed(2)} * k);
+  vU = u;
+  vAng = atan(position.x, position.z);
+  vAlong = u * len / max(rad, 1e-4);
+  // (Seen edge-on, a shell looks thicker: its streaks brighter there.)
+  vFacing = abs(dot(n, normalize(camPos - c)));
+  gl_Position = viewProjection * vec4(c, 1.0);
+}`;
+Effect.ShadersStore.beamTornadoFragmentShader = /* glsl */ `
+precision highp float;
+varying float vU, vAng, vAlong, vFacing, vBulge;
+uniform vec3 color, hot;
+uniform float time, fade;
+vec2 hash2(vec2 p) {
+  p = mod(p, ${TORNADO_STREAKS.toFixed(1)});
+  return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453);
+}
+float voronoi(vec2 x, float t) {
+  vec2 n = floor(x), f = fract(x);
+  float md = 5.0;
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
+    vec2 g = vec2(float(i), float(j));
+    vec2 o = 0.5 + 0.5 * sin(t + 6.2831 * hash2(n + g));
+    vec2 r = g + o - f;
+    md = min(md, dot(r, r));
+  }
+  return md;
+}
+void main(void) {
+  // (Round it: TORNADO_STREAKS cells, seamless; along it in radii, winding.)
+  float x = vAng * ${TORNADO_STREAKS.toFixed(1)} / 6.2831853 - vAlong * ${TORNADO_TWIST.toFixed(2)} - time * ${TORNADO_SPIN.toFixed(1)} * 0.1;
+  float y = vAlong * 0.35 - time * ${TORNADO_FLOW.toFixed(2)};
+  float f = voronoi(vec2(x, y), time * 0.6);
+  float v = pow(f, 0.75);
+  // (Cel shaded, as the aura tornadoes: its streaks in flat bands of the
+  // beam's own tones, each outlined dark.)
+  // (Torn apart where it bursts: fewer, thinner streaks.)
+  float cut = 0.44 + 0.28 * vBulge;
+  float on = step(cut, v), ink = step(cut - 0.06, v) - on;
+  vec3 c = v > 0.7 ? hot : color;
+  c = mix(c, color * 0.25, ink);
+  float a = max(on * 0.92, ink * 0.9) * (1.0 - 0.35 * vBulge);
+  a *= smoothstep(0.0, 0.06, vU) * (1.0 - smoothstep(0.92, 1.0, vU)) * fade;
+  gl_FragColor = vec4(c * a, a);
+}`;
+
 Effect.ShadersStore.beamDustVertexShader = /* glsl */ `
 precision highp float;
 attribute vec3 position;
@@ -405,6 +501,8 @@ void main(void) {
 // ── colours ────────────────────────────────────────────────────────────
 interface Colours {
   hot: RGB; main: RGB; accent: RGB; dark: RGB;
+  /** A patchwork skin's other colours (BeamPalette.skins). */
+  dark2?: RGB; dark3?: RGB;
   /** The torn black skin's dissolve threshold (lower = more of it). */
   skinCut?: number;
 }
@@ -417,19 +515,26 @@ interface Colours {
 export function coloursFor(element: string, palette?: BeamPalette): Colours {
   const [outer, , typeLine, typeFill] = auraGlow(element);
   // A move's own palette (beamMoves) in place of its type's outline and fill.
-  const line = palette?.skin ?? typeLine, fill = palette?.body ?? typeFill;
+  const line = palette?.skins?.[0] ?? palette?.skin ?? typeLine, fill = palette?.body ?? typeFill;
   const same = Math.hypot(line[0] - fill[0], line[1] - fill[1], line[2] - fill[2]) < 0.05;
   const skin = same ? outer : line;
   const main = fill.map((x) => x * 1.1) as RGB;
   const hot = fill.map((x) => (1 + x) * 0.62) as RGB;
   const lum = 0.2126 * skin[0] + 0.7152 * skin[1] + 0.0722 * skin[2];
   // A black skin reads best a little heavier (as the Dark beam had it).
-  return { hot, main, accent: hot.map((x) => x * 1.1) as RGB, dark: skin, skinCut: lum < 0.1 ? 0.48 : 0.58 };
+  const more = palette?.skins && palette.skins.length > 1
+    ? { dark2: palette.skins[1], dark3: palette.skins[2] ?? palette.skins[1] } : {};
+  return { hot, main, accent: hot.map((x) => x * 1.1) as RGB, dark: skin, skinCut: lum < 0.1 ? 0.48 : 0.58, ...more };
 }
 
 // ── API ────────────────────────────────────────────────────────────────
-/** A beam's own colours, over its type's: `skin` its heavy (dark) noise, `body` its fill (the hot core is drawn from it). */
-export interface BeamPalette { skin: RGB; body: RGB }
+/**
+ * A beam's own colours, over its type's: `skin` its heavy (dark) noise, `body`
+ * its fill (the hot core is drawn from it). `skins` (up to three) makes the
+ * heavy noise a patchwork of those colours instead (Tri Attack: fire,
+ * electricity and ice), in patches drifting with the noise.
+ */
+export interface BeamPalette { skin: RGB; body: RGB; skins?: RGB[] }
 
 export interface BeamShot {
   element: string;
@@ -439,6 +544,37 @@ export interface BeamShot {
   burstAlong?: boolean;
   /** How thick it is (1 = as the others): its column, eggs and puffs (not a clash's ball). */
   thickness?: number;
+  /**
+   * Twin beams (from two cannons): shared by the pair, so both start the same
+   * distance out — on one line across `fwd()` (the attacker's facing), as far
+   * forward as the one that needs it most (each writes how far, by its id).
+   */
+  twin?: { fwd(): Vector3; reach: Map<number, number> };
+  /**
+   * How far ahead of `mouth` its ball sits at least (× its height; default
+   * ROOT, clear of a face). A cannon's muzzle needs none: 0 puts the ball's
+   * back at the muzzle (still kept clear of the body).
+   */
+  root?: number;
+  /**
+   * `target()` is already the point on the target's near side it meets (twin
+   * or triple beams share one, so they converge on it): no TARGET_BODY step
+   * back from it.
+   */
+  exactTarget?: boolean;
+  /**
+   * A bolt (Ice Beam, Thunderbolt in a clash): its starting egg, charge,
+   * sparks and clash ball as a beam's, but no column or tip — the caller
+   * draws a bolt from `origin()` to `end()` in their place.
+   */
+  bolt?: boolean;
+  /** No starting egg, charge or launch either (Thunderbolt: its bolt leaves the body itself). */
+  eggless?: boolean;
+  /**
+   * Its front is at the clash point the moment it opens (no column racing
+   * out): a ball's half of a clash's ball, opened as the ball arrives.
+   */
+  instant?: boolean;
   /** The attacker's displayed height, world units ("model height"). */
   height: number;
   /** Where the mouth is this frame (it follows the animation). */
@@ -476,11 +612,23 @@ export interface BeamShot {
    * streaked over this half.
    */
   clash?: BeamClash;
+  /**
+   * Its clash half's noise (the skin, and the other's streaks over it) drawn
+   * by this instead (a tornado ball: the moving tornado's half, WindFx.hemi).
+   */
+  clashNoise?: () => ClashNoise;
+}
+
+/** A clash half's noise drawn elsewhere: each frame, the clash point, the way in, its radius (world) and how strongly it shows. */
+export interface ClashNoise {
+  update(at: Vector3, aim: Vector3, radius: number, show: number): void;
+  dispose(): void;
 }
 
 /**
  * A beam clash, as one beam sees it. `at` is where the beams meet (it moves
- * as one pushes the other back). Once `over` the clash has ended for this
+ * as one pushes the other back) — null until they have: till then the beam
+ * races at its target as ever, and stops where the other's front met it. Once `over` the clash has ended for this
  * beam: the winner's beam then runs on into the loser and splits round it,
  * as an ordinary hit. `edge` (0..1) is how far this beam is winning: its egg
  * swells (CLASH_EDGE_EGG) and its noise grows heavier (CLASH_EDGE_SKIN).
@@ -491,7 +639,7 @@ export function clashBallRadius(size: number): number {
 }
 
 export interface BeamClash {
-  at(): Vector3;
+  at(): Vector3 | null;
   size: number;
   other?: string;
   /** The other beam's own colours, if it has them. */
@@ -500,11 +648,17 @@ export interface BeamClash {
   edge?(): number;
   /** A tie: the ball bursts as a ball attack's does on contact (CLASH_BURST) while the beams fade. */
   burst?(): boolean;
+  /** Draw this beam's half of the clash's ball (default yes; a twin's second beam leaves it to the first). */
+  ball?: boolean;
 }
 
 export interface BeamHandle {
   /** Where the beam leaves the attacker (its ball's centre), this frame. */
   origin(): Vector3;
+  /** Where its front is, this frame (its origin until it launches). */
+  end(): Vector3;
+  /** The tip of its starting egg (its front, toward the target), this frame. */
+  eggTip(): Vector3;
   /** The launch: the mouth has opened (the loop clip begins). */
   open(): void;
   /** Resolves when the front reaches the target — where the hit lands. */
@@ -546,10 +700,94 @@ export class BeamFx {
       e.setFloat2('center', this.blurCenter.x, this.blurCenter.y);
       e.setFloat('strength', this.blurStrength);
     };
+    // The clash hemisphere's shader, compiled now: a lone burst (hemiBurst)
+    // lives less time than a first compile takes, and would never show.
+    const warm = MeshBuilder.CreateSphere('hemiWarm', { diameter: 2, segments: 4 }, scene);
+    warm.setEnabled(false);
+    const warmMat = new ShaderMaterial('hemiWarmMat', scene, { vertex: 'beamClash', fragment: 'beamClash' }, {
+      attributes: ['position', 'uv'],
+      uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'egg', 'split', 'time', 'disp', 'pan',
+        'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
+    });
+    warmMat.backFaceCulling = false;
+    warmMat.forceCompilation(warm, () => { warm.dispose(); warmMat.dispose(); });
   }
 
   fire(shot: BeamShot): BeamHandle {
     return new Beam(this, shot);
+  }
+
+  /**
+   * A clash's hemisphere burst on its own (a quick step's launch and blow):
+   * its heavy noise alone — the torn dark skin, in the same shader — in
+   * `element`'s beam colours, its curved side facing `dir`, `size` its
+   * radius. It grows in, then bursts as a tied clash's ball's skin does:
+   * swelling out and tearing away. `light`: the lighter version — sparser,
+   * a smaller swell, quicker.
+   */
+  hemiBurst(at: Vector3, dir: Vector3, size: number, element: string, light = true): void {
+    const scene = this.scene;
+    const col = coloursFor(element);
+    const aim = dir.normalizeToNew();
+    const upv0 = Math.abs(aim.y) > 0.95 ? new Vector3(1, 0, 0) : new Vector3(0, 1, 0);
+    const side = Vector3.Cross(upv0, aim).normalize();
+    const upv = Vector3.Cross(aim, side).normalize();
+    // (The clash shader flattens its +y side and keeps the dome below: turn
+    // that side back, so the dome faces `dir`.)
+    const turn = new Quaternion();
+    Quaternion.FromUnitVectorsToRef(new Vector3(0, -1, 0), aim, turn);
+    const k = light ? HEMI_LIGHT : 1;
+    const layers = [
+      { color: col.dark, rim: col.dark, dark: 1, pan: 5.5, nscale: [0.28, 3.0], cutoff: col.skinCut ?? 0.58, disp: 0.6,
+        tear: light ? HEMI_LIGHT_SKIN : CLASH_SKIN },
+    ];
+    const parts = layers.map((l, i) => {
+      const mesh = MeshBuilder.CreateSphere(`hemiBurst${i}`, { diameter: 2, segments: 24 }, scene);
+      const mat = new ShaderMaterial(`hemiBurstMat${i}`, scene, { vertex: 'beamClash', fragment: 'beamClash' }, {
+        attributes: ['position', 'uv'],
+        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'egg', 'split', 'time', 'disp', 'pan',
+          'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
+      });
+      mat.backFaceCulling = false;
+      mat.setColor3('color', new Color3(...l.color));
+      mat.setColor3('rim', new Color3(...l.rim));
+      mat.setFloat('dark', l.dark);
+      mat.setFloat('pan', l.pan * FLOW);
+      mat.setVector2('nscale', new Vector2(l.nscale[0], l.nscale[1]));
+      mat.setFloat('disp', l.disp);
+      mat.setFloat('egg', 0);
+      mat.setFloat('multi', 0);
+      mat.setVector3('origin', at); mat.setVector3('aim', aim); mat.setVector3('side', side); mat.setVector3('upv', upv);
+      const r = size;
+      mat.setFloat('rad', r);
+      mesh.material = mat;
+      mesh.isPickable = false;
+      mesh.rotationQuaternion = turn.clone();
+      mesh.position.copyFrom(at);
+      return { mesh, mat, r, base: l.cutoff * l.tear, dark: true };
+    });
+    const grow = HEMI_GROW * k, life = CLASH_BURST_TIME * k;
+    let t = 0;
+    const obs = scene.onBeforeRenderObservable.add(() => {
+      t += Math.min(0.05, scene.getEngine().getDeltaTime() / 1000);
+      const g = easeOutCubic(t / grow);
+      const bt = Math.max(0, t - grow);
+      let alive = false;
+      for (const p of parts) {
+        const kk = clamp01(bt / (life * (p.dark ? CLASH_NET_LIFE : 1)));
+        const swell = 1 + ((p.dark ? CLASH_NET_BURST : CLASH_BURST) - 1) * (light ? HEMI_LIGHT_SWELL : 1) * easeOutCubic(kk);
+        const gone = smoothstep(0.1, 1, kk);
+        p.mesh.setEnabled(gone < 0.999);
+        if (gone < 0.999) alive = true;
+        p.mesh.scaling.setAll(Math.max(1e-3, p.r * Math.max(0.05, g) * swell));
+        p.mat.setFloat('time', t + (p.dark ? 1.7 : 0));
+        p.mat.setFloat('cutoff', p.base + (1 - p.base) * gone);
+      }
+      if (!alive) {
+        scene.onBeforeRenderObservable.remove(obs);
+        for (const p of parts) { p.mesh.dispose(); p.mat.dispose(); }
+      }
+    });
   }
 
   /** The radial blur, attached only while some beam is using it. */
@@ -586,6 +824,8 @@ const easeOutCubic = (t: number) => 1 - Math.pow(1 - clamp01(t), 3);
 const easeOutBack = (t: number) => { const c = 1.7; const x = clamp01(t) - 1; return 1 + (c + 1) * x * x * x + c * x * x; };
 
 interface Layer { mat: ShaderMaterial; cutoff: number }
+
+let beamIds = 0;
 
 class Beam implements BeamHandle {
   readonly front: Promise<void>;
@@ -630,6 +870,7 @@ class Beam implements BeamHandle {
   private rootShells: { mesh: Mesh; layer: Layer; i: number; phase: number }[] = [];
   /** A clash's hemisphere: the beam's three layers, then the other beam's skin, sparse. */
   private hemis: { mesh: Mesh; layer: Layer; r: number; tear: number }[] = [];
+  private clashNoise: ClashNoise | null = null;
   private slashes: { mesh: Mesh; layer: Layer }[] = [];
   private swirls: { mesh: Mesh; mat: ShaderMaterial }[] = [];
   private dust: { mesh: Mesh; mat: ShaderMaterial }[] = [];
@@ -654,13 +895,22 @@ class Beam implements BeamHandle {
       { color: col.main, rim: col.hot, dark: 0, pan: 9.0, nscale: [0.5, 2.1], cutoff: 0.42, disp: 0.5 },
       { color: col.dark, rim: col.dark, dark: 1, pan: 5.5, nscale: [0.28, 3.0], cutoff: col.skinCut ?? 0.58, disp: 0.6 },
     ];
+    // A patchwork skin (BeamPalette.skins): the heavy noise in several colours.
+    const multi = col.dark2 ? { color2: col.dark2, color3: col.dark3 ?? col.dark2 } : null;
     type LayerDef = (typeof LAYERS)[number];
     const masterMat = (name: string, shader: string, l: LayerDef): Layer => {
       const mat = new ShaderMaterial(name, scene, { vertex: shader, fragment: shader }, {
         attributes: ['position', 'uv'],
         uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'egg', 'split', 'time', 'disp', 'pan',
-          'color', 'rim', 'cutoff', 'dark', 'nscale'],
+          'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
       });
+      // (Only its own skin: a clash's streaks of the other beam keep their one colour.)
+      const patchwork = !!l.dark && !!multi && l.color === col.dark;
+      mat.setFloat('multi', patchwork ? 1 : 0);
+      if (patchwork && multi) {
+        mat.setColor3('color2', new Color3(...multi.color2));
+        mat.setColor3('color3', new Color3(...multi.color3));
+      }
       mat.backFaceCulling = false;
       mat.setColor3('color', new Color3(...l.color));
       mat.setColor3('rim', new Color3(...l.rim));
@@ -789,8 +1039,27 @@ class Beam implements BeamHandle {
       this.slashes.push({ mesh, layer });
     }
 
-    // Swirls.
-    for (let i = 0; i < SWIRLS; i++) {
+    // Swirls: a tornado round the beam (SWIRL_TORNADO), or three ribbons.
+    if (SWIRL_TORNADO) {
+      const mesh = MeshBuilder.CreateCylinder('beamTornado', { height: 1, diameter: 2, tessellation: 64, subdivisions: 48, cap: Mesh.NO_CAP }, scene);
+      const mat = new ShaderMaterial('beamTornadoMat', scene, { vertex: 'beamTornado', fragment: 'beamTornado' }, {
+        attributes: ['position'],
+        uniforms: ['viewProjection', 'origin', 'aim', 'side', 'upv', 'camPos', 'len', 'rad', 'time', 'burst', 'color', 'hot', 'fade'],
+        needAlphaBlending: true,
+      });
+      mat.backFaceCulling = false;
+      mat.disableDepthWrite = true;
+      // (Laid over the beam by its alpha, not added: its dark ink shows.)
+      mat.alphaMode = Constants.ALPHA_PREMULTIPLIED;
+      // (In its type's own colour: the beam's skin colour, its brightest
+      // streaks the body's — not the near-white hot core.)
+      mat.setColor3('color', new Color3(...col.dark));
+      mat.setColor3('hot', new Color3(...col.main));
+      mesh.material = mat;
+      this.prepare(mesh);
+      this.swirls.push({ mesh, mat });
+    }
+    for (let i = 0; i < (SWIRL_TORNADO ? 0 : SWIRLS); i++) {
       const mesh = new Mesh(`beamSwirl${i}`, scene);
       fx.strip.applyToMesh(mesh);
       const mat = new ShaderMaterial(`beamSwirlMat${i}`, scene, { vertex: 'beamSwirl', fragment: 'beamSwirl' }, {
@@ -851,6 +1120,23 @@ class Beam implements BeamHandle {
   origin(): Vector3 {
     return this.anchor.clone();
   }
+
+  end(): Vector3 {
+    // (Not yet poured: its front is where it will leave from.)
+    return (this.opened ? this.endPt : this.anchor).clone();
+  }
+
+  eggTip(): Vector3 {
+    return this.eggTipPt.clone();
+  }
+
+  /** Its starting egg's tip this frame (BeamHandle.eggTip). */
+  private eggTipPt = new Vector3();
+
+  /** Its front this frame (BeamHandle.end). */
+  private endPt = new Vector3();
+  /** In a clash, how far its front was racing before it met the other's (its pace). */
+  private raceTo = 0;
 
   open(): void {
     if (this.opened) return;
@@ -947,10 +1233,11 @@ class Beam implements BeamHandle {
   private updateClash(origin: Vector3, aim: Vector3, side: Vector3, up: Vector3, contactAt: number,
     cut: (base: number) => number, dissolve: number): void {
     const clash = this.shot.clash;
-    const ended = this.clashEndT >= 0 ? clamp01((this.time - this.clashEndT) / CLASH_END) : 0;
+    // (A ball's half, won, goes at once: it has become the whole ball flying on — RecipeFactory.clashBall.)
+    const ended = this.clashEndT >= 0 ? (this.shot.instant ? 1 : clamp01((this.time - this.clashEndT) / CLASH_END)) : 0;
     if (clash && this.frontDone && this.burstT < 0 && clash.burst?.()) {
       this.burstT = this.time;
-      const c = clash.at();
+      const c = clash.at() ?? this.endPt;
       for (let k = 0; k < CLASH_BURST_SPARKS; k++) {
         const d = randomDir();
         this.streamSparks.spawn(c.add(d.scale(0.2 * this.H)), d.scale((2.5 + Math.random() * 3) * this.H), 0.25 + Math.random() * 0.3);
@@ -961,12 +1248,16 @@ class Beam implements BeamHandle {
     // Bursting, it no longer fades with the beam's release: it swells and disperses on its own clock.
     const g = clash && this.frontDone && !this.finished
       ? easeOutCubic((this.time - this.frontT) / CLASH_GROW) * (bursting ? 1 : 1 - smoothstep(0.3, 1, dissolve)) * (1 - ended) : 0;
-    const at = clash ? clash.at() : origin.add(aim.scale(contactAt));
+    const at = (clash ? clash.at() : null) ?? origin.add(aim.scale(contactAt));
     const toAim = new Quaternion();
     Quaternion.FromUnitVectorsToRef(Y, aim, toAim);
+    if (this.shot.clashNoise && !this.clashNoise && clash && clash.ball !== false) this.clashNoise = this.shot.clashNoise();
+    let noiseR = 0, noiseShow = 0;
     this.hemis.forEach(({ mesh, layer, r, tear }, i) => {
-      mesh.setEnabled(g > 0.01);
-      if (g <= 0.01 || !clash) return;
+      mesh.setEnabled(g > 0.01 && clash?.ball !== false);
+      if (g <= 0.01 || !clash || clash.ball === false) return;
+      // (Its noise drawn elsewhere: the skin's size and fade go to that instead.)
+      const elsewhere = !!this.clashNoise && i >= BEAM_R.length - 1;
       mesh.position.copyFrom(at);
       mesh.rotationQuaternion!.copyFrom(toAim);
       // The dark noise (the skin, and the other beam's streaks over it) bursts further and lingers.
@@ -979,6 +1270,11 @@ class Beam implements BeamHandle {
         mesh.setEnabled(gone < 0.999);
       }
       mesh.scaling.setAll(Math.max(1e-3, CLASH_R * r * clash.size * g * swell));
+      if (elsewhere) {
+        mesh.setEnabled(false);
+        if (i === BEAM_R.length - 1) { noiseR = CLASH_R * r * clash.size * g * swell; noiseShow = gone >= 0 ? 1 - gone : 1; }
+        return;
+      }
       const m = layer.mat;
       m.setVector3('origin', origin); m.setVector3('aim', aim); m.setVector3('side', side); m.setVector3('upv', up);
       m.setFloat('rad', r * this.H);
@@ -986,6 +1282,7 @@ class Beam implements BeamHandle {
       const base = layer.cutoff * tear;
       m.setFloat('cutoff', gone >= 0 ? base + (1 - base) * gone : cut(base));
     });
+    this.clashNoise?.update(at, aim, noiseR, noiseR > 1e-3 ? noiseShow : 0);
   }
 
   /**
@@ -998,7 +1295,7 @@ class Beam implements BeamHandle {
     heavier: (base: number, layer: number) => number): void {
     const H = this.H;
     const clashing = !!this.shot.clash && this.clashEndT < 0;
-    const on = !clashing && !this.finished;
+    const on = !clashing && !this.finished && !this.shot.bolt; // (a bolt has no tip)
     if (on && this.splitT >= 0 && this.loopT < 0) this.loopT = this.time;
     // Grows in with the front; released, swells out as it disperses (as a ball attack's burst).
     const grownIn = clamp01(len / (SPHERE_R[BEAM_R.length - 1] * H * this.W * 2));
@@ -1081,6 +1378,8 @@ class Beam implements BeamHandle {
     return (this.relCycleT - this.loopT) / TIP_LOOP + phase;
   }
   private relCycleT = -1;
+  /** Its id among its twins (BeamShot.twin). */
+  private readonly id = ++beamIds;
   /** Its thickness (BeamShot.thickness). */
   private get W(): number { return this.shot.thickness ?? 1; }
 
@@ -1091,8 +1390,10 @@ class Beam implements BeamHandle {
   }
 
   private setBeamVisible(on: boolean): void {
-    for (const t of this.tubes) t.mesh.setEnabled(on);
-    for (const s of this.swirls) s.mesh.setEnabled(on);
+    // A bolt keeps only its column's heavy noise (BOLT_SKIN), round the bolt, tying it to its egg.
+    const skinOnly = !!this.shot.bolt;
+    this.tubes.forEach((t, i) => t.mesh.setEnabled(on && (!skinOnly || (i === this.tubes.length - 1 && !this.shot.eggless))));
+    for (const s of this.swirls) s.mesh.setEnabled(on && !skinOnly);
   }
 
   private update(): void {
@@ -1122,13 +1423,22 @@ class Beam implements BeamHandle {
     // Its ball sits ROOT ahead of the mouth — further if the attacker's own
     // body reaches out there, so the ball's back (and all of the beam) stays
     // clear of it. Measured every frame, across the widest the ball can get
-    // (BALL_MAX_BACK × its height); the most it has reached is kept.
+    // (BALL_MAX_BACK × its height, × its thickness); the most it has reached is kept.
     if (this.shot.bodyAhead) {
-      this.bodyClear = Math.max(this.bodyClear, this.shot.bodyAhead(mouth, aim, BALL_MAX_BACK * H));
+      this.bodyClear = Math.max(this.bodyClear, this.shot.bodyAhead(mouth, aim, BALL_MAX_BACK * H * this.W));
     }
-    const origin = mouth.add(aim.scale(Math.max(ROOT * H, this.bodyClear + this.backR * 1.05)));
+    let start = Math.max((this.shot.root ?? ROOT) * H, this.bodyClear + this.backR * 1.05);
+    const twin = this.shot.twin;
+    if (twin) {
+      // Level with its twin: as far forward (along the facing) as either needs.
+      const fwd = twin.fwd(), along = Math.max(0.2, Vector3.Dot(aim, fwd)), base = Vector3.Dot(mouth, fwd);
+      twin.reach.set(this.id, base + start * along);
+      start = Math.max(start, (Math.max(...twin.reach.values()) - base) / along);
+    }
+    const origin = mouth.add(aim.scale(start));
     this.anchor.copyFrom(origin);
-    const reach = Math.max(0.2, dist - ROOT * H);
+    // From where it actually starts (its ball, however far out) to the target.
+    const reach = Math.max(0.2, dist - start);
     // It meets the target on its near side, not at its middle — or, in a
     // clash, the other beam right at the clash point.
     // A clash ends for this beam once it says so (the winner runs on into the loser).
@@ -1140,8 +1450,13 @@ class Beam implements BeamHandle {
     const edge = clashing ? clamp01(this.shot.clash!.edge?.() ?? 0) : this.clashEndT >= 0 ? clamp01(this.shot.clash!.edge?.() ?? 0) : 0;
     // Winning, its torn skin (the last layer) grows heavier.
     const heavier = (base: number, layer: number) => (layer === BEAM_R.length - 1 ? base * (1 - CLASH_EDGE_SKIN * edge) : base);
-    const targetR = clashing ? 0 : TARGET_BODY * (this.shot.targetSize?.() ?? H);
+    const targetR = clashing || this.shot.exactTarget ? 0 : TARGET_BODY * (this.shot.targetSize?.() ?? H);
     const contactAt = Math.max(0.2, reach - targetR);
+    // A clash not yet met: the front races at the target; met, it stops where
+    // the two fronts crossed (the target is then the clash point), its pace
+    // still set by the whole way it was racing (no jump back).
+    const met = clashing && !!this.shot.clash!.at();
+    if (clashing && !met) this.raceTo = contactAt;
 
     // Release: everything dissolves (cutoff → 1).
     let dissolve = 0;
@@ -1177,27 +1492,32 @@ class Beam implements BeamHandle {
     // Pouring: the ball becomes the egg the column runs out of.
     const egg = this.opened ? smoothstep(SNAP + POP, SNAP + POP + EGG_IN, this.t) : 0;
     // How far its ball reaches back toward the attacker (the outermost layer, the egg's back).
-    this.backR = SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * (1 + CLASH_EDGE_EGG * edge) * (1 + (EGG_BACK - 1) * egg);
+    // Winning a clash, its egg swells (CLASH_EDGE_EGG) — not a bolt's: its egg keeps its size.
+    const swell = 1 + CLASH_EDGE_EGG * (this.shot.bolt ? 0 : edge);
+    this.backR = SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell * (1 + (EGG_BACK - 1) * egg);
+    // Its tip: the outermost layer's front, drawn out as the ball becomes the egg.
+    this.eggTipPt.copyFrom(origin).addInPlace(aim.scale(
+      SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell * (1 + (EGG_FRONT - 1) * egg)));
     this.balls.forEach(({ mesh, layer }, i) => {
       layer.mat.setFloat('egg', egg);
       mesh.position.copyFrom(origin);
-      mesh.scaling.setAll(Math.max(1e-3, SPHERE_R[i] * H * this.W * ball * (1 + CLASH_EDGE_EGG * edge)));
+      mesh.scaling.setAll(Math.max(1e-3, SPHERE_R[i] * H * this.W * ball * swell));
       mesh.rotationQuaternion!.copyFrom(poleToAim);
-      mesh.setEnabled(ball > 0.02);
+      mesh.setEnabled(ball > 0.02 && !this.shot.eggless);
       const m = layer.mat;
       m.setVector3('origin', origin); m.setVector3('aim', aim); m.setVector3('side', side); m.setVector3('upv', up);
       m.setFloat('rad', BEAM_R[i] * H);
       m.setFloat('time', this.time + i * 1.7); // as its tube
-      m.setFloat('cutoff', cut(heavier(layer.cutoff, i) * (i === BEAM_R.length - 1 ? ROOT_SKIN : 1)));
+      m.setFloat('cutoff', cut(heavier(layer.cutoff, i) * (i === BEAM_R.length - 1 ? (this.shot.bolt ? BOLT_ROOT_SKIN : ROOT_SKIN) : 1)));
     });
     // A billowing beam's starting egg bursts in a loop once it pours: shells
     // swelling forward from it (their back held at the egg's), tearing as they go.
     this.rootShells.forEach(({ mesh, layer, i, phase }) => {
-      const on = this.opened && egg > 0.05 && ball > 0.02 && !this.finished;
+      const on = this.opened && egg > 0.05 && ball > 0.02 && !this.finished && !this.shot.eggless;
       mesh.setEnabled(on);
       if (!on) return;
       const k = (this.time / TIP_LOOP + phase) % 1;
-      const base = SPHERE_R[i] * H * this.W * ball * (1 + CLASH_EDGE_EGG * edge);
+      const base = SPHERE_R[i] * H * this.W * ball * swell;
       const r = base * (1 + (ROOT_BURST - 1) * easeOutCubic(k));
       layer.mat.setFloat('egg', egg);
       // Forward by however much it has swelled, so its back stays where the egg's is.
@@ -1214,7 +1534,7 @@ class Beam implements BeamHandle {
     });
 
     // Sparks swirling into the ball while it charges.
-    if (!this.opened && !this.releasing) {
+    if (!this.opened && !this.releasing && !this.shot.eggless) {
       this.owed.charge += CHARGE_RATE * dt;
       for (; this.owed.charge >= 1; this.owed.charge -= 1) {
         const d = randomDir();
@@ -1229,7 +1549,7 @@ class Beam implements BeamHandle {
     const light = this.fx.light;
     light.position.copyFrom(origin);
     light.diffuse = new Color3(...(this.col.main.map((x) => Math.min(1, x)) as RGB));
-    light.intensity = (this.opened ? 2.6 : 1.4 * ball) * (1 - dissolve);
+    light.intensity = this.shot.eggless ? 0 : (this.opened ? 2.6 : 1.4 * ball) * (1 - dissolve);
     light.range = 5 * H;
 
     if (!this.opened) return;
@@ -1237,7 +1557,7 @@ class Beam implements BeamHandle {
 
     // Launch: the radial blur from the root.
     if (this.blurring) {
-      const k = t / BLUR_LIFE;
+      const k = this.shot.eggless ? 1 : t / BLUR_LIFE;
       if (k >= 1) { this.blurring = false; this.fx.useBlur(false); this.fx.blurStrength = 0; }
       else {
         const cam = this.fx.camera;
@@ -1250,7 +1570,7 @@ class Beam implements BeamHandle {
     const toAim = new Quaternion();
     Quaternion.FromUnitVectorsToRef(Y, aim, toAim);
     this.slashes.forEach(({ mesh, layer }, i) => {
-      const k = t / SLASH_LIFE;
+      const k = this.shot.eggless ? 1 : t / SLASH_LIFE;
       if (k >= 1) { mesh.setEnabled(false); return; }
       const s = (0.3 + 1.9 * easeOutCubic(k)) * H * (i ? 0.75 : 1);
       mesh.position.copyFrom(origin);
@@ -1265,7 +1585,7 @@ class Beam implements BeamHandle {
     // Dust round the feet.
     const feet = this.shot.feet ? this.shot.feet() : mouth.subtract(new Vector3(0, H * 0.8, 0));
     this.dust.forEach(({ mesh, mat }, i) => {
-      if (t > DUST_LIFE || !feet) { mesh.setEnabled(false); return; }
+      if (t > DUST_LIFE || !feet || this.shot.eggless) { mesh.setEnabled(false); return; }
       const k = easeOutCubic(t / 0.3);
       mesh.position.set(feet.x, feet.y + DUST_H * H * 0.5 * (i ? 0.8 : 1), feet.z);
       mesh.scaling.set(0.4 + 0.6 * k, k, 0.4 + 0.6 * k);
@@ -1275,14 +1595,19 @@ class Beam implements BeamHandle {
 
     // The beam: the front races out; it holds a steady thickness (no throb).
     // The front races out to the target's near side; the hit lands as it gets there.
-    const grow = easeOutCubic((t - SNAP * 0.5) / GROW);
-    const len = Math.max(0.01, contactAt * grow);
-    if (!this.frontDone && grow >= 0.999) {
+    const grow = this.shot.instant ? 1 : easeOutCubic((t - SNAP * 0.5) / GROW);
+    const len = clashing
+      ? Math.max(0.01, met ? Math.min(contactAt, Math.max(this.raceTo, contactAt) * grow) : contactAt * grow)
+      : Math.max(0.01, contactAt * grow);
+    const arrived = clashing ? met && len >= contactAt - 1e-3 : grow >= 0.999;
+    if (!this.frontDone && arrived) {
       this.frontDone = true; this.resolveFront(); this.frontT = this.time;
       if (!this.shot.clash || this.clashEndT >= 0) this.splitT = this.time;
     }
     const on = grow > 0.001;
-    this.setBeamVisible(on);
+    this.endPt.copyFrom(origin).addInPlace(aim.scale(on ? len : 0));
+    // A bolt: no column (the caller's bolt runs from its egg to here).
+    this.setBeamVisible(on && !this.shot.bolt);
     if (!on) return;
     const width = 1 - 0.4 * smoothstep(0.4, 1, dissolve);
     // How far it has split on the target (the arcs grow out as its end opens).
@@ -1290,16 +1615,18 @@ class Beam implements BeamHandle {
     this.tubes.forEach(({ layer }, i) => {
       const m = layer.mat;
       m.setVector3('origin', origin); m.setVector3('aim', aim); m.setVector3('side', side); m.setVector3('upv', up);
-      m.setFloat('len', len); m.setFloat('rad', BEAM_R[i] * H * this.W * width * COLUMN);
+      m.setFloat('len', len); m.setFloat('rad', BEAM_R[i] * H * this.W * width * COLUMN * (this.shot.bolt ? BOLT_SKIN_R : 1));
       m.setFloat('split', split);
       m.setFloat('time', this.time + i * 1.7);
-      const billow = this.shot.burstAlong && i === BEAM_R.length - 1 ? BILLOW_SKIN : 1;
+      const billow = this.shot.burstAlong && i === BEAM_R.length - 1 ? BILLOW_SKIN : this.shot.bolt ? BOLT_SKIN : 1;
       m.setFloat('cutoff', cut(heavier(layer.cutoff, i) * billow));
     });
     this.swirls.forEach(({ mat }) => {
       mat.setVector3('origin', origin); mat.setVector3('aim', aim); mat.setVector3('side', side); mat.setVector3('upv', up);
       mat.setFloat('len', len); mat.setFloat('rad', SWIRL_R * H * this.W * width); mat.setFloat('width', SWIRL_W * H * this.W);
       mat.setFloat('time', this.time); mat.setFloat('fade', 1 - dissolve);
+      if (SWIRL_TORNADO && this.scene.activeCamera) mat.setVector3('camPos', this.scene.activeCamera.globalPosition);
+      if (SWIRL_TORNADO) mat.setFloat('burst', this.shot.burstAlong || TORNADO_BURSTING.has(this.shot.element) ? 1 : 0);
     });
     // Sparks only where the beam meets the target, from the moment it does:
     // splashing back and outward off the contact point, swirling once out of
@@ -1325,6 +1652,8 @@ class Beam implements BeamHandle {
   }
 
   private finish(): void {
+    this.clashNoise?.dispose();
+    this.clashNoise = null;
     const r = this.releasing;
     this.dispose();
     r?.done();

@@ -14,12 +14,22 @@ export const BATTLE_CLIPS = {
   ranged: ['rangeattack01'],
   roar: ['roar01'],
   appeal: ['appeal01'],
+  // A mega form's own appeal (its forms 51/52 carry it): a self-boost plays it in place of the appeal.
+  megaAppeal: ['megaappeal01'],
   damage: ['damage01'],
   faint: ['down01_start'],
   down: ['down01_loop'],
   glad: ['glad01'],
   turnL: ['turn_l090'],
   turnR: ['turn_r090'],
+  // A soft turn: stepping round on the spot, no turn of its own in the clip (the body is turned to suit).
+  turnSoft: ['turn_r000'],
+  // A jump: up (its spring, then rising), down (its fall), and the landing.
+  jumpUpStart: ['jumpup01_start'],
+  jumpUpLoop: ['jumpup01_loop'],
+  jumpDownStart: ['jumpdown01_start'],
+  jumpDownLoop: ['jumpdown01_loop'],
+  land: ['land02'],
   // The beam chain: wind-up (mouth shut), the pour (held), the release.
   beamStart: ['rangeattack02_start'],
   beamLoop: ['rangeattack02_loop'],
@@ -30,6 +40,8 @@ export const BATTLE_CLIPS = {
   swipeStart: ['attack03_start'],
   swipeLoop: ['attack03_loop'],
   swipeEnd: ['attack03_end'],
+  // Gathering itself, held (a ram clash's standoff).
+  charge: ['charge01_loop'],
   // The same actions in the air (200xx clips), for species that fly. Absent
   // for the rest, so nothing extra is fetched for them.
   airIdle: ['air:battlewait01_loop', 'air:defaultwait01_loop'],
@@ -39,6 +51,7 @@ export const BATTLE_CLIPS = {
   airRanged: ['air:rangeattack01'],
   airRoar: ['air:roar01'],
   airAppeal: ['air:appeal01'],
+  airMegaAppeal: ['air:megaappeal01'],
   airDamage: ['air:damage01'],
   airGlad: ['air:glad01'],
   airBeamStart: ['air:rangeattack02_start'],
@@ -47,6 +60,10 @@ export const BATTLE_CLIPS = {
   airSwipeStart: ['air:attack03_start'],
   airSwipeLoop: ['air:attack03_loop'],
   airSwipeEnd: ['air:attack03_end'],
+  airCharge: ['air:charge01_loop'],
+  airTurnL: ['air:turn_l090'],
+  airTurnR: ['air:turn_r090'],
+  airTurnSoft: ['air:turn_r000'],
 };
 
 /** Map a species' Pokédex number to its base form id: 6 -> 'pm0006_00_00'. */
@@ -54,10 +71,10 @@ export const formId = (dex, form = 0) => `pm${String(dex).padStart(4, '0')}_${St
 
 /**
  * @param {string} id  form id, e.g. 'pm0006_00_00'
- * @param {{ base?: string, clips?: Record<string, string[]>, onProgress?: (fraction: number) => void }} [opts]
+ * @param {{ base?: string, clips?: Record<string, string[]>, shiny?: boolean, onProgress?: (fraction: number) => void }} [opts]
  * @returns {Promise<any>} decoded recipe data for buildPokemon
  */
-export function loadPokemon(id, { base = '', clips = BATTLE_CLIPS, onProgress } = {}) {
+export function loadPokemon(id, { base = '', clips = BATTLE_CLIPS, shiny = false, onProgress } = {}) {
   return new Promise((resolve, reject) => {
     const w = new Worker(new URL('./decode-worker.js', import.meta.url), { type: 'module' });
     w.onmessage = ({ data }) => {
@@ -67,6 +84,6 @@ export function loadPokemon(id, { base = '', clips = BATTLE_CLIPS, onProgress } 
       else reject(new Error(data.message));
     };
     w.onerror = (e) => { w.terminate(); reject(new Error(e.message || 'worker failed')); };
-    w.postMessage({ id, base, clips });
+    w.postMessage({ id, base, clips, shiny });
   });
 }

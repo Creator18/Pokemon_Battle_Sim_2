@@ -17,6 +17,7 @@ export {
 
 // Terrain
 export { TERRAIN_PROPS, getTerrainProps, type TerrainProperties } from './terrain/terrainProps.ts';
+export { isGrassTile, tileTint, TILE_TINTS, EARTH_TINT } from './terrain/grass.ts';
 export {
   TerrainEntity,
   TerrainManager,
@@ -41,7 +42,7 @@ export {
   voltTackleRecoilMultiplier,
   type DamageParams,
 } from './moves/damage.ts';
-export { executeMove, qaPowerMultiplier, type MoveResult, type ExecuteOptions } from './moves/execute.ts';
+export { executeMove, qaPowerMultiplier, burnGrass, newResult, type MoveResult, type ExecuteOptions } from './moves/execute.ts';
 export { QUAKE_RINGS, isSelfArea, quakeZone, quakeLanding } from './moves/quake.ts';
 export { beamOutput, resolveClash, beamsMeet } from './moves/clash.ts';
 export type { ClashOutcome, ClashSide } from './moves/clash.ts';

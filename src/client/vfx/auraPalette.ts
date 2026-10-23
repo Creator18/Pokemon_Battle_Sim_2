@@ -46,6 +46,8 @@ const PAIRS: Record<string, [RGB, RGB, number]> = {
   Water: [[0.62, 0.90, 1.00], [0.00, 0.34, 0.92], 0.66],
   // Blue flames (see elementFor): a deeper blue than Water.
   BlueFire: [[0.42, 0.62, 1.00], [0.00, 0.08, 0.72], 0.60],
+  // Ghostly fire (the Litwick line's): Ghost's colours, burning as fire.
+  GhostFire: [[0.80, 0.70, 1.00], [0.36, 0.18, 0.66], 0.58],
   Grass: [[0.92, 1.00, 0.66], [0.26, 0.78, 0.10], 0.66],
   // Glows like the lightning (LightningFx): the bolts' amber halo on the
   // outer edge, their white-hot core against the body, and no dimming
@@ -65,6 +67,8 @@ const PAIRS: Record<string, [RGB, RGB, number]> = {
   Dark: [[0.78, 0.66, 0.74], [0.34, 0.12, 0.34], 0.55],
   Steel: [[0.90, 0.92, 0.98], [0.54, 0.60, 0.74], 0.70],
   Fairy: [[1.00, 0.86, 0.96], [0.96, 0.44, 0.70], 0.68],
+  // Golden (Brave Bird's: a Flying aura in gold).
+  Gold: [[1.00, 0.95, 0.70], [0.95, 0.62, 0.05], 0.70],
 };
 
 /**
@@ -94,22 +98,31 @@ const OUTLINE_FILL: Record<string, [RGB, RGB]> = {
   Fighting: [[0.88, 0.06, 0.05], [0.25, 0.5, 1.0]], //  red outline, blue fill
   // Blue flames (see elementFor): a deeper blue than Water's, both outline and fill.
   BlueFire: [[0.0, 0.06, 0.78], [0.12, 0.36, 1.0]],
+  GhostFire: [[0.04, 0.02, 0.06], [0.55, 0.25, 0.9]], // as Ghost: black outline, purple fill
+  Gold: [[1.0, 0.62, 0.04], [1.0, 0.9, 0.45]], //      deep gold outline, bright gold fill (Brave Bird)
 };
 
 /** Pokémon whose flames are blue: their Fire wears BlueFire's colours. */
 const BLUE_FLAMES = new Set(['Mega Charizard X']);
+/** …and those whose flames are blue only when shiny. */
+const SHINY_BLUE_FLAMES = new Set(['Emboar']);
+/** Pokémon whose flames are ghostly (violet, as on their bodies): their Fire wears GhostFire's colours. */
+const GHOST_FLAMES = new Set(['Litwick', 'Lampent', 'Chandelure', 'Mega Chandelure']);
 
 /**
  * The colours a Pokémon's move of `element` wears: its type's, except where
  * it has its own (Mega Charizard X's Fire is blue flame, deeper than Water).
  */
-export function elementFor(element: string, species?: string | null): string {
-  return element === 'Fire' && species && BLUE_FLAMES.has(species) ? 'BlueFire' : element;
+export function elementFor(element: string, species?: string | null, shiny = false): string {
+  if (element !== 'Fire' || !species) return element;
+  if (GHOST_FLAMES.has(species)) return 'GhostFire';
+  const blue = BLUE_FLAMES.has(species) || (shiny && SHINY_BLUE_FLAMES.has(species));
+  return blue ? 'BlueFire' : element;
 }
 
 /** Fire of any colour (for the effects drawn as flame: a licking aura edge). */
 export function isFire(element: string): boolean {
-  return element === 'Fire' || element === 'BlueFire';
+  return element === 'Fire' || element === 'BlueFire' || element === 'GhostFire';
 }
 
 /**

@@ -149,6 +149,32 @@ export class VertexSubset {
     this.size = size;
   }
 
+  /** The vertex furthest along `dir` (world) this frame, into `out`; false if there are none. */
+  furthestAlong(dir: Vector3, out: Vector3): boolean {
+    let best = -Infinity;
+    const acc = new Vector3(), v = new Vector3();
+    for (const { mesh, pos, idx, wgt } of this.parts) {
+      const M = this.skeleton.getTransformMatrices(mesh);
+      const world = mesh.getWorldMatrix();
+      for (let k = 0; k < pos.length / 3; k++) {
+        const x = pos[k * 3], y = pos[k * 3 + 1], z = pos[k * 3 + 2];
+        acc.setAll(0);
+        for (let j = 0; j < 4; j++) {
+          const wt = wgt[k * 4 + j];
+          if (wt <= 0) continue;
+          const o = idx[k * 4 + j] * 16;
+          acc.x += wt * (M[o] * x + M[o + 4] * y + M[o + 8] * z + M[o + 12]);
+          acc.y += wt * (M[o + 1] * x + M[o + 5] * y + M[o + 9] * z + M[o + 13]);
+          acc.z += wt * (M[o + 2] * x + M[o + 6] * y + M[o + 10] * z + M[o + 14]);
+        }
+        Vector3.TransformCoordinatesToRef(acc, world, v);
+        const d = Vector3.Dot(v, dir);
+        if (d > best) { best = d; out.copyFrom(v); }
+      }
+    }
+    return best > -Infinity;
+  }
+
   /** The lowest world Y of these vertices this frame (Infinity if none). */
   lowestY(): number {
     let lo = Infinity;

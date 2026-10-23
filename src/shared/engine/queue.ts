@@ -4,6 +4,7 @@ import { ActionOrder, ActionType } from '../core/enums.ts';
 import { Pokemon } from '../model/pokemon.ts';
 import { getMove } from '../data/moves.ts';
 import { RNG } from '../rng.ts';
+import type { TerrainManager } from '../terrain/terrainManager.ts';
 import {
   QA_MOVE_FIRST_SPEED_MULT,
   QA_MOVE_FIRST_PRIORITY_BUMP,
@@ -31,7 +32,7 @@ function sortKey(a: QueuedAction): [number, number] {
   return [-a.priority, a.tiebreak];
 }
 
-export function buildQueue(p1: Pokemon, p2: Pokemon, rng: RNG): QueuedAction[] {
+export function buildQueue(p1: Pokemon, p2: Pokemon, rng: RNG, tm?: TerrainManager): QueuedAction[] {
   const queue: QueuedAction[] = [];
 
   for (const pokemon of [p1, p2]) {
@@ -42,7 +43,7 @@ export function buildQueue(p1: Pokemon, p2: Pokemon, rng: RNG): QueuedAction[] {
 
     const [mp, ap] = pokemon.getActionPriorities();
 
-    if (move.quickPriority) {
+    if (tm ? tm.hasPriority(move) : move.quickPriority) {
       const order = decl.actionOrder;
       if (order === ActionOrder.ATTACK_FIRST) {
         queue.push({

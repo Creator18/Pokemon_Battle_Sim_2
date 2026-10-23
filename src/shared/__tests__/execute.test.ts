@@ -64,3 +64,16 @@ describe('type immunity', () => {
     expect(res.missReason).toContain('immunity');
   });
 });
+
+describe('Metal Sound', () => {
+  it('deals no damage and harshly lowers the target\'s Sp. Def', () => {
+    const user = mk('Absol', 1, [0, 0]);
+    const foe = mk('Gengar', 2, [2, 0]);
+    const ms = getMove('Metal Sound')!;
+    const res = executeMove(ms, user, foe, new TerrainManager(), noCritRng, { targetTile: [2, 0], straightTiles: 0 });
+    expect(res.hit).toBe(true);
+    expect(res.damageDealt).toBe(0);
+    expect(foe.currentHp).toBe(foe.maxHp);
+    expect(res.statChanges).toContainEqual([2, 'sp_def', -2, -2]);
+  });
+});

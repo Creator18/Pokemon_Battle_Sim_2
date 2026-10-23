@@ -78,6 +78,8 @@ export interface ResolvedActionWire {
   qaLandedAt: [number, number] | null;
   /** The defender thrown off its tile by this attack (Earthquake): where from, where to. */
   knockback?: { playerId: number; from: [number, number]; to: [number, number] } | null;
+  /** The defender dodged this attack (an accuracy miss): it side-stepped from one tile to the one beside it. */
+  dodge?: { playerId: number; from: [number, number]; to: [number, number] } | null;
   /**
    * A beam clash (both sides' attack actions carry it, the initiator's first):
    * the winner (null: a tie, both disperse), each side's output and charge by
@@ -90,6 +92,10 @@ export interface ResolvedActionWire {
     charges: Record<number, number>;
     margin: number;
   } | null;
+  /** Frozen solid by this attack, or freed: its ice shattered by the hit, or melted (a Fire move). */
+  statuses?: { playerId: number; status: 'frozen' | 'shattered' | 'thawed' }[];
+  /** Stat stages this action raised or lowered (Swords Dance, Close Combat, Metal Sound…): whose, which, by how much. */
+  stages?: { playerId: number; stat: string; delta: number }[];
   skippedMovement: boolean;
   skippedAttack: boolean;
 }

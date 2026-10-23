@@ -40,6 +40,8 @@ export class BattleCamera {
   readonly keyLight: DirectionalLight;
   readonly fill: HemisphericLight;
   readonly shadows: ShadowGenerator;
+  /** The post-processing (bloom, tone mapping, the grade: FieldFx tints and saturates it). */
+  readonly pipeline: DefaultRenderingPipeline;
   private targetLerp: { from: Vector3; to: Vector3; t: number } | null = null;
 
   constructor(scene: Scene, engine: Engine, canvas: HTMLCanvasElement) {
@@ -83,6 +85,7 @@ export class BattleCamera {
     this.keyLight.shadowMaxZ = 80 * TILE_SCALE;
 
     const pipeline = new DefaultRenderingPipeline('default', true, scene, [this.camera]);
+    this.pipeline = pipeline;
     pipeline.bloomEnabled = true;
     pipeline.bloomThreshold = 0.8;
     pipeline.bloomWeight = 0.35;

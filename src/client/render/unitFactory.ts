@@ -22,9 +22,11 @@ export interface BeamPlay {
   hit: Promise<void>; contactEnds: Promise<void>; done: Promise<void>;
   /** Where the beam leaves the attacker, this frame (beams only). */
   origin?: () => Vector3;
+  /** Where its front is, this frame (beams and balls in a clash: where they will meet). */
+  front?: () => Vector3;
 }
-/** A beam clash: `hit` when the winner's beam lands (or, a tie, as both disperse); `done` once both are gone. */
-export interface ClashPlay { hit: Promise<void>; done: Promise<void> }
+/** A beam clash: `met` as the two beams meet, `hit` when the winner's beam lands (or, a tie, as both disperse); `done` once both are gone. */
+export interface ClashPlay { met: Promise<void>; hit: Promise<void>; done: Promise<void> }
 
 import { MoveCategory, type MoveDefinition, type SpeciesDefinition } from '../../shared/index.ts';
 
@@ -51,7 +53,8 @@ export type CastKind = 'ranged' | 'roar' | 'appeal';
 
 export interface UnitFactory {
   /** `onProgress` gets 0..1 while the model loads (immediately 1 if nothing to load). */
-  createPokemon(species: SpeciesDefinition, playerId: number, onProgress?: (fraction: number) => void): Promise<TransformNode>;
+  /** `shiny`: its shiny colours (and, where a shiny's flames differ, their colour in its moves). */
+  createPokemon(species: SpeciesDefinition, playerId: number, onProgress?: (fraction: number) => void, opts?: { shiny?: boolean }): Promise<TransformNode>;
   /**
    * Walk the path. `hover[i]` is how high a flier hovers over waypoint i
    * (0 = on the ground; see HexBoard.hoverHeight): a flier crossing an
@@ -65,10 +68,30 @@ export interface UnitFactory {
    * its own. `swipe`: a claw or a slash — the swipe, where it has one.
    */
   playAttackLunge(node: TransformNode, targetPos: Vector3, swipe?: boolean): Promise<void>;
+  /** A physical attack as a flurry of `power`'s many blows (where the factory can); resolves on the last blow. */
+  playFlurry?(node: TransformNode, targetPos: Vector3, power: number): Promise<void>;
+  /**
+   * A quick step into a strike (the priority moves: Quick Attack, Extreme
+   * Speed, Shadow Sneak, Sucker Punch): vanish, dash to `land` as streaks
+   * and afterimages, reappear as the blow lands; bursts in `element`'s
+   * colours, the end one only on `contact` (a Pokémon on the target tile).
+   * Resolves at the blow.
+   */
+  playQuickStep(node: TransformNode, targetPos: Vector3, land: Vector3, strike?: 'attack' | 'swipe', element?: string, contact?: boolean): Promise<void>;
+  /**
+   * Aerial Ace: a quick step stacked — through `target` (it flinches), round
+   * behind it and back through it, on to `stop`, afterimages all the way, then
+   * it turns back to face it. `hit` at the second blow, `done` once it faces it.
+   */
+  playAerialAce(node: TransformNode, target: TransformNode | null, targetPos: Vector3, stop: Vector3, element?: string, jump?: boolean): BeamPlay;
   /** A non-contact move. Resolves at the moment of release. */
   playCast(node: TransformNode, targetPos: Vector3, kind: CastKind): Promise<void>;
   /** Flinch, flashing `flash` (0..1 display RGB: the HP bar's colour) for a moment. */
   playHitReact(node: TransformNode, flash?: [number, number, number]): Promise<void>;
+  /** A dodge: a quick side-step to `to` (the tile beside it), leaving an afterimage where it stood. */
+  playDodge(node: TransformNode, to: Vector3): Promise<void>;
+  /** Missed: it stops, holds its heading until `during` is over and a beat after, then turns (its turn clip) to look at `target`. */
+  playMissLook(node: TransformNode, target: TransformNode, during: Promise<void>): Promise<void>;
   /**
    * Thrown (Earthquake): flung in an arc to `to` (where it lands, on the
    * ground), flinching, still facing the way it was; resolves as it lands.
@@ -99,11 +122,21 @@ export interface UnitFactory {
    */
   playPulse(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: PulseSpec): BeamPlay;
   /** Two beams meet head-on: `winner` pushes the ball back into the other (null: a tie, both disperse). */
-  playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null, margin: number): ClashPlay;
+  playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null, margin: number, standUntil?: Promise<void>): ClashPlay;
   /** A ball attack (Shadow Ball…): a sphere of the type forms at the mouth, flies, and bursts on the target. */
   playBall(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: BallSpec): BeamPlay;
   /** Gust / Twister: a whirlwind or a tornado growing out of the ground on the target. */
   playWind(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: WindSpec): BeamPlay;
+  /** Fire Spin / Whirlpool: rings of `element` spinning up round the target's tile. `hit` once they are up, `contactEnds` as they go. */
+  playSpin(node: TransformNode, targetPos: Vector3, element?: string): BeamPlay;
+  /** A charge on foot into the target (Flare Blitz): bursts as it sets off and at the impact; resolves at the impact. */
+  playRunInto(node: TransformNode, path: Vector3[], targetPos: Vector3, element?: string, pose?: 'run' | 'leap',
+    opts?: { land?: boolean }): Promise<void>;
+  /** Two ram attacks meeting head-on: both leap to the middle and the contact burst goes off there, looped, for the standoff. */
+  playRamClash(a: TransformNode, b: TransformNode, typeA: string, typeB: string, hold?: number, until?: Promise<void>, at?: Vector3,
+    onward?: { node: TransformNode; to: Vector3; land?: boolean }, won?: TransformNode | null): Promise<{ onward: Promise<void> }>;
+  /** A stat change, momentary: rising round it in red and orange (`up`), or sinking in blue and light blue. */
+  playStatChange(node: TransformNode, up: boolean): Promise<void>;
   /** Thunderbolt, Thunder, Discharge, sparks: `hit` as it strikes, `contactEnds` as it lets go. */
   playLightning(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: LightningSpec): BeamPlay;
   /**
@@ -111,10 +144,21 @@ export interface UnitFactory {
    * walking, when they face along the path).
    */
   faceEachOther(a: TransformNode, b: TransformNode): void;
+  /**
+   * Frozen solid: its body slows to a stop where it is, and a block of
+   * see-through ice, fitted to its shape, grows up round it (`instant`: it is
+   * already so — no animation). Resolves once it is encased.
+   */
+  freeze(node: TransformNode, instant?: boolean): Promise<void>;
+  /** The ice shatters (or, `melt`, melts away in steam: a Fire move) and it moves again; resolves once it is gone. */
+  thaw(node: TransformNode, how?: 'shatter' | 'melt'): Promise<void>;
+  isFrozen(node: TransformNode): boolean;
   /** Keep the unit flinching (its hit animation, back to back) until `until` resolves. */
   holdHitReact(node: TransformNode, until: Promise<void>): void;
   /** Light an aura outline round the unit (a no-op handle where unsupported). */
   aura(node: TransformNode, options: AuraOptions): AuraHandle;
+  /** How it punches: the clip it throws a punch with ('attack', or its 'swipe' where its attack is a kick), and the hand that leads it. */
+  punchPlan?(node: TransformNode): { key: 'attack' | 'swipe'; part: string | null };
 }
 
 /** Which body animation a move uses: null = a contact strike (lunge + attack). */

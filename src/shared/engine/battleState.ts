@@ -26,6 +26,8 @@ export interface BattleStateJSON {
     p2: PokemonJSON | null;
   };
   terrain: TerrainEntityJSON[];
+  /** Tiles whose grass has burned away ("q,r"). */
+  scorched?: string[];
   statusEffects: {
     p1: StatusEffects;
     p2: StatusEffects;
@@ -80,6 +82,7 @@ export function serializeState(s: BattleState): BattleStateJSON {
       p2: s.p2 ? s.p2.toJSON() : null,
     },
     terrain: s.terrain.toJSON(),
+    scorched: s.terrain.scorchedKeys,
     statusEffects: {
       p1: { ...s.statusEffects.p1 },
       p2: { ...s.statusEffects.p2 },
@@ -94,7 +97,7 @@ export function deserializeState(j: BattleStateJSON): BattleState {
     meta: { ...j.meta },
     p1: j.pokemon.p1 ? Pokemon.fromJSON(j.pokemon.p1) : null,
     p2: j.pokemon.p2 ? Pokemon.fromJSON(j.pokemon.p2) : null,
-    terrain: TerrainManager.fromJSON(j.terrain),
+    terrain: TerrainManager.fromJSON(j.terrain, j.scorched ?? []),
     statusEffects: {
       p1: { ...j.statusEffects.p1 },
       p2: { ...j.statusEffects.p2 },

@@ -26,6 +26,8 @@ export enum PokemonStatus {
   FAINTED = 'fainted',
   BURNED = 'burned',
   PARALYZED = 'paralyzed',
+  /** Frozen solid: no moving, no attacking, until it thaws (FREEZE_*). */
+  FROZEN = 'frozen',
 }
 
 export enum TerrainType {
@@ -44,8 +46,18 @@ export enum TerrainType {
   RESONANCE_ZONE = 'resonance_zone',
   PERISH_ZONE = 'perish_zone',
   ICE_ZONE = 'ice_zone',
+  /** Whole-field weather (as in the games): hail and a sandstorm, beside the sun and the rain. */
+  HAIL = 'hail',
+  SANDSTORM = 'sandstorm',
+  /** Whole-field terrains (as in the games): one at a time, on the Pokémon touching the ground. */
+  ELECTRIC_TERRAIN = 'electric_terrain',
+  GRASSY_TERRAIN = 'grassy_terrain',
+  MISTY_TERRAIN = 'misty_terrain',
+  PSYCHIC_TERRAIN = 'psychic_terrain',
   /** Ground heaved by Earthquake, left tilted inward: rough to cross. */
   TILTED = 'tilted',
+  /** A pond on the map: slow to wade through; Water moves fired from it hit harder, Fire moves weaker. */
+  WATER = 'water',
 }
 
 export enum ActionType {

@@ -31,6 +31,7 @@ import { DeclarationPanel, type HighlightSetter } from './ui/DeclarationPanel.ts
 import { GameOverOverlay } from './ui/GameOverOverlay.ts';
 import { LoadingScreen } from './ui/LoadingScreen.ts';
 import { ResolutionPlayback } from './ui/ResolutionPlayback.ts';
+import { elementFor } from './vfx/auraPalette.ts';
 
 export interface GameControllerDeps {
   net: NetClient;
@@ -70,6 +71,11 @@ export class GameController {
     this.board = deps.board;
     this.factory = deps.factory;
     this.camera = deps.camera;
+    // A grass fire burns in the colour of its lighter's fire (blue for blue flames).
+    this.board.setFireHue((owner) => {
+      const n = this.units.get(owner);
+      return elementFor('Fire', n?.metadata?.species, !!n?.metadata?.shiny);
+    });
     this.playback = new ResolutionPlayback(deps.board, deps.factory, deps.vfx, deps.camera,
       (pid, hp, maxHp) => this.hud.setHp(pid, hp, maxHp));
 
@@ -268,6 +274,9 @@ export class GameController {
       this.factory.setHover(node, p.status === 'fainted' ? 0 : this.board.hoverOver(p.tile[0], p.tile[1], p.huge === true));
       if (p.status === 'fainted') this.factory.lieDown(node);
       else if (this.factory.isDown(node)) this.factory.revive(node);
+      // Frozen solid (or not), as the state has it.
+      if (p.status === 'frozen') void this.factory.freeze(node, true);
+      else if (this.factory.isFrozen(node)) void this.factory.thaw(node);
       // Face toward center / opponent.
       const other = pid === 1 ? state.pokemon.p2 : state.pokemon.p1;
       if (other) {

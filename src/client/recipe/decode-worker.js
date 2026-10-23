@@ -3,7 +3,7 @@
 // the main thread (and the loading screen) never stalls. Everything comes back
 // as typed arrays moved, not copied, across the boundary.
 //
-// in:  { id, base, clips: { action: [clip name candidates...] } }
+// in:  { id, base, clips: { action: [clip name candidates...] }, shiny }
 // out: { type: 'progress', loaded, total }  …then
 //      { type: 'done', form, textures, clips, stats }  or  { type: 'error', message }
 
@@ -12,6 +12,7 @@ import { readBntx } from './bntx.js';
 import { decodeSurface } from './bcn.js';
 import { readTranm } from './tranm.js';
 import { readTracm } from './tracm.js';
+import { readTraef } from './traef.js';
 
 // Ground performances only: 000xx–006xx is "on the ground" (the doc's §1.3).
 const GROUND = /^00[0-6]\d\d_/;
@@ -19,7 +20,7 @@ const GROUND = /^00[0-6]\d\d_/;
 // "air:<name>" takes only these, so species without an air set skip it.
 const AIR = /^20[0-6]\d\d_/;
 
-self.onmessage = async ({ data: { id, base = '', clips = {} } }) => {
+self.onmessage = async ({ data: { id, base = '', clips = {}, shiny = false } }) => {
   const t0 = performance.now();
   let bytes = 0, loaded = 0, total = 0;
   const progress = () => self.postMessage({ type: 'progress', loaded, total });
@@ -52,14 +53,18 @@ self.onmessage = async ({ data: { id, base = '', clips = {} } }) => {
         const key = air ? keys.find((k) => AIR.test(k)) : keys.find((k) => GROUND.test(k)) || keys[0];
         if (key) {
           const vis = `${prefix}${key}.tracm`;
-          clipFiles[action] = { key, file: `${prefix}${key}.tranm`, vis: have.has(vis) ? vis : null, loop: /_loop$/.test(want) };
+          const ev = `${prefix}${key}.traef`;
+          clipFiles[action] = { key, file: `${prefix}${key}.tranm`, vis: have.has(vis) ? vis : null, events: have.has(ev) ? ev : null, loop: /_loop$/.test(want) };
           break;
         }
       }
     }
 
-    const modelNames = ['.trskl', '.trmsh', '.trmbf', '.trmtr'].map((e) => id + e);
-    const clipCount = Object.values(clipFiles).reduce((n, c) => n + (c.vis ? 2 : 1), 0);
+    // A shiny wears its own material file (the same textures, recoloured), in place of the usual one.
+    const rare = `${id}_rare.trmtr`;
+    const useRare = shiny && have.has(rare);
+    const modelNames = ['.trskl', '.trmsh', '.trmbf', '.trmtr'].map((e) => (useRare && e === '.trmtr' ? rare : id + e));
+    const clipCount = Object.values(clipFiles).reduce((n, c) => n + 1 + (c.vis ? 1 : 0) + (c.events ? 1 : 0), 0);
     total = modelNames.length + clipCount; // textures added once known
     progress();
 
@@ -67,11 +72,14 @@ self.onmessage = async ({ data: { id, base = '', clips = {} } }) => {
     // Each clip brings its shapes' visibility (tracm.js) when it has one.
     const modelP = Promise.all(modelNames.map((n) => fetchBytes(n).then((b) => [n, b])));
     const clipP = Promise.all(Object.entries(clipFiles).map(async ([action, c]) => {
-      const [anim, vis] = await Promise.all([fetchBytes(c.file), c.vis ? fetchBytes(c.vis) : null]);
-      return [action, { name: c.key, loop: c.loop, ...readTranm(anim), vis: vis ? readTracm(vis).shapes : {} }];
+      const [anim, vis, ev] = await Promise.all([fetchBytes(c.file), c.vis ? fetchBytes(c.vis) : null, c.events ? fetchBytes(c.events) : null]);
+      // (Its events — sounds, triggers, the joints they follow — when it has them: traef.js.)
+      let events = [];
+      try { events = ev ? readTraef(ev).events : []; } catch { events = []; }
+      return [action, { name: c.key, loop: c.loop, ...readTranm(anim), vis: vis ? readTracm(vis).shapes : {}, events }];
     }));
 
-    const form = parseForm(id, new Map(await modelP));
+    const form = parseForm(id, new Map((await modelP).map(([n, b]) => [n === rare ? `${id}.trmtr` : n, b])));
     const texNames = textureNames(form).filter((n) => have.has(n));
     total += texNames.length;
     progress();

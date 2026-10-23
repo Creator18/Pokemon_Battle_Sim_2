@@ -10,6 +10,7 @@ import { hpColorCss } from '../theme.ts';
 const STATUS_STYLE: Record<string, { label: string; bg: string; fg: string }> = {
   burned: { label: 'BRN', bg: '#F97316', fg: '#2A1000' },
   paralyzed: { label: 'PAR', bg: '#FBBF24', fg: '#2A2000' },
+  frozen: { label: 'FRZ', bg: '#7DD3FC', fg: '#062033' },
   fainted: { label: 'KO', bg: '#6B7280', fg: '#111' },
 };
 
@@ -70,11 +71,13 @@ export class HUD {
   }
 
   private weatherLabel(state: BattleStateJSON): string | null {
-    for (const t of state.terrain) {
-      if (t.terrain_type === 'sunny_zone') return '☀ Harsh Sunlight';
-      if (t.terrain_type === 'rain_zone') return '🌧 Rain';
-    }
-    return null;
+    const labels: Record<string, string> = {
+      sunny_zone: '☀ Harsh Sunlight', rain_zone: '🌧 Rain', hail: '🌨 Hail', sandstorm: '🌪 Sandstorm',
+      electric_terrain: '⚡ Electric Terrain', grassy_terrain: '🌿 Grassy Terrain',
+      misty_terrain: '🌸 Misty Terrain', psychic_terrain: '🔮 Psychic Terrain',
+    };
+    const on = state.terrain.map((t) => labels[t.terrain_type]).filter((l): l is string => !!l);
+    return on.length ? on.join('  ') : null;
   }
 
   private renderSide(wrap: HTMLElement, poke: PokemonJSON | null, pid: number, effects: Record<string, number>): void {

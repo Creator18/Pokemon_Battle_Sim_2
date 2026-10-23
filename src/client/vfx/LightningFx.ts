@@ -23,8 +23,8 @@
  *   stretches its own lightning.
  * - `bolt(…)`: a thick bolt from one point to another, re-striking every
  *   RESTRIKE with forks breaking off it (Thunderbolt, Discharge, sparks).
- * - `thunder(…)`: an even thicker bolt out of the sky onto a point, with
- *   strokes running out over the ground round it (Thunder).
+ * - `thunder(…)`: many bolts falling out of the sky onto a point and the
+ *   ground round it (Thunder).
  */
 
 import type { Scene } from '@babylonjs/core/scene';
@@ -34,7 +34,7 @@ import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { Color3 } from '@babylonjs/core/Maths/math.color';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Effect } from '@babylonjs/core/Materials/effect';
 import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
@@ -49,6 +49,8 @@ const LIFE = 0.28; //             s, an earthing stroke's life
 const BOW = 1.6, BOW_EARLY = 0.28, BOW_LATE = 0.68;
 const SPRAY = 0.3, REACH = 1.0, SPREAD = 0.75; // footing, in body heights
 const TRAIL = 1.1, TRAIL_MIN = 0.35;
+/** Pressing in a clash (EarthBody.press): how far its strokes are thrown back behind it, and out to either side (body heights, at most) — out past its aura, grown and stretched back as it is in a clash. */
+const PRESS_BACK = 1.9, PRESS_SIDE = 1.3;
 const GIRTH_CUT = 0.52, GIRTH_RATE = 2.6;
 const POOL_R = 0.3, POOL_GAIN = 2.4;
 /** How fast the field drifts (the source's tCur is seconds; lightning writhes faster). */
@@ -59,10 +61,19 @@ const WRITHE = 1.6;
 const HAIR = 0.016 * TILE_SCALE;
 /** Body-to-ground strokes are this × the hairline. */
 const EARTH_THIN = 0.5;
+/** Earthing strokes scale with the body's height (÷ 1.3, a mid-sized Pokémon), within these bounds. */
+const EARTH_SIZE_MIN = 0.45, EARTH_SIZE_MAX = 2.6;
 /** The ribbon is this many times the core's width: the rest is halo. */
 const HALO = 4;
-/** Thunder's column barely wanders (× its length; a bolt's is WANDER). */
-const THUNDER_WANDER = 0.03;
+/**
+ * Thunder: how many bolts fall, how far apart they come in (s), how often
+ * each strikes somewhere new (s), and how high (and how far off upright) the
+ * sky they fall from is (× TILE_SCALE).
+ */
+const THUNDER_BOLTS = 7, THUNDER_STAGGER = 0.07, THUNDER_RESEAT = 0.3;
+/** On a hit, how many of Thunder's bolts strike the target. */
+const THUNDER_ON_TARGET = 3;
+const THUNDER_SKY = 14, THUNDER_SLANT = 0.6;
 /** Thick bolts re-strike (a new path) this often, s. */
 const RESTRIKE = 0.075;
 /** Above 1 blooms. */
@@ -109,6 +120,20 @@ void main(void) {
   gl_FragColor = vec4(rgb, alpha);
 }`;
 
+// A stroke in a unit's silhouette mask (UnitFx.addToMask): its core only (so
+// the aura's outline wraps the bolt itself, not its halo), in the unit's mask colour.
+Effect.ShadersStore.boltMaskFragmentShader = /* glsl */ `
+precision highp float;
+varying vec2 vUV;
+varying vec4 vHot;
+uniform float lit;
+uniform vec4 maskColor;
+void main(void) {
+  float x = abs(vUV.y * 2.0 - 1.0) * ${HALO.toFixed(1)};
+  if (x > 1.0 || vHot.x * lit < 0.05) discard;
+  gl_FragColor = maskColor;
+}`;
+
 Effect.ShadersStore.boltPoolVertexShader = /* glsl */ `
 precision highp float;
 attribute vec3 position;
@@ -140,6 +165,21 @@ void main(void) {
 const ARC = new Vector3(1.0, 0.93, 0.4);
 const AMBER = new Vector3(1.0, 0.5, 0.0);
 
+/** A bolt's (or earthing stroke's) colours: its core, its halo, and the light it casts. */
+export interface BoltColors { arc: Vector3; halo: Vector3; light: Color3 }
+/** Icy lightning (Ice Beam): a white-cyan core in an ice-blue halo. */
+/** Psychic lightning (Psybeam): a pale pink core in a magenta-violet halo. */
+export const PSY_BOLT: BoltColors = {
+  arc: new Vector3(1.0, 0.86, 0.98),
+  halo: new Vector3(0.92, 0.2, 0.78),
+  light: new Color3(1.0, 0.55, 0.9),
+};
+export const ICE_BOLT: BoltColors = {
+  arc: new Vector3(0.86, 0.97, 1.0),
+  halo: new Vector3(0.15, 0.55, 1.0),
+  light: new Color3(0.6, 0.85, 1.0),
+};
+
 const hash = (n: number) => { const s = Math.sin(n) * 43758.5453; return s - Math.floor(s); };
 
 export interface StrokeOpts {
@@ -167,6 +207,23 @@ class Stroke {
   private readonly pts: Vector3[] = Array.from({ length: KNOTS }, () => new Vector3());
   /** 0..1 how bright it is now (illum × power × its own share). */
   lit = 0;
+  /** Its copy's material in a unit's silhouette mask, if it is in one (maskIn). */
+  private maskMat: ShaderMaterial | null = null;
+  private unmask: (() => void) | null = null;
+
+  /**
+   * Put the stroke in a unit's silhouette (its aura's outline then wraps the
+   * bolt with the body, as one shape): `add` is UnitFx.addToMask for the unit.
+   */
+  maskIn(scene: Scene, color: Color4, add: (mesh: Mesh, mat: ShaderMaterial) => () => void): void {
+    this.maskMat = new ShaderMaterial('boltMaskMat', scene, { vertex: 'bolt', fragment: 'boltMask' }, {
+      attributes: ['position', 'uv', 'color'],
+      uniforms: ['viewProjection', 'lit', 'maskColor'],
+    });
+    this.maskMat.backFaceCulling = false;
+    this.maskMat.setColor4('maskColor', color);
+    this.unmask = add(this.mesh, this.maskMat);
+  }
 
   constructor(scene: Scene, public o: StrokeOpts) {
     this.mesh = new Mesh('bolt', scene);
@@ -261,9 +318,10 @@ class Stroke {
     this.mesh.updateVerticesData(VertexBuffer.PositionKind, this.pos);
     this.mesh.updateVerticesData(VertexBuffer.ColorKind, this.col);
     this.mat.setFloat('lit', this.lit);
+    this.maskMat?.setFloat('lit', this.lit);
   }
 
-  dispose(): void { this.mat.dispose(); this.mesh.dispose(); }
+  dispose(): void { this.unmask?.(); this.maskMat?.dispose(); this.mat.dispose(); this.mesh.dispose(); }
 }
 
 /** The amber dome of light where a stroke lands. */
@@ -310,6 +368,14 @@ export interface EarthBody {
   ground: () => number;
   /** Body points no stroke may start from (the front of the face). */
   avoid?: (p: Vector3) => boolean;
+  /**
+   * A way it is pressing (unit, level), or null: held in a clash, the way to
+   * the other. Its strokes are then thrown back behind it and out to its
+   * sides, away from what it presses against, as if blown off it.
+   */
+  press?: () => Vector3 | null;
+  /** Draw a stroke over the auras (UnitFx.addLight: laid on as light after them), returning the undo — so a stroke out past its aura shows whole. */
+  overAura?: (mesh: Mesh) => () => void;
 }
 
 export interface EarthOptions {
@@ -322,6 +388,8 @@ export interface EarthOptions {
   spread?: number;
   /** Ignore the flicker's dead air (always on, flickering only in brightness). */
   steady?: boolean;
+  /** Its colours (default: the white-hot arc in its amber halo). */
+  colors?: BoltColors;
 }
 
 export interface LightningPlay { hit: Promise<void>; contactEnds: Promise<void>; done: Promise<void> }
@@ -352,8 +420,9 @@ export class LightningFx {
     const n = o.bolts ?? BOLTS;
     const h = body.height;
     // Earthing strokes are finer than the bolts (asked for: thinner).
-    const width = HAIR * EARTH_THIN * (o.thick ?? 1) * Math.sqrt(h / 1.3);
-    const slots: { s: Stroke; pool: Pool; idx: number; head: Vector3; foot: Vector3; born: number; share: number }[] = [];
+    // In proportion to the body (a big Pokémon's strokes as thick, for its size, as a small one's).
+    const width = HAIR * EARTH_THIN * (o.thick ?? 1) * Math.min(EARTH_SIZE_MAX, Math.max(EARTH_SIZE_MIN, h / 1.3));
+    const slots: { s: Stroke; pool: Pool; idx: number; head: Vector3; foot: Vector3; born: number; share: number; undoOver?: () => void }[] = [];
     let last = body.root().clone(), vel = new Vector3();
     let stopped = false, fade = 1;
     const born = this.time;
@@ -380,6 +449,13 @@ export class LightningFx {
       const speed = vel.length();
       const trail = speed > 1e-3 ? vel.scale(-1 / speed).scale(TRAIL * Math.min(1, speed / (4.4 * TILE_SCALE)) * h * 0.25 * (TRAIL_MIN + (1 - TRAIL_MIN) * hash(seed + 5))) : Vector3.Zero();
       slot.foot.set(slot.head.x, ground + 0.01, slot.head.z).addInPlace(dir.scale(out)).addInPlace(trail);
+      // (Pressing in a clash: thrown back behind it and out to either side.)
+      const press = body.press?.();
+      if (press) {
+        const side = new Vector3(press.z, 0, -press.x);
+        slot.foot.addInPlace(press.scale(-PRESS_BACK * h * (0.5 + 0.5 * hash(seed + 11))))
+          .addInPlace(side.scale((hash(seed + 13) - 0.5) * 2 * PRESS_SIDE * h));
+      }
       slot.born = t;
       slot.share = 0.55 + 0.45 * hash(977 * (k + base) + 61);
       slot.s.o.k = (k + base + Math.floor(t / LIFE) * 3.7) % 40;
@@ -392,7 +468,9 @@ export class LightningFx {
         from: () => (body.pointAt(slots[k].idx, head) ? head : head),
         to: () => foot, width, k,
       });
-      slots.push({ s, pool: new Pool(this.scene), idx: 0, head, foot, born: -1, share: 1 });
+      if (o.colors) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); }
+      const undoOver = body.overAura?.(s.mesh);
+      slots.push({ s, pool: new Pool(this.scene), idx: 0, head, foot, born: -1, share: 1, undoOver });
       // Stagger the first ones so they do not all go out together.
       seat(k, this.time - hash(k * 17.1) * LIFE);
     }
@@ -411,7 +489,7 @@ export class LightningFx {
         slot.s.update(t, cam);
         slot.pool.set(slot.foot, POOL_R * h * 0.6, slot.s.lit * (1 - age) * POOL_GAIN);
       }
-      if (stopped && fade <= 0) { for (const sl of slots) { sl.s.dispose(); sl.pool.dispose(); } return false; }
+      if (stopped && fade <= 0) { for (const sl of slots) { sl.undoOver?.(); sl.s.dispose(); sl.pool.dispose(); } return false; }
       return true;
     });
     return { stop: () => { stopped = true; } };
@@ -422,7 +500,15 @@ export class LightningFx {
    * RESTRIKE, forks breaking off them, held `hold` s after it strikes.
    * `hit` as it first strikes, `contactEnds` as it lets go.
    */
-  bolt(from: () => Vector3, to: () => Vector3, o: { width: number; strands?: number; forks?: number; hold: number; delay?: number; light?: number; wander?: number }): LightningPlay {
+  bolt(from: () => Vector3, to: () => Vector3, o: { width: number; strands?: number; forks?: number; hold: number; delay?: number; light?: number; wander?: number;
+    /** Its colours (default: the white-hot arc in its amber halo), and its light's. */
+    colors?: BoltColors;
+    /** Held until this resolves (then it lets go), in place of `hold` s. */
+    holdUntil?: Promise<void>;
+    /** No camera shake as it strikes (Electric Terrain's crackle over the ground). */
+    quiet?: boolean;
+    /** The unit whose silhouette the bolt joins (its aura wraps body and bolt as one): its mask colour and UnitFx.addToMask. */
+    mask?: { color: Color4; add: (mesh: Mesh, mat: ShaderMaterial) => () => void } }): LightningPlay {
     const strands = o.strands ?? 2;
     const forks = o.forks ?? 3;
     let resolveHit!: () => void, resolveEnd!: () => void, resolveDone!: () => void;
@@ -437,12 +523,17 @@ export class LightningFx {
     const forkStrokes = forkEnds.map((f, i) => new Stroke(this.scene, {
       from: () => mains[f.host].at(f.at), to: () => f.end, width: o.width * 0.35, k: base + 10 + i,
     }));
+    if (o.colors) for (const s of [...mains, ...forkStrokes]) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); }
+    if (o.mask) for (const s of mains) s.maskIn(this.scene, o.mask.color, o.mask.add);
     const light = new PointLight('boltLight', Vector3.Zero(), this.scene);
-    light.diffuse = new Color3(1, 0.92, 0.6);
+    light.diffuse = o.colors?.light ?? new Color3(1, 0.92, 0.6);
     light.range = 3.5 * TILE_SCALE;
     light.intensity = 0;
     const start = this.time + (o.delay ?? 0);
     let lastStrike = -1, struck = false, ended = false;
+    // Held until told to let go (then for as long as it had been on).
+    let hold = o.holdUntil ? Infinity : o.hold;
+    void o.holdUntil?.then(() => { hold = Math.max(0, this.time - start); });
     const FADE = 0.15;
     const reFork = (t: number) => {
       const a = from(), b = to();
@@ -460,9 +551,9 @@ export class LightningFx {
     this.jobs.push((_dt, t, cam) => {
       const el = t - start;
       if (el < 0) { for (const s of [...mains, ...forkStrokes]) s.mesh.isVisible = false; return true; }
-      if (!struck) { struck = true; resolveHit(); this.opts.shake?.(o.width * 2, 140); }
-      if (!ended && el >= o.hold) { ended = true; resolveEnd(); }
-      const out = el >= o.hold ? 1 - (el - o.hold) / FADE : 1;
+      if (!struck) { struck = true; resolveHit(); if (!o.quiet) this.opts.shake?.(o.width * 2, 140); }
+      if (!ended && el >= hold) { ended = true; resolveEnd(); }
+      const out = el >= hold ? 1 - (el - hold) / FADE : 1;
       if (out <= 0) {
         for (const s of [...mains, ...forkStrokes]) s.dispose();
         light.dispose();
@@ -489,51 +580,64 @@ export class LightningFx {
   }
 
   /**
-   * Thunder: one very thick column of lightning dropped straight out of the
-   * sky onto `at` (barely wandering: a column, not a forked bolt), with
-   * strokes running out over the ground to `ring` (the tiles round it).
+   * Thunder: `count` Thunderbolt-thick bolts falling out of the sky, one after
+   * another (THUNDER_STAGGER apart), over the ground round `at` (the target)
+   * out to `ring` (the tiles round it), each landing in an amber pool and
+   * striking somewhere new every THUNDER_RESEAT. A hit: THUNDER_ON_TARGET of
+   * them strike the target, one after another (the first of them first of
+   * all). A miss (`miss`): none touches it — the rest land at least `clear`
+   * off it, leaning away from it, unforked.
    */
-  thunder(at: () => Vector3, o: { width: number; hold: number; ring: number; delay?: number }): LightningPlay {
-    const sky = (() => {
+  thunder(at: () => Vector3, o: { width: number; hold: number; ring: number; clear: number; delay?: number; count?: number; miss?: boolean }): LightningPlay {
+    const n = Math.max(o.count ?? THUNDER_BOLTS, THUNDER_ON_TARGET + 1);
+    const delay = o.delay ?? 0;
+    const base = this.serial * 3.1;
+    // Which bolts strike the target: every other one from the first, on a hit.
+    const onTarget = (i: number) => !o.miss && i % 2 === 0 && i / 2 < THUNDER_ON_TARGET;
+    const clear = Math.min(o.clear, o.ring * 0.9);
+    // Where bolt i lands now, and which way off the target (its angle).
+    const seat = (i: number) => {
+      const k = Math.floor((this.time + i * 0.137) / THUNDER_RESEAT) * 5.77 + i * 13.1 + base;
+      return { a: (i / n + 0.4 * hash(k)) * 6.283, r: clear + (o.ring - clear) * Math.sqrt(hash(k + 1)) };
+    };
+    const landing = (i: number) => {
       const p = at();
-      const a = hash(this.serial * 3.1) * 6.283;
-      return new Vector3(p.x + Math.cos(a) * 0.3 * TILE_SCALE, p.y + 18 * TILE_SCALE, p.z + Math.sin(a) * 0.3 * TILE_SCALE);
-    })();
-    const play = this.bolt(() => sky, at, { width: o.width, strands: 1, forks: 0, hold: o.hold, delay: o.delay, light: 4, wander: THUNDER_WANDER });
-    // The strike runs out over the ground once it lands.
-    void play.hit.then(() => {
-      const spokes = 7;
-      const ends = Array.from({ length: spokes }, () => new Vector3());
-      const strokes = ends.map((e, i) => new Stroke(this.scene, {
-        from: () => { const p = at(); return new Vector3(p.x, p.y + 0.03, p.z); }, to: () => e, width: o.width * 0.1, k: 20 + i,
-        bow: new Vector3(0, 0.12 * o.ring, 0), peak: 0.35,
-      }));
-      const pools = ends.map(() => new Pool(this.scene));
-      let stop = false;
-      void play.contactEnds.then(() => { stop = true; });
-      let fade = 1, lastSeat = -1;
-      this.jobs.push((dt, t, cam) => {
+      if (onTarget(i)) return p;
+      const { a, r } = seat(i);
+      return new Vector3(p.x + Math.cos(a) * r, p.y + 0.02, p.z + Math.sin(a) * r);
+    };
+    // The sky it falls from: off to one side — leaning away from the target,
+    // for one that misses it.
+    const skyOf = (i: number) => {
+      const p = landing(i);
+      const a = onTarget(i) ? hash(base + i * 7.7) * 6.283 : seat(i).a;
+      return new Vector3(p.x + Math.cos(a) * THUNDER_SLANT * TILE_SCALE, p.y + THUNDER_SKY * TILE_SCALE, p.z + Math.sin(a) * THUNDER_SLANT * TILE_SCALE);
+    };
+    // The first holds `hold` (its hit is the target's zap, if it is on it);
+    // the rest fall in after it and hold as long. Unforked when missing, so
+    // no fork reaches the target.
+    const forks = (i: number) => (o.miss ? 0 : i === 0 ? 4 : 3);
+    const main = this.bolt(() => skyOf(0), () => landing(0), { width: o.width, strands: 2, forks: forks(0), hold: o.hold, delay, light: 3 });
+    const rest = Array.from({ length: n - 1 }, (_, j) => this.bolt(() => skyOf(j + 1), () => landing(j + 1), {
+      width: o.width, strands: 2, forks: forks(j + 1), hold: 0, holdUntil: main.contactEnds, delay: delay + (j + 1) * THUNDER_STAGGER, light: 0.8,
+    }));
+    // An amber pool where each of the rest lands.
+    void main.hit.then(() => {
+      const pools = rest.map(() => new Pool(this.scene));
+      const struck = this.time;
+      let stop = false, fade = 1;
+      void main.contactEnds.then(() => { stop = true; });
+      this.jobs.push((dt, t) => {
         if (stop) fade -= dt / 0.15;
-        if (fade <= 0) { strokes.forEach((s) => s.dispose()); pools.forEach((p) => p.dispose()); return false; }
-        if (t - lastSeat >= LIFE * 0.6) {
-          lastSeat = t;
-          const p = at();
-          ends.forEach((e, i) => {
-            const a = (i / spokes + 0.15 * hash(t * 100 + i)) * 6.283;
-            const r = o.ring * (0.75 + 0.35 * hash(t * 50 + i * 3));
-            e.set(p.x + Math.cos(a) * r, p.y + 0.02, p.z + Math.sin(a) * r);
-          });
-          strokes.forEach((s, i) => { s.o.k = (20 + i + Math.floor(t / (LIFE * 0.6)) * 3.3) % 40; });
-        }
-        strokes.forEach((s, i) => {
-          s.lit = fade * illum(t * 2 + i) * 0.5 + fade * 0.5;
-          s.update(t, cam);
-          pools[i].set(ends[i], POOL_R * 1.4 * TILE_SCALE, s.lit * POOL_GAIN * 0.6);
+        if (fade <= 0) { pools.forEach((p) => p.dispose()); return false; }
+        pools.forEach((pool, j) => {
+          const on = t - struck >= (j + 1) * THUNDER_STAGGER ? 1 : 0;
+          pool.set(landing(j + 1), POOL_R * 1.4 * TILE_SCALE, on * fade * (0.6 + 0.4 * illum(t * 2 + j)) * POOL_GAIN * 0.6);
         });
         return true;
       });
     });
-    return play;
+    return { hit: main.hit, contactEnds: main.contactEnds, done: Promise.all([main.done, ...rest.map((r) => r.done)]).then(() => {}) };
   }
 
   dispose(): void {

@@ -27,9 +27,16 @@ interface RawMove {
   always_hits?: boolean;
   needs_momentum?: boolean;
   is_beam?: boolean;
+  /** A ball attack (Shadow Ball, Aura Sphere…): it can clash with beams, bolts and other balls. */
+  is_ball?: boolean;
+  /** A pulse attack (Psychic, Dark Pulse): rings sent in a rhythm; it clashes as beams and balls do. */
+  is_pulse?: boolean;
   self_hp_cost?: number;
   fixed_damage?: number;
   quick_priority?: boolean;
+  quick_dash?: boolean;
+  double_pass?: boolean;
+  is_ram?: boolean;
   recoil_fraction?: number;
   self_debuff?: Record<string, number>;
   skip_turn_on_hit?: boolean;
@@ -75,9 +82,14 @@ function buildMove(name: string, d: RawMove, fallback: MoveCategory): MoveDefini
     alwaysHits: d.always_hits ?? false,
     needsMomentum: d.needs_momentum ?? false,
     isBeam: d.is_beam ?? false,
+    isBall: d.is_ball ?? false,
+    isPulse: d.is_pulse ?? false,
+    isRam: d.is_ram ?? false,
     selfHpCost: d.self_hp_cost ?? 0,
     fixedDamage: d.fixed_damage ?? 0,
     quickPriority: d.quick_priority ?? false,
+    quickDash: d.quick_dash ?? ((d.quick_priority ?? false) && parseCategory(d.category, fallback) === MoveCategory.PHYSICAL),
+    doublePass: d.double_pass ?? false,
     recoilFraction: d.recoil_fraction ?? 0.0,
     selfDebuff: (d.self_debuff ?? {}) as Partial<Record<StatName, number>>,
     skipTurnOnHit: d.skip_turn_on_hit ?? false,

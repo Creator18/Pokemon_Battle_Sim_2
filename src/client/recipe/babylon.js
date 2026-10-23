@@ -15,11 +15,24 @@
 // stack the toolkit runs on the CPU (layer 0 under, R/G/B/A paint layers 1–4
 // over it IN ORDER, the linear constant converted to sRGB, times the albedo).
 // Babylon's own lighting, shadows, fog and skinning then apply on top.
+//
+// CEL SHADED. The light falling on the surface (all the lights summed, with
+// their shadows) is cut into CEL_BANDS flat tones — shadow, mid, lit — with a
+// narrow soft step between them (no stair-stepping at the edges); the colour
+// keeps its hue, and is a touch more saturated (CEL_SATURATION).
 
 import { sampleTrack as sample } from './tranm.js';
 
 // --- the colour-layer material plugin ---------------------------------------------
 const pluginClasses = new WeakMap();
+
+/** The cel bands: below each threshold (of the light's brightness) the surface takes that tone. */
+const CEL_SHADOW = 0.36, CEL_MID = 0.74;
+const CEL_TONES = [0.5, 0.8, 1.04];
+/** Half the width of the soft step between two bands. */
+const CEL_SOFT = 0.025;
+/** The albedo's colour pushed out from its grey by this much (1: as it was). */
+const CEL_SATURATION = 1.15;
 
 function layerPluginClass(B) {
   if (pluginClasses.has(B)) return pluginClasses.get(B);
@@ -29,10 +42,15 @@ function layerPluginClass(B) {
      * @param flash  [r,g,b,amount], shared by every material of one Pokémon: the
      *               finished pixel is mixed toward that colour by `amount` (hit flash)
      */
-    constructor(material, mask, layers, flash) {
+    constructor(material, mask, layers, flash, emission = null, highlight = null) {
       super(material, 'LayerComposite', 200, { LAYERCOMPOSITE: false });
       this.mask = mask;
       this.flash = flash;
+      // What it lights by itself (emissionColors), and the highlight's mask (an eye's catchlight).
+      const e = emission || { layers: [], highlight: null };
+      this.emis = [0, 1, 2, 3, 4].map((i) => (e.layers[i] ? [...e.layers[i], 1] : [0, 0, 0, 0]));
+      this.hlColor = e.highlight && highlight ? [...e.highlight, 1] : [0, 0, 0, 0];
+      this.hl = highlight;
       this.layers = layers.map((c) => (c ? [c[0], c[1], c[2], 1] : [0, 0, 0, 0]));
       if (!layers[0]) this.layers[0] = [1, 1, 1, 1];
       // `_isEnabled` is the plugin's own flag (the base class does not keep
@@ -44,15 +62,19 @@ function layerPluginClass(B) {
     }
     getClassName() { return 'LayerCompositePlugin'; }
     prepareDefines(defines) { defines.LAYERCOMPOSITE = this._isEnabled; }
-    getSamplers(samplers) { samplers.push('lymSampler'); }
-    getActiveTextures(list) { if (this.mask) list.push(this.mask); }
-    hasTexture(t) { return t === this.mask; }
+    getSamplers(samplers) { samplers.push('lymSampler', 'hlSampler'); }
+    getActiveTextures(list) { if (this.mask) list.push(this.mask); if (this.hl) list.push(this.hl); }
+    hasTexture(t) { return t === this.mask || t === this.hl; }
     getUniforms() {
       return {
         ubo: [...[0, 1, 2, 3, 4].map((i) => ({ name: `lcLayer${i}`, size: 4, type: 'vec4' })),
+          ...[0, 1, 2, 3, 4].map((i) => ({ name: `lcEmis${i}`, size: 4, type: 'vec4' })),
+          { name: 'lcHighlight', size: 4, type: 'vec4' },
           { name: 'lcFlash', size: 4, type: 'vec4' }],
         fragment: `#ifdef LAYERCOMPOSITE
           uniform vec4 lcLayer0; uniform vec4 lcLayer1; uniform vec4 lcLayer2; uniform vec4 lcLayer3; uniform vec4 lcLayer4;
+          uniform vec4 lcEmis0; uniform vec4 lcEmis1; uniform vec4 lcEmis2; uniform vec4 lcEmis3; uniform vec4 lcEmis4;
+          uniform vec4 lcHighlight;
           uniform vec4 lcFlash;
         #endif`,
       };
@@ -60,6 +82,7 @@ function layerPluginClass(B) {
     bindForSubMesh(ubo) {
       if (!this._isEnabled) return;
       ubo.setTexture('lymSampler', this.mask);
+      ubo.setTexture('hlSampler', this.hl || this.mask);
     }
     // Called on every draw, even when Babylon decides the material needn't
     // rebind. Many materials share one compiled shader, so without this a
@@ -69,16 +92,20 @@ function layerPluginClass(B) {
     hardBindForSubMesh(ubo, scene, engine, subMesh) {
       if (!this._isEnabled) return;
       this.layers.forEach((c, i) => ubo.updateFloat4(`lcLayer${i}`, c[0], c[1], c[2], c[3]));
+      this.emis.forEach((c, i) => ubo.updateFloat4(`lcEmis${i}`, c[0], c[1], c[2], c[3]));
+      const h = this.hlColor;
+      ubo.updateFloat4('lcHighlight', h[0], h[1], h[2], h[3]);
       const f = this.flash;
       ubo.updateFloat4('lcFlash', f[0], f[1], f[2], f[3]);
       const effect = subMesh.effect;
-      if (effect) effect.setTexture('lymSampler', this.mask);
+      if (effect) { effect.setTexture('lymSampler', this.mask); effect.setTexture('hlSampler', this.hl || this.mask); }
     }
     getCustomCode(shaderType) {
       if (shaderType !== 'fragment') return null;
       return {
         CUSTOM_FRAGMENT_DEFINITIONS: `#ifdef LAYERCOMPOSITE
           uniform sampler2D lymSampler;
+          uniform sampler2D hlSampler;
           vec3 lcToSRGB(vec3 v) {
             return mix(v * 12.92, 1.055 * pow(max(v, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), v));
           }
@@ -94,11 +121,37 @@ function layerPluginClass(B) {
             lcLin = mix(lcLin, lcLayer3.rgb, lcMask.b * lcLayer3.a);
             lcLin = mix(lcLin, lcLayer4.rgb, lcMask.a * lcLayer4.a);
             baseColor.rgb = lcToSRGB(lcLin) * lcLum;
+            // Cel: a little more saturated (pushed out from its own grey).
+            float lcGrey = dot(baseColor.rgb, vec3(0.299, 0.587, 0.114));
+            baseColor.rgb = max(mix(vec3(lcGrey), baseColor.rgb, ${CEL_SATURATION.toFixed(2)}), 0.0);
+          }
+        #endif`,
+        // Cel: the summed light (after every light and its shadow) cut into flat tones.
+        '!aggShadow=aggShadow\\/numLights;': `$0
+        #ifdef LAYERCOMPOSITE
+          {
+            float celL = dot(diffuseBase, vec3(0.299, 0.587, 0.114));
+            float celT = mix(${CEL_TONES[0].toFixed(3)}, ${CEL_TONES[1].toFixed(3)}, smoothstep(${(CEL_SHADOW - CEL_SOFT).toFixed(3)}, ${(CEL_SHADOW + CEL_SOFT).toFixed(3)}, celL));
+            celT = mix(celT, ${CEL_TONES[2].toFixed(3)}, smoothstep(${(CEL_MID - CEL_SOFT).toFixed(3)}, ${(CEL_MID + CEL_SOFT).toFixed(3)}, celL));
+            diffuseBase *= celT / max(celL, 1e-3);
           }
         #endif`,
         // After lighting and fog: the flash covers the shading, like a hit
         // flash in a sprite game, but keeps a little of the form.
         CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR: `#ifdef LAYERCOMPOSITE
+          {
+            // What it lights by itself, over the shading: each layer's glow where
+            // its mask says, and the highlight (an eye's catchlight) where its own does.
+            vec4 lcM = texture2D(lymSampler, vDiffuseUV);
+            vec3 lcE = lcEmis0.rgb;
+            lcE = mix(lcE, lcEmis1.rgb, lcM.r * lcEmis1.a);
+            lcE = mix(lcE, lcEmis2.rgb, lcM.g * lcEmis2.a);
+            lcE = mix(lcE, lcEmis3.rgb, lcM.b * lcEmis3.a);
+            lcE = mix(lcE, lcEmis4.rgb, lcM.a * lcEmis4.a);
+            vec4 lcH = texture2D(hlSampler, vDiffuseUV);
+            float lcHl = max(max(lcH.r, lcH.g), lcH.b) * lcHighlight.a;
+            color.rgb = mix(color.rgb + lcToSRGB(lcE), lcToSRGB(lcHighlight.rgb), lcHl);
+          }
           color.rgb = mix(color.rgb, lcFlash.rgb * (0.82 + 0.18 * dot(color.rgb, vec3(0.333))), lcFlash.a);
         #endif`,
       };
@@ -177,7 +230,7 @@ export function buildPokemon(B, scene, data, { shadowGenerator = null } = {}) {
     mat.diffuseTexture = tex(m.albedo) || white;
     mat.specularColor = new B.Color3(0.08, 0.08, 0.08);
     mat.specularPower = 24;
-    new Plugin(mat, tex(m.mask) || black, m.layers, flash);
+    new Plugin(mat, tex(m.mask) || black, m.layers, flash, m.emission, m.emission?.highlight ? tex(m.highlight) : null);
     materials.set(m.name, mat);
   }
 
@@ -316,18 +369,28 @@ export class AnimationPlayer {
       }
       // Per switched shape, its on/off by frame in this clip (null: as at rest).
       const vis = shown.map((s) => (c.vis && c.vis[s.name]) || null);
+      // (Its events, from its .traef: sounds, triggers — its blow's frame among them.)
       this.clips.set(action, { action, name: c.name, frames: c.frames, fps: c.fps, loop: c.loop,
-        duration: Math.max(1, c.frames - 1) / c.fps, bind, vis });
+        duration: Math.max(1, c.frames - 1) / c.fps, bind, vis, events: c.events || [] });
     }
 
     this.active = null;
     this.time = 0;
     this.speed = 1;
+    // Frozen solid: the pose holds whatever is played (a one-shot still
+    // resolves when it would have ended, so nothing waiting on it hangs).
+    this.frozen = false;
     this.fade = 0;
     this.fadeDur = 0;
     this._done = null;
     this._v = new B.Vector3(); this._q = new B.Quaternion(); this._s = new B.Vector3();
+    this._m1 = new B.Matrix(); this._m2 = new B.Matrix(); this._m3 = new B.Matrix();
     this._tmp = new Float32Array(4);
+    // Segment scale compensation (_apply): each bone's parent, by index. On:
+    // the games' rigs scale each segment of a chain on its own (Chandelure's
+    // flames swell ×2 a bone in its beam pose — compounded, ×16 at the tip).
+    this.parentIndex = Int32Array.from(restBones, (b) => (b.parent ?? -1));
+    this.ssc = true;
     this._obs = scene.onBeforeAnimationsObservable.add(() => this.update(scene.getEngine().getDeltaTime() / 1000));
   }
 
@@ -350,12 +413,17 @@ export class AnimationPlayer {
     this.fadeDur = fade;
     this.fade = fade > 0 ? 0 : 1;
     for (const b of clip.bind) { b.cr.k = 0; b.cp.k = 0; b.cs.k = 0; }
-    return new Promise((res) => { this._done = res; });
+    return new Promise((res) => {
+      this._done = res;
+      if (this.frozen && !this.loop) {
+        setTimeout(() => { if (this._done === res) { this._done = null; res(true); } }, (clip.duration / Math.max(0.05, speed)) * 1000);
+      }
+    });
   }
 
   update(dt) {
     const clip = this.active;
-    if (!clip) return;
+    if (!clip || this.frozen) return;
     this.time += dt * this.speed;
     if (this.fade < 1) this.fade = Math.min(1, this.fade + dt / Math.max(1e-3, this.fadeDur));
     let t = this.time;
@@ -400,16 +468,38 @@ export class AnimationPlayer {
     return v[Math.min(Math.round(Math.max(0, Math.min(t, clip.duration)) * clip.fps), v.length - 1)] === 1;
   }
 
-  /** Put pose P on the bones. */
+  /**
+   * Put pose P on the bones. With `ssc` (segment scale compensation), a
+   * bone's scale does not pass to its children: each child's local matrix
+   * undoes its parent's scale after its own rotation (S·R·S_parent⁻¹·T), so a
+   * chain of scaled bones (a flame, a tail) scales each segment once rather
+   * than compounding down the chain. Its translation still scales with the parent.
+   */
   _apply(P) {
     for (let i = 0; i < this.N; i++) {
       const o = i * STRIDE, bone = this.bones[i];
       this._v.set(P[o], P[o + 1], P[o + 2]);
       this._q.set(P[o + 3], P[o + 4], P[o + 5], P[o + 6]);
       this._s.set(P[o + 7], P[o + 8], P[o + 9]);
-      bone.position = this._v;
-      bone.rotationQuaternion = this._q;
-      bone.scaling = this._s;
+      const pi = this.ssc ? this.parentIndex[i] : -1;
+      if (pi < 0) {
+        bone.position = this._v;
+        bone.rotationQuaternion = this._q;
+        bone.scaling = this._s;
+        continue;
+      }
+      const po = pi * STRIDE, B = this.B;
+      const sx = P[po + 7] || 1, sy = P[po + 8] || 1, sz = P[po + 9] || 1;
+      const m = this._m1, r = this._m2, t = this._m3;
+      B.Matrix.ScalingToRef(this._s.x, this._s.y, this._s.z, m);
+      this._q.toRotationMatrix(r);
+      m.multiplyToRef(r, m);
+      B.Matrix.ScalingToRef(1 / sx, 1 / sy, 1 / sz, r);
+      m.multiplyToRef(r, m);
+      B.Matrix.TranslationToRef(this._v.x, this._v.y, this._v.z, t);
+      m.multiplyToRef(t, m);
+      bone.getLocalMatrix().copyFrom(m);
+      bone.markAsDirty();
     }
   }
 

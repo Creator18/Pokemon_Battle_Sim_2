@@ -1,0 +1,394 @@
+<!--
+  UI mockup: Pokédex shell × Fire Emblem battle windows.
+  A fragment injected over the running 3D scene (not wired to the game yet).
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  #dexui {
+    --shell: #c8102e; --shell-hi: #ef3b4f; --shell-lo: #7d0a1c; --hinge: #5a0714;
+    --bezel: #e8e4d8; --bezel-lo: #b9b3a2;
+    --lcd: #10282c; --lcd-2: #16363b; --lcd-ink: #bff5e6; --lcd-dim: #5fa89a;
+    --ally: #3b82f6; --ally-hi: #93c5fd; --foe: #ef4444; --foe-hi: #fca5a5;
+    --gold: #f5c542;
+    position: fixed; inset: 0; pointer-events: none; z-index: 40;
+    font-family: 'Chakra Petch', system-ui, sans-serif; color: var(--lcd-ink);
+  }
+  #dexui * { box-sizing: border-box; }
+  #dexui .num { font-family: 'VT323', monospace; letter-spacing: 1px; }
+
+  /* ── The Pokédex shell: red casing, hinge seam, LEDs, a cream bezel round an LCD ── */
+  .dex {
+    position: absolute; pointer-events: auto;
+    background: linear-gradient(160deg, var(--shell-hi), var(--shell) 40%, var(--shell-lo));
+    border-radius: 14px 14px 14px 4px; padding: 10px;
+    box-shadow: 0 0 0 2px var(--hinge), 0 10px 0 -2px var(--hinge), 0 14px 28px rgba(0,0,0,.45),
+      inset 0 2px 0 rgba(255,255,255,.35), inset 0 -3px 0 rgba(0,0,0,.25);
+  }
+  .dex .leds { display: flex; gap: 6px; align-items: center; margin: 0 0 8px 2px; }
+  .lens { width: 22px; height: 22px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #e0f2ff, #38bdf8 35%, #0b4f8a 75%);
+    box-shadow: 0 0 0 3px var(--bezel), 0 0 0 5px var(--hinge), 0 0 10px #38bdf8; }
+  .led { width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--hinge); }
+  .led.r { background: #ff5a5a; } .led.y { background: #ffd84a; } .led.g { background: #5ee08a; animation: blink 1.6s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .dex .tag { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #ffe2e6; opacity: .9; }
+  .bezel { background: linear-gradient(var(--bezel), var(--bezel-lo)); border-radius: 8px 8px 8px 22px; padding: 7px; }
+  .lcd {
+    position: relative; overflow: hidden; border-radius: 4px 4px 4px 16px;
+    background: linear-gradient(var(--lcd-2), var(--lcd)); box-shadow: inset 0 0 0 1px #000, inset 0 0 18px rgba(0,0,0,.6);
+    padding: 10px 12px;
+  }
+  /* Scanlines + a glass glint over every screen. */
+  .lcd::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(transparent 0 2px, rgba(0,0,0,.18) 2px 3px),
+      linear-gradient(115deg, rgba(255,255,255,.08) 0 30%, transparent 30%); }
+
+  /* ── Unit windows (Fire Emblem's top corners) ── */
+  .unit { top: 16px; width: 330px; }
+  .unit.ally { left: 16px; }
+  .unit.foe { right: 16px; }
+  .unit .row { display: flex; gap: 10px; align-items: center; }
+  .portrait { width: 64px; height: 64px; flex: none; border-radius: 6px; position: relative;
+    background: radial-gradient(circle at 50% 40%, var(--pc, #6890F0) 0 45%, #0a1a1d 46%);
+    box-shadow: inset 0 0 0 2px var(--side); }
+  .portrait .no { position: absolute; left: 3px; top: 1px; font-size: 13px; color: var(--lcd-dim); }
+  .unit.ally { --side: var(--ally); } .unit.foe { --side: var(--foe); }
+  .unit .plate { flex: 1; min-width: 0; }
+  .unit .name { font-size: 19px; font-weight: 700; line-height: 1; color: #fff; display: flex; align-items: baseline; gap: 8px; }
+  .unit .lv { font-size: 18px; color: var(--lcd-dim); }
+  .side-tag { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; padding: 1px 6px; border-radius: 3px; background: var(--side); color: #fff; }
+  .types { margin-top: 5px; display: flex; gap: 4px; }
+  .type { font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 1px 7px; border-radius: 2px; color: #111;
+    clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%); }
+  .hp { margin-top: 8px; display: flex; align-items: center; gap: 8px; }
+  .hp .lbl { font-size: 12px; font-weight: 700; color: var(--gold); }
+  .hp .val { font-size: 26px; line-height: .8; color: #fff; min-width: 74px; }
+  .hp .val small { font-size: 18px; color: var(--lcd-dim); }
+  /* FE's segmented HP bar. */
+  .segs { flex: 1; height: 12px; display: grid; grid-template-columns: repeat(20, 1fr); gap: 2px; }
+  .segs i { background: #0a1a1d; box-shadow: inset 0 0 0 1px #24474c; }
+  .segs i.on { background: var(--hpc, #5ee08a); box-shadow: inset 0 -3px 0 rgba(0,0,0,.25); }
+  .stats { margin-top: 8px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; font-size: 11px; }
+  .stats div { background: rgba(0,0,0,.25); border-radius: 2px; padding: 2px 4px; display: flex; justify-content: space-between; }
+  .stats b { color: var(--lcd-dim); font-weight: 600; }
+  .stats .up { color: #7dffb0; } .stats .dn { color: #ff8a8a; }
+  .conds { margin-top: 6px; display: flex; gap: 4px; min-height: 16px; }
+  .cond { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 2px; }
+
+  /* ── Turn / phase plate, top centre ── */
+  .phase { top: 16px; left: 50%; transform: translateX(-50%); padding: 6px 8px; border-radius: 10px; }
+  .phase .lcd { padding: 4px 16px; border-radius: 4px; display: flex; gap: 14px; align-items: center; white-space: nowrap; }
+  .phase .turn { font-size: 26px; line-height: 1; color: #fff; }
+  .phase .who { font-size: 12px; font-weight: 700; letter-spacing: 2px; color: var(--ally-hi); }
+  .phase .wx { font-size: 12px; color: var(--gold); }
+
+  /* ── Phase banner (FE's "PLAYER PHASE" sweep) ── */
+  .banner { position: absolute; top: 38%; left: 0; right: 0; height: 74px; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(90deg, transparent, rgba(30,64,175,.85) 18%, rgba(30,64,175,.85) 82%, transparent);
+    border-top: 2px solid var(--ally-hi); border-bottom: 2px solid var(--ally-hi);
+    animation: sweep 2.6s cubic-bezier(.2,.8,.2,1) both; }
+  .banner span { font-size: 44px; font-weight: 700; letter-spacing: 12px; color: #fff; font-style: italic;
+    text-shadow: 0 3px 0 #0b2a6b, 0 0 24px rgba(147,197,253,.8); }
+  @keyframes sweep { 0% { transform: translateX(-100%); opacity: 0; } 18%, 72% { transform: none; opacity: 1; } 100% { transform: translateX(100%); opacity: 0; } }
+
+  /* ── Command window (right): FE's command list, as Pokédex screen ── */
+  .cmd { right: 16px; bottom: 16px; width: 380px; }
+  .cmd .head { display: flex; justify-content: space-between; font-size: 11px; letter-spacing: 2px; color: var(--lcd-dim); margin-bottom: 6px; }
+  .mv { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; padding: 5px 8px; margin: 0 -4px;
+    border-radius: 3px; cursor: pointer; position: relative; }
+  .mv .ic { width: 14px; height: 14px; border-radius: 50%; background: var(--tc); box-shadow: 0 0 0 2px #0a1a1d, 0 0 0 3px var(--tc); }
+  .mv .nm { font-size: 16px; font-weight: 600; color: #fff; }
+  .mv .meta { font-size: 11px; color: var(--lcd-dim); margin-top: -2px; }
+  .mv .pw { text-align: right; font-size: 20px; line-height: 1; color: #fff; }
+  .mv .pw small { display: block; font-size: 12px; color: var(--lcd-dim); }
+  .mv.sel { background: linear-gradient(90deg, rgba(59,130,246,.45), rgba(59,130,246,.05)); box-shadow: inset 2px 0 0 var(--ally-hi); }
+  /* FE's pointing-hand cursor. */
+  .mv.sel::before { content: '▶'; position: absolute; left: -18px; color: var(--gold); font-size: 13px; animation: nudge .6s ease-in-out infinite alternate; }
+  @keyframes nudge { to { transform: translateX(4px); } }
+  .mv.cd { opacity: .45; }
+  .pips { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: middle; }
+  .pips i { width: 6px; height: 6px; background: #24474c; transform: rotate(45deg); }
+  .pips i.hot { background: var(--gold); }
+  .steps { display: flex; gap: 4px; margin-top: 10px; }
+  .steps span { flex: 1; text-align: center; font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 3px 0; border-radius: 2px; background: rgba(0,0,0,.3); color: var(--lcd-dim); }
+  .steps span.now { background: var(--ally); color: #fff; } .steps span.done { color: var(--lcd-ink); }
+  .btns { display: flex; gap: 10px; justify-content: flex-end; margin-top: 12px; }
+  /* The game's 3D button, in Pokédex colours. */
+  #dexui .pbw-btn { min-width: 0; }
+  #dexui .pbw-btn.dex-go { --deck: var(--hinge); --deck-glow: rgba(0,0,0,.3); --face: var(--shell); --rim: var(--shell-hi); --ink: #fff; }
+  #dexui .pbw-btn .pbw-btn-face { padding: 9px 20px; font-family: 'Chakra Petch'; font-weight: 700; letter-spacing: 1px; }
+
+  /* ── Combat forecast (FE), centre bottom ── */
+  .fc { left: 50%; bottom: 16px; transform: translateX(-50%); width: 400px; }
+  .fc .lcd { padding: 0; }
+  .fc .title { text-align: center; font-size: 11px; letter-spacing: 3px; color: var(--gold); padding: 6px 0 4px; background: rgba(0,0,0,.25); }
+  .fc .cols { display: grid; grid-template-columns: 1fr 70px 1fr; }
+  .fc .side { padding: 8px 12px 10px; }
+  .fc .side.a { background: linear-gradient(90deg, rgba(59,130,246,.35), transparent); }
+  .fc .side.b { background: linear-gradient(270deg, rgba(239,68,68,.35), transparent); text-align: right; }
+  .fc .who { font-size: 15px; font-weight: 700; color: #fff; }
+  .fc .mvn { font-size: 11px; color: var(--lcd-dim); }
+  .fc .hpto { font-size: 24px; color: #fff; margin-top: 2px; }
+  .fc .hpto .arrow { color: var(--gold); }
+  .fc .hpto .after { color: var(--foe-hi); }
+  .fc .mid { display: flex; flex-direction: column; justify-content: center; gap: 3px; font-size: 11px; font-weight: 700; color: var(--lcd-dim); text-align: center; letter-spacing: 1px; }
+  .fc .val { font-size: 20px; color: #fff; }
+  .fc .stack { display: grid; grid-template-rows: repeat(3, 1fr); gap: 3px; margin-top: 6px; }
+  .fc .x2 { display: inline-block; font-size: 12px; font-weight: 700; color: #111; background: var(--gold); padding: 0 5px; border-radius: 2px; margin-left: 4px; }
+  .fc .eff { color: #7dffb0; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+
+  /* ── Tile window (FE's terrain box), bottom left ── */
+  .tile { left: 16px; bottom: 16px; width: 200px; }
+  .tile .t { font-size: 16px; font-weight: 700; color: #fff; }
+  .tile .k { display: flex; justify-content: space-between; font-size: 12px; color: var(--lcd-dim); margin-top: 2px; }
+  .tile .k b { color: #fff; font-family: 'VT323'; font-size: 18px; font-weight: 400; }
+
+  /* ── Log: a Pokédex entry ticker, above the tile box ── */
+  .log { left: 16px; bottom: 178px; width: 300px; padding: 7px; border-radius: 10px; }
+  .log .lcd { font-size: 13px; line-height: 1.45; max-height: 120px; padding: 8px 10px; }
+  .log .lcd p { margin: 0; color: var(--lcd-dim); }
+  .log .lcd p:last-child { color: var(--lcd-ink); }
+  .log .lcd p:last-child::after { content: '▌'; animation: blink 1s steps(1) infinite; }
+  .log .hd { font-size: 10px; letter-spacing: 2px; color: var(--gold); margin-bottom: 3px; }
+
+  /* ── Action points ─────────────────────────────────────────────── */
+  /* The AP bar: 100 AP as 20 cells, filled by what the plan spends on —
+     move (blue), charge (gold), wind-up (white) — the rest left over. */
+  .ap { margin-top: 10px; }
+  .ap .top { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; letter-spacing: 1.5px; color: var(--lcd-dim); }
+  .ap .top b { font-family: 'VT323'; font-size: 22px; font-weight: 400; color: #fff; letter-spacing: 1px; }
+  .ap .top b small { font-size: 16px; color: var(--lcd-dim); }
+  .apbar { margin-top: 3px; height: 16px; display: grid; grid-template-columns: repeat(20, 1fr); gap: 2px; }
+  .apbar i { background: #0a1a1d; box-shadow: inset 0 0 0 1px #24474c; }
+  .apbar i.mv { background: var(--ally); box-shadow: inset 0 -3px 0 rgba(0,0,0,.3); }
+  .apbar i.ch { background: var(--gold); box-shadow: inset 0 -3px 0 rgba(0,0,0,.3); }
+  .apbar i.wu { background: #e8e4d8; box-shadow: inset 0 -3px 0 rgba(0,0,0,.3); }
+  .apkey { display: flex; gap: 10px; margin-top: 4px; font-size: 10px; color: var(--lcd-dim); }
+  .apkey span::before { content: ''; display: inline-block; width: 8px; height: 8px; margin-right: 4px; vertical-align: -1px; background: var(--k); }
+  /* Two-way switches (plan order, physical mode): FE's option toggles. */
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .opt { font-size: 10px; letter-spacing: 1.5px; color: var(--lcd-dim); }
+  .seg2 { display: flex; margin-top: 3px; border-radius: 3px; overflow: hidden; box-shadow: inset 0 0 0 1px #24474c; }
+  .seg2 span { flex: 1; text-align: center; padding: 4px 0; font-size: 10px; font-weight: 700; color: var(--lcd-dim); cursor: pointer; }
+  .seg2 span.on { background: var(--ally); color: #fff; }
+  /* Charge: levels as stepped pips; the hatched ones are past what is left. */
+  .charge { margin-top: 10px; display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto auto; gap: 8px; align-items: center; }
+  .charge .lbl { font-size: 10px; letter-spacing: 1.5px; color: var(--lcd-dim); }
+  .charge .lv8 { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+  .charge .lv8 i { height: 12px; background: #0a1a1d; box-shadow: inset 0 0 0 1px #24474c; clip-path: polygon(4px 0, 100% 0, calc(100% - 4px) 100%, 0 100%); }
+  .charge .lv8 i.on { background: var(--gold); }
+  .charge .lv8 i.cant { background: repeating-linear-gradient(90deg, transparent 0 2px, #24474c 2px 3px); box-shadow: none; }
+  .charge .mult { font-family: 'VT323'; font-size: 20px; color: var(--gold); }
+  .stepbtn { width: 20px; height: 18px; display: grid; place-items: center; border-radius: 2px; background: rgba(0,0,0,.35); color: #fff; font-weight: 700; cursor: pointer; font-size: 12px; }
+  /* Unit windows: AP rates, and stat stages with rounds left. */
+  .rates { margin-top: 6px; display: flex; gap: 10px; font-size: 11px; color: var(--lcd-dim); }
+  .rates b { font-family: 'VT323'; font-size: 17px; font-weight: 400; color: #fff; }
+  .stats .t { font-size: 11px; color: var(--lcd-dim); margin-left: 1px; }
+  .warn, .warn b { color: #ff8a8a !important; }
+  /* Phase plate: round, phase, the rival's state, the selection timer. */
+  .phase .ph { font-size: 12px; font-weight: 700; letter-spacing: 2px; padding: 2px 8px; border-radius: 2px; background: var(--ally); color: #fff; }
+  .phase .lock { font-size: 11px; color: var(--lcd-dim); letter-spacing: 1px; }
+  .phase .lock b { color: #7dffb0; }
+  /* The AP clock (bottom centre, above the forecast): the round's 0–100
+     timeline with your plan laid out on it; the rival's hidden till execution. */
+  .clock { left: 50%; bottom: 214px; transform: translateX(-50%); width: 400px; padding: 7px; border-radius: 10px; }
+  .clock .lcd { padding: 7px 10px 8px; }
+  .clock .hd { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: 2px; color: var(--gold); }
+  .clock .lanes { padding-left: 38px; }
+  .lane { position: relative; height: 16px; margin-top: 6px; background: rgba(0,0,0,.3); border-radius: 2px; }
+  .lane .who { position: absolute; left: -38px; top: 0; font-size: 10px; letter-spacing: 1px; color: var(--lcd-dim); line-height: 16px; }
+  .lane .seg { position: absolute; top: 2px; bottom: 2px; border-radius: 1px; }
+  .lane .seg.mv { background: var(--ally); } .lane .seg.ch { background: var(--gold); } .lane .seg.wu { background: #e8e4d8; }
+  .lane .fire { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #fff; box-shadow: 0 0 6px #fff; }
+  .lane.foe { background: repeating-linear-gradient(90deg, rgba(239,68,68,.18) 0 6px, transparent 6px 10px); }
+  .lane.foe .q { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10px; letter-spacing: 2px; color: var(--foe-hi); }
+  .ticks { display: flex; justify-content: space-between; font-family: 'VT323'; font-size: 13px; color: var(--lcd-dim); margin-top: 2px; }
+  .fc .note { padding: 0 12px 8px; font-size: 11px; color: var(--lcd-dim); text-align: center; }
+  .fc .note b { color: var(--gold); font-weight: 700; }
+
+
+  /* ── Layout: a grid over the whole window, so the windows never overlap ──
+     Wide: units and the phase plate along the top; log + tile (left), clock +
+     forecast (middle) and the command window (right) along the bottom; the
+     board shows through the empty middle row. The whole UI is scaled by --ui
+     (from the window size, 0.5–1.2), so it keeps its proportions anywhere. */
+  #dexui {
+    display: grid; gap: 12px; padding: 14px; box-sizing: border-box;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas: "ally phase foe" ". . ." "left mid cmd";
+    zoom: var(--ui, 1); width: calc(100vw / var(--ui, 1)); height: calc(100vh / var(--ui, 1));
+  }
+  #dexui .dex { position: relative; inset: auto; transform: none; }
+  #dexui .unit.ally { grid-area: ally; justify-self: start; width: 330px; max-width: 100%; }
+  #dexui .unit.foe  { grid-area: foe;  justify-self: end;   width: 330px; max-width: 100%; }
+  #dexui .phase { grid-area: phase; align-self: start; }
+  #dexui .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; justify-content: flex-end; }
+  #dexui .col.left { grid-area: left; align-items: flex-start; }
+  #dexui .col.mid  { grid-area: mid;  align-items: center; }
+  #dexui .cmd  { grid-area: cmd; justify-self: end; align-self: end; width: 380px; max-width: 100%; }
+  #dexui .log  { width: 300px; max-width: 100%; }
+  #dexui .tile { width: 200px; }
+  #dexui .clock, #dexui .fc { width: 400px; max-width: 100%; }
+  #dexui .banner { position: absolute; }
+  .apbar, .segs, .ap, .charge, .opts { min-width: 0; }
+  #dexui .lcd { min-width: 0; }
+
+  /* Medium (the middle gets tight): two columns; the clock and forecast
+     stack above the command window on the right. */
+  @media (max-aspect-ratio: 4/3) {
+    #dexui { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      grid-template-areas: "ally foe" "phase phase" ". ." "left mid" "left cmd"; grid-template-rows: auto auto 1fr auto auto; }
+    #dexui .phase { justify-self: center; }
+    #dexui .col.mid { align-items: flex-end; }
+  }
+  /* Tall / phone: one column — units side by side and compact on top, the
+     command window full width at the bottom; log and tile fold away. */
+  @media (max-aspect-ratio: 4/5) {
+    #dexui { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr auto auto;
+      grid-template-areas: "ally foe" "phase phase" ". ." "mid mid" "cmd cmd"; }
+    #dexui .unit.ally, #dexui .unit.foe { width: auto; justify-self: stretch; }
+    #dexui .unit .stats, #dexui .unit .rates { display: none; }
+    #dexui .col.left { display: none; }
+    #dexui .col.mid { display: flex; }
+    #dexui .col.mid .fc { display: none; }
+    #dexui .clock { width: 100%; }
+    #dexui .cmd { width: 100%; justify-self: stretch; }
+  }
+</style>
+
+<div id="dexui">
+  <div class="banner"><span>SELECTION PHASE</span></div>
+
+  <div class="dex phase"><div class="bezel"><div class="lcd">
+    <span class="turn num">ROUND 04</span><span class="ph">SELECT</span>
+    <span class="lock">RIVAL <b>● PLANNING</b> · <span class="num" style="font-size:16px;color:#fff">0:24</span></span>
+    <span class="wx">☀ SUN · 2</span>
+  </div></div></div>
+
+  <div class="dex unit ally">
+    <div class="leds"><span class="lens"></span><span class="led r"></span><span class="led y"></span><span class="led g"></span><span class="tag">P1 · YOU</span></div>
+    <div class="bezel"><div class="lcd">
+      <div class="row">
+        <div class="portrait" style="--pc:#5b8fc7"><span class="no num">No.376</span></div>
+        <div class="plate">
+          <div class="name">Metagross <span class="lv num">Lv50</span></div>
+          <div class="types"><span class="type" style="background:#B8B8D0">STEEL</span><span class="type" style="background:#F85888">PSYCHIC</span></div>
+          <div class="hp"><span class="lbl">HP</span><span class="val num">142<small>/180</small></span><div class="segs" style="--hpc:#5ee08a"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i></div></div>
+        </div>
+      </div>
+      <div class="stats num"><div><b>ATK</b>135</div><div><b>DEF</b>130</div><div><b>SPA</b>95</div><div><b>SPD</b>90</div><div><b>SPE</b><span class="up">105▲<span class="t">2R</span></span></div></div>
+      <div class="rates"><span>MOVE <b>19</b> AP/tile</span><span>CHARGE <b>21</b> AP/lv</span><span>BUDGET <b>100</b></span></div>
+    </div></div>
+  </div>
+
+  <div class="dex unit foe">
+    <div class="leds"><span class="lens"></span><span class="led r"></span><span class="led y"></span><span class="led g"></span><span class="tag">P2 · RIVAL</span></div>
+    <div class="bezel"><div class="lcd">
+      <div class="row">
+        <div class="portrait" style="--pc:#e0743a"><span class="no num">No.006</span></div>
+        <div class="plate">
+          <div class="name">Charizard <span class="lv num">Lv50</span></div>
+          <div class="types"><span class="type" style="background:#F08030">FIRE</span><span class="type" style="background:#A890F0">FLYING</span></div>
+          <div class="hp"><span class="lbl">HP</span><span class="val num">96<small>/166</small></span><div class="segs" style="--hpc:#ffd84a"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+        </div>
+      </div>
+      <div class="stats num"><div><b>ATK</b>84</div><div><b>DEF</b><span class="dn">78▼<span class="t">1R</span></span></div><div><b>SPA</b>109</div><div><b>SPD</b>85</div><div><b>SPE</b>100</div></div>
+      <div class="rates"><span>MOVE <b>20</b> AP/tile</span><span>CHARGE <b>20</b> AP/lv</span><span class="warn">BUDGET <b>50</b> · RECHARGING</span></div>
+    </div></div>
+  </div>
+
+  <div class="col left">
+  <div class="dex log"><div class="bezel"><div class="lcd">
+    <div class="hd">BATTLE LOG · ROUND 3</div>
+    <p>@32 Metagross used Agility! Speed rose for 3 rounds.</p>
+    <p>@60 Charizard fired Hyper Beam at (−1, 2)… it missed!</p>
+    <p>Charizard must recharge: −50 AP next round.</p>
+  </div></div></div>
+
+  <div class="dex tile"><div class="bezel"><div class="lcd">
+    <div class="t">Tall Grass</div>
+    <div class="k">Tile <b>(0, 2)</b></div>
+    <div class="k">Step cost <b>×1</b></div>
+    <div class="k">To enter <b>19 AP</b></div>
+    <div class="k">Line of sight <b>CLEAR</b></div>
+  </div></div></div>
+
+  </div>
+  <div class="col mid">
+  <div class="dex clock"><div class="bezel"><div class="lcd">
+    <div class="hd"><span>AP CLOCK · ROUND 4</span><span>YOU STRIKE @48</span></div>
+    <div class="lanes">
+      <div class="lane"><span class="who">YOU</span>
+        <span class="seg mv" style="left:0;width:38%"></span>
+        <span class="seg wu" style="left:38%;width:10%"></span>
+        <span class="fire" style="left:48%"></span>
+      </div>
+      <div class="lane foe"><span class="who">RIVAL</span><span class="q">HIDDEN · 50 AP</span></div>
+      <div class="ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div>
+    </div>
+  </div></div></div>
+
+  <div class="dex fc"><div class="bezel"><div class="lcd">
+    <div class="title">COMBAT FORECAST</div>
+    <div class="cols">
+      <div class="side a"><div class="who">Metagross</div><div class="mvn">Meteor Mash · 90 · run</div><div class="hpto num">142</div></div>
+      <div class="mid"><div class="stack"><span>DMG</span><span>HIT</span><span>BOOST</span></div></div>
+      <div class="side b"><div class="who">Charizard</div><div class="mvn">if still on (1, 2)</div><div class="hpto num">96 <span class="arrow">→</span> <span class="after">29</span></div></div>
+    </div>
+    <div class="cols" style="padding-bottom:6px">
+      <div class="side a" style="background:none;padding-top:0"><div class="stack num"><span class="val">67<span class="eff"> ×1</span></span><span class="val">90%</span><span class="val">MOM ×1.2</span></div></div>
+      <div></div>
+      <div class="side b" style="background:none;padding-top:0"><div class="stack num"><span class="val">?</span><span class="val">?</span><span class="val">?</span></div></div>
+    </div>
+    <div class="note">Strikes at <b>AP 48</b>: misses if Charizard has left the tile by then.</div>
+  </div></div></div>
+
+  </div>
+  <div class="dex cmd">
+    <div class="leds"><span class="lens"></span><span class="led r"></span><span class="led y"></span><span class="led g"></span><span class="tag">COMMAND</span></div>
+    <div class="bezel"><div class="lcd">
+      <div class="head"><span>MOVES</span><span>POW</span></div>
+      <div class="mv sel" style="--tc:#B8B8D0"><span class="ic"></span><div><div class="nm">Meteor Mash</div><div class="meta">Steel · Physical · run or launch</div></div><div class="pw num">90<small>MOM ×1.2</small></div></div>
+      <div class="mv" style="--tc:#F85888"><span class="ic"></span><div><div class="nm">Psychic</div><div class="meta">Psychic · Special · beam · chargeable</div></div><div class="pw num">90<small>CHG ≤×1.8</small></div></div>
+      <div class="mv" style="--tc:#78C850"><span class="ic"></span><div><div class="nm">Solar Beam</div><div class="meta">Grass · Special · <span style="color:var(--gold)">min charge waived in sun</span></div></div><div class="pw num">120<small>CHG ≥40</small></div></div>
+      <div class="mv" style="--tc:#F85888"><span class="ic"></span><div><div class="nm">Agility</div><div class="meta">Psychic · Status · then move faster</div></div><div class="pw num">—<small>SPE +2 · 3R</small></div></div>
+
+      <div class="opts">
+        <div class="opt">PLAN ORDER<div class="seg2"><span class="on">MOVE → ATTACK</span><span>ATTACK → MOVE</span></div></div>
+        <div class="opt">PHYSICAL<div class="seg2"><span class="on">RUN</span><span>CHARGE &amp; LAUNCH</span></div></div>
+      </div>
+      <div class="charge"><span class="lbl">CHARGE</span><span class="stepbtn">−</span>
+        <div class="lv8"><i></i><i></i><i class="cant"></i><i class="cant"></i><i class="cant"></i><i class="cant"></i><i class="cant"></i><i class="cant"></i></div>
+        <span class="stepbtn">+</span><span class="mult">×1.0</span></div>
+
+      <div class="ap">
+        <div class="top"><span>ACTION POINTS</span><b>52<small> / 100 LEFT</small></b></div>
+        <div class="apbar"><i class="mv"></i><i class="mv"></i><i class="mv"></i><i class="mv"></i><i class="mv"></i><i class="mv"></i><i class="mv"></i><i class="mv"></i><i class="wu"></i><i class="wu"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="apkey"><span style="--k:var(--ally)">MOVE 2 tiles · 38</span><span style="--k:var(--gold)">CHARGE 0</span><span style="--k:#e8e4d8">WIND-UP 10</span></div>
+      </div>
+      <div class="steps"><span class="done">MOVE ✓</span><span class="done">PATH ✓</span><span class="now">CHARGE</span><span>TARGET</span><span>LOCK IN</span></div>
+      <div class="btns">
+        <button class="pbw-btn ghost"><span class="pbw-btn-deck"></span><span class="pbw-btn-face"><span class="pbw-btn-spot"></span><span class="pbw-btn-sheen"></span><span class="pbw-btn-label">Clear path</span></span></button>
+        <button class="pbw-btn dex-go"><span class="pbw-btn-deck"></span><span class="pbw-btn-face"><span class="pbw-btn-spot"></span><span class="pbw-btn-sheen"></span><span class="pbw-btn-label">Pick target</span></span></button>
+      </div>
+    </div></div>
+  </div>
+</div>
+<script>
+  (() => {
+    const ui = document.getElementById('dexui');
+    const fit = () => {
+      // (Against the layout in use: a tall window lays out one column, a
+      // squarish one stacks the right column higher.)
+      const tall = innerWidth / innerHeight <= 4 / 5;
+      const mid = !tall && innerWidth / innerHeight <= 4 / 3;
+      const k = tall ? Math.min(innerWidth / 560, innerHeight / 1100)
+        : mid ? Math.min(innerWidth / 900, innerHeight / 1250)
+        : Math.min(innerWidth / 1500, innerHeight / 900);
+      ui.style.setProperty('--ui', String(Math.max(0.45, Math.min(1.2, k))));
+    };
+    fit(); addEventListener('resize', fit);
+  })();
+</script>

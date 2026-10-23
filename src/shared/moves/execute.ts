@@ -8,10 +8,11 @@
 import { ActionOrder, MoveCategory, PokemonStatus, TerrainType } from '../core/enums.ts';
 import { MoveDefinition } from './moveDefinition.ts';
 import { Pokemon } from '../model/pokemon.ts';
-import { TerrainManager } from '../terrain/terrainManager.ts';
+import { TerrainManager, isGrounded, type GrassFireSplit } from '../terrain/terrainManager.ts';
 import { TurnDeclaration } from '../engine/declaration.ts';
 import { RNG } from '../rng.ts';
 import { isSelfArea, quakeZone, quakeLanding } from './quake.ts';
+import { isGrassTile } from '../terrain/grass.ts';
 import { getMove, moveType } from '../data/moves.ts';
 import { getTypeEffectiveness } from '../core/typechart.ts';
 import {
@@ -30,6 +31,8 @@ import {
   getHexPower,
   getMoveTypeMult,
   getWeatherMult,
+  sandSpDefMult,
+  terrainPulseType,
   momentumMultiplier,
   chargeMultiplier,
   chargesUp,
@@ -45,7 +48,8 @@ import {
   ELECTRO_WEB_SPEED_STAGES,
   PERISH_COUNTDOWN_TURNS,
   TILTED_DURATION,
-} from '../core/constants.ts';
+  GRASS_FIRE_DURATION, ICE_BEAM_FREEZE_CHANCE, FREEZE_RAIN_MULT, FREEZE_MELT_FIRE_MULT, THUNDER_ACCURACY,
+  FIELD_DURATION, TERRAIN_PULSE_POWER_MULT } from '../core/constants.ts';
 
 /** Result of executing a move. */
 export interface MoveResult {
@@ -76,11 +80,13 @@ export interface MoveResult {
   selfCost: number;
   /** Thrown off its tile by the attack (Earthquake): where from, where to. */
   knockback: { playerId: number; from: Tile; to: Tile } | null;
+  /** The defender dodged it (an accuracy miss): it side-stepped to a tile beside it, out of the way. */
+  dodge: { playerId: number; from: Tile; to: Tile } | null;
   missReason: string;
   logLines: string[];
 }
 
-function newResult(): MoveResult {
+export function newResult(): MoveResult {
   return {
     hit: false,
     damageDealt: 0,
@@ -103,6 +109,7 @@ function newResult(): MoveResult {
     flinched: false,
     qaLandedAt: null,
     knockback: null,
+    dodge: null,
     selfCost: 0,
     missReason: '',
     logLines: [],
@@ -111,6 +118,56 @@ function newResult(): MoveResult {
 
 function totalMultiplier(r: MoveResult): number {
   return r.momentumMult * r.chargeMult * r.clashMult * r.powerMult * r.boostMult * r.typeMult * r.weatherMult;
+}
+
+/**
+ * Light the grass on the line from `attacker` to `to` (not its own tile):
+ * burn zones, the grass scorched away. `upTo` (0..1) stops it that share of
+ * the way (a beam held in a clash, up to where the beams meet); `split` marks
+ * the fires as half of a tied clash's (GrassFireSplit). A grass fire already
+ * on its line, lit by another, becomes this one's (its beam has taken it over).
+ */
+/**
+ * Does the move scale with momentum (its straight run-up before it, +a share
+ * a tile up to the cap, no early-stop boost on top)? Every physical attack does
+ * — rams among them — and the momentum moves; not a priority move (Quick
+ * Attack, Bullet Punch, Sucker Punch…), which strikes first instead.
+ */
+export function scalesWithMomentum(move: MoveDefinition): boolean {
+  if (move.quickPriority) return false;
+  return move.needsMomentum || move.isRam || move.category === MoveCategory.PHYSICAL;
+}
+
+export function burnGrass(attacker: Pokemon, to: Tile, tm: TerrainManager, grid: ReadonlySet<string>, result: MoveResult,
+  opts: { upTo?: number; split?: GrassFireSplit } = {}): void {
+  const line = hexLineTiles(attacker.tile[0], attacker.tile[1], to[0], to[1]).slice(1);
+  const upTo = opts.upTo ?? 1;
+  line.forEach((tile, i) => {
+    if ((i + 1) / line.length > upTo + 1e-9) return;
+    burnGrassTile(attacker, tile, tm, grid, result, opts.split);
+  });
+}
+
+/** Set one tile's grass alight (not under its attacker; one already burning is taken over). */
+export function burnGrassTile(attacker: Pokemon, tile: Tile, tm: TerrainManager, grid: ReadonlySet<string>, result: MoveResult,
+  split?: GrassFireSplit): void {
+  const key = tileKey(tile[0], tile[1]);
+  if (!grid.has(key) || attacker.tiles.some((t) => t[0] === tile[0] && t[1] === tile[1])) return;
+  const there = tm.getTerrain(tile);
+  if (there?.grassFire) {
+    // Already burning: this fire takes it (unless both halves of a tie meet here).
+    if (split) { there.split = split; return; }
+    there.owner = attacker.playerId;
+    there.split = null;
+    return;
+  }
+  if (!isGrassTile(tile[0], tile[1]) || tm.isScorched(tile) || there) return;
+  const fire = tm.addTerrain(tile, TerrainType.BURN_ZONE, attacker.playerId, GRASS_FIRE_DURATION);
+  fire.grassFire = true;
+  fire.split = split ?? null;
+  tm.scorch(tile);
+  result.terrainPlaced.push([tile, TerrainType.BURN_ZONE]);
+  result.logLines.push(`The grass at ${key} caught fire!`);
 }
 
 /** A move that costs its user HP to fire (selfHpCost): pay it, once fired. */
@@ -139,6 +196,27 @@ function qaCheckStraightLine(
   return true;
 }
 
+/**
+ * Where a double-pass dash (Aerial Ace) pulls up: the tile two short of its
+ * target on the straight line it came in on (where it stood, if that is
+ * nearer); if that tile is taken, the nearest free one before it on the line,
+ * back to its start.
+ */
+function passLandingTile(
+  attackerTile: Tile,
+  defenderTile: Tile,
+  blockedTiles: ReadonlySet<string>,
+  occupiedTiles: ReadonlySet<string>,
+  grid: ReadonlySet<string>,
+): Tile {
+  const line = hexLineTiles(attackerTile[0], attackerTile[1], defenderTile[0], defenderTile[1]);
+  for (let i = Math.max(0, line.length - 3); i > 0; i--) {
+    const key = tileKey(line[i][0], line[i][1]);
+    if (grid.has(key) && !blockedTiles.has(key) && !occupiedTiles.has(key)) return line[i];
+  }
+  return attackerTile;
+}
+
 function qaLandingTile(
   attackerTile: Tile,
   defenderTile: Tile,
@@ -154,12 +232,23 @@ function qaLandingTile(
     }
   }
   if (candidates.length === 0) return null;
+  // The free neighbour nearest the path it dashed along (the straight line
+  // from where it stood to the target); of two as near, the one nearer its start.
+  const centre = (t: Tile): [number, number] => [Math.sqrt(3) * (t[0] + t[1] / 2), 1.5 * t[1]];
+  const [ax, ay] = centre(attackerTile), [dx, dy] = centre(defenderTile);
+  const fromPath = (t: Tile): number => {
+    const [px, py] = centre(t);
+    const vx = dx - ax, vy = dy - ay, L2 = vx * vx + vy * vy;
+    const k = L2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * vx + (py - ay) * vy) / L2)) : 0;
+    return Math.hypot(px - (ax + k * vx), py - (ay + k * vy));
+  };
   let best = candidates[0];
-  let bestDist = hexDistance(attackerTile[0], attackerTile[1], best[0], best[1]);
+  let bestPath = fromPath(best), bestDist = hexDistance(attackerTile[0], attackerTile[1], best[0], best[1]);
   for (const c of candidates.slice(1)) {
-    const d = hexDistance(attackerTile[0], attackerTile[1], c[0], c[1]);
-    if (d < bestDist) {
+    const p = fromPath(c), d = hexDistance(attackerTile[0], attackerTile[1], c[0], c[1]);
+    if (p < bestPath - 1e-6 || (Math.abs(p - bestPath) <= 1e-6 && d < bestDist)) {
       best = c;
+      bestPath = p;
       bestDist = d;
     }
   }
@@ -216,15 +305,36 @@ export function validateMove(
 // ── Terrain moves ────────────────────────────
 const MOVE_TO_TERRAIN: Record<string, TerrainType> = {
   'Will-O-Wisp': TerrainType.BURN_ZONE,
-  'Misty Terrain': TerrainType.MIST_ZONE,
   'Stealth Rock': TerrainType.ROCK_TRAP,
   'Toxic Spikes': TerrainType.POISON_TRAP,
   'Smokescreen Field': TerrainType.FOG_ZONE,
-  'Metal Sound Field': TerrainType.RESONANCE_ZONE,
   'Perish Trap': TerrainType.PERISH_ZONE,
-  Hail: TerrainType.ICE_ZONE,
   'Electro Web': TerrainType.SLOW_ZONE,
 };
+
+/** Moves that set a weather or a terrain over the whole field (FIELD_DURATION turns, as in the games). */
+const MOVE_TO_FIELD: Record<string, TerrainType> = {
+  'Sunny Day': TerrainType.SUNNY_ZONE,
+  'Rain Dance': TerrainType.RAIN_ZONE,
+  Hail: TerrainType.HAIL,
+  Sandstorm: TerrainType.SANDSTORM,
+  'Electric Terrain': TerrainType.ELECTRIC_TERRAIN,
+  'Grassy Terrain': TerrainType.GRASSY_TERRAIN,
+  'Misty Terrain': TerrainType.MISTY_TERRAIN,
+  'Psychic Terrain': TerrainType.PSYCHIC_TERRAIN,
+};
+
+/**
+ * Misty Terrain keeps a grounded Pokémon from any status condition (burn,
+ * paralysis, sleep, poison, freeze); Electric Terrain, from falling asleep.
+ */
+function terrainGuards(tm: TerrainManager, defender: Pokemon, sleep = false): string | null {
+  if (!isGrounded(defender)) return null;
+  const t = tm.fieldTerrain();
+  if (t === TerrainType.MISTY_TERRAIN) return 'Misty Terrain';
+  if (sleep && t === TerrainType.ELECTRIC_TERRAIN) return 'Electric Terrain';
+  return null;
+}
 
 function executeTerrainMove(
   move: MoveDefinition,
@@ -236,10 +346,10 @@ function executeTerrainMove(
   const result = newResult();
   result.hit = true;
 
-  if (move.name === 'Sunny Day' || move.name === 'Rain Dance') {
-    const tt = move.name === 'Sunny Day' ? TerrainType.SUNNY_ZONE : TerrainType.RAIN_ZONE;
-    tm.addTerrain(attacker.tile, tt, attacker.playerId, TERRAIN_DURATION_MINOR + 1);
-    result.terrainPlaced.push([attacker.tile, tt]);
+  const field = MOVE_TO_FIELD[move.name];
+  if (field !== undefined) {
+    tm.addTerrain(attacker.tile, field, attacker.playerId, FIELD_DURATION);
+    result.terrainPlaced.push([attacker.tile, field]);
     result.logLines.push(`${attacker.logName} (P${attacker.playerId}) summoned ${move.name}!`);
     return result;
   }
@@ -280,6 +390,7 @@ function executeStatusMove(
   move: MoveDefinition,
   attacker: Pokemon,
   defender: Pokemon,
+  tm: TerrainManager,
 ): MoveResult {
   const result = newResult();
   const n = move.name;
@@ -305,13 +416,33 @@ function executeStatusMove(
   }
 
   if (n === 'Hypnosis') {
+    const guard = terrainGuards(tm, defender, true);
+    if (guard) {
+      result.missReason = `${defender.logName} is protected by ${guard}.`;
+      result.logLines.push(`${defender.logName} is protected by ${guard}! It won't fall asleep.`);
+      return result;
+    }
     result.hit = true;
     result.statChanges.push([defender.playerId, 'hypnosis', -2, 'hypnosis']);
     result.logLines.push(`${defender.logName} fell asleep! Movement skipped next turn.`);
     return result;
   }
 
+  if (n === 'Metal Sound') {
+    result.hit = true;
+    const { newStage } = defender.applyStatStage('sp_def', -2);
+    result.statChanges.push([defender.playerId, 'sp_def', -2, newStage]);
+    result.logLines.push(`${defender.logName}'s Sp. Def harshly fell! (stage ${newStage})`);
+    return result;
+  }
+
   if (n === 'Thunder Wave') {
+    const guard = terrainGuards(tm, defender);
+    if (guard) {
+      result.missReason = `${defender.logName} is protected by ${guard}.`;
+      result.logLines.push(`${defender.logName} is protected by ${guard}!`);
+      return result;
+    }
     result.hit = true;
     const applied = defender.applyStatus(PokemonStatus.PARALYZED);
     if (applied) {
@@ -370,6 +501,10 @@ export interface ExecuteOptions {
   actionOrder?: ActionOrder | null;
   defenderDeclaration?: TurnDeclaration | null;
   grid?: ReadonlySet<string>;
+  /** The battle's turn (1 = its first): Fake Out and First Impression work only then. */
+  turnNumber?: number;
+  /** A ram that won a ram clash: no landing beside the target and no knockback here (the clash places both). */
+  ramClash?: boolean;
 }
 
 export function executeMove(
@@ -389,11 +524,35 @@ export function executeMove(
     return executeTerrainMove(move, attacker, opts.targetTile, tm, grid);
   }
   if (move.category === MoveCategory.STATUS) {
-    return executeStatusMove(move, attacker, defender);
+    return executeStatusMove(move, attacker, defender, tm);
   }
 
   const result = newResult();
   let targetTile = opts.targetTile;
+
+  // Psychic Terrain: a priority move cannot touch a grounded target.
+  if (tm.hasPriority(move) && tm.fieldTerrain() === TerrainType.PSYCHIC_TERRAIN && isGrounded(defender)) {
+    result.missReason = `${defender.logName} is protected by Psychic Terrain.`;
+    result.logLines.push(`${attacker.logName} used ${n}! But ${defender.logName} is protected by Psychic Terrain!`);
+    return result;
+  }
+
+  // Fake Out, First Impression: only on the battle's first turn.
+  if ((n === 'Fake Out' || n === 'First Impression') && (opts.turnNumber ?? 1) > 1) {
+    result.missReason = `${n} works only on the first turn.`;
+    result.logLines.push(`${attacker.logName} used ${n}! But it failed.`);
+    return result;
+  }
+
+  // Upper Hand: only against a target that declared a priority attack.
+  if (n === 'Upper Hand') {
+    const dm = opts.defenderDeclaration ? getMove(opts.defenderDeclaration.moveName) : undefined;
+    if (!dm || dm.category === MoveCategory.STATUS || !tm.hasPriority(dm)) {
+      result.missReason = "Upper Hand failed — target didn't declare a priority attack.";
+      result.logLines.push(`${attacker.logName} used Upper Hand! But it failed.`);
+      return result;
+    }
+  }
 
   // Sucker Punch conditional
   if (n === 'Sucker Punch') {
@@ -451,25 +610,54 @@ export function executeMove(
   // Fired: it costs its user, hit or miss (Steel Beam).
   payHpCost(move, attacker, result);
 
+  // Flamethrower sets the grass it passes over alight: every grass tile on
+  // its line from the user to where it lands, if nothing stands on the tile.
+  if (n === 'Flamethrower' && targetTile) burnGrass(attacker, targetTile, tm, grid, result);
+  // Fire Spin sets the grass of the tile it spins on alight (only that tile).
+  if (n === 'Fire Spin' && targetTile) burnGrassTile(attacker, targetTile, tm, grid, result);
+
   // Focus Blast accuracy (70%)
   if (n === 'Focus Blast') {
     if (rng() > 0.7) {
       result.missReason = 'Focus Blast missed (70% accuracy).';
       result.logLines.push(`${attacker.logName} used Focus Blast! But it missed!`);
+      dodgeAside(attacker, defender, targetTile, tm, grid, result);
       return result;
     }
   }
 
-  if (!move.alwaysHits) result.crit = rollCrit(move, rng);
+  // Dragon Rush accuracy (75%).
+  if (n === 'Dragon Rush' && rng() > DRAGON_RUSH_ACCURACY) {
+    result.missReason = 'Dragon Rush missed (75% accuracy).';
+    result.logLines.push(`${attacker.logName} used Dragon Rush! But it missed!`);
+    dodgeAside(attacker, defender, targetTile, tm, grid, result);
+    return result;
+  }
 
-  result.momentumMult = move.needsMomentum ? momentumMultiplier(opts.straightTiles) : 1.0;
+  // Thunder accuracy (70%; it never misses in the rain).
+  if (n === 'Thunder' && !tm.isRainy()) {
+    if (rng() > THUNDER_ACCURACY) {
+      result.missReason = 'Thunder missed (70% accuracy).';
+      result.logLines.push(`${attacker.logName} used Thunder! But it missed!`);
+      dodgeAside(attacker, defender, targetTile, tm, grid, result);
+      return result;
+    }
+  }
+
+  if (!move.alwaysHits) result.crit = n === 'Zippy Zap' || rollCrit(move, rng);
+
+  // (Every physical attack is a momentum move: its straight run-up powers it — no early-stop boost on top.)
+  const momentum = scalesWithMomentum(move);
+  result.momentumMult = momentum ? momentumMultiplier(opts.straightTiles) : 1.0;
   result.powerMult = n === 'Quick Attack' ? qaPowerMultiplier(tilesMoved, actionOrder) : 1.0;
   result.chargeMult = chargesUp(move) ? chargeMultiplier(opts.chargeTiles ?? 0) : 1.0;
   result.clashMult = opts.clashMult ?? 1.0;
   // A charged move takes no early-stop boost on top: the unused tiles are its charge.
-  result.boostMult = move.needsMomentum || chargesUp(move) ? 1.0 : attacker.boostMult;
-  result.typeMult = getMoveTypeMult(move, defender);
-  result.weatherMult = getWeatherMult(move, tm);
+  result.boostMult = momentum || chargesUp(move) ? 1.0 : attacker.boostMult;
+  result.typeMult = getMoveTypeMult(move, defender, tm, attacker);
+  result.weatherMult = getWeatherMult(move, tm, attacker, defender);
+  // Terrain Pulse under a terrain: the terrain's type (above), doubled.
+  if (terrainPulseType(move, tm, attacker)) result.powerMult *= TERRAIN_PULSE_POWER_MULT;
 
   const hexPower = getHexPower(move, defender, tm);
 
@@ -527,14 +715,19 @@ export function executeMove(
     result.missReason = 'Defender already fainted.';
     result.logLines.push(`${defender.logName} already fainted.`);
   } else if (struck) {
+    // Frozen when it is hit: the ice breaks (and a Fire move spends some of itself melting it).
+    const wasFrozen = defender.isFrozen;
+    const fire = moveType(n) === 'Fire';
+    const melt = wasFrozen && fire ? FREEZE_MELT_FIRE_MULT : 1;
     const dmg = move.fixedDamage > 0 ? move.fixedDamage : calculateDamage(move, attacker, defender, {
       momentum: result.momentumMult,
-      powerMult: result.powerMult * result.chargeMult * result.clashMult,
+      powerMult: result.powerMult * result.chargeMult * result.clashMult * melt,
       boostMult: result.boostMult,
       typeMult: result.typeMult,
       weatherMult: result.weatherMult,
       crit: result.crit,
       hexPower,
+      spDefMult: sandSpDefMult(move, tm, defender),
     });
     const actual = defender.takeDamage(dmg);
     result.hit = true;
@@ -546,18 +739,62 @@ export function executeMove(
     if (!defender.isAlive) result.logLines.push(`${defender.logName} fainted!`);
 
     // ── Secondary effects on hit ──
-    if (n === 'Fire Fang' && rng() < 0.1) {
+    const guarded = terrainGuards(tm, defender) !== null;
+    if ((n === 'Fire Fang' || n === 'Flare Blitz') && !guarded && rng() < 0.1) {
       if (defender.applyStatus(PokemonStatus.BURNED)) {
-        result.statChanges.push([defender.playerId, 'burned', 0, 'fire_fang']);
+        result.statChanges.push([defender.playerId, 'burned', 0, n === 'Fire Fang' ? 'fire_fang' : 'flare_blitz']);
         result.logLines.push(`${defender.logName} was burned!`);
       }
     }
-    if (n === 'Discharge' && rng() < 0.3) {
+    if (n === 'Discharge' && !guarded && rng() < 0.3) {
       const immune = getTypeEffectiveness(moveType(n), defender.types) === 0.0;
       if (!immune && defender.applyStatus(PokemonStatus.PARALYZED)) {
         result.statChanges.push([defender.playerId, 'paralyzed', 0, 'discharge']);
         result.logLines.push(`${defender.logName} is paralyzed!`);
       }
+    }
+    // Any hit ends a freeze: a Fire move melts the ice (in steam), anything else shatters it.
+    if (defender.isAlive && wasFrozen) {
+      defender.thaw();
+      result.statChanges.push([defender.playerId, fire ? 'thawed' : 'shattered', 0, n]);
+      result.logLines.push(fire ? `The heat melted ${defender.logName}'s ice!` : `${defender.logName}'s ice shattered!`);
+    }
+    // (Just broken out of the ice, it is not frozen again by the same hit.)
+    const freezable = !wasFrozen;
+    if (n === 'Tri Attack') {
+      // Fire, electricity or ice: a burn, paralysis or a freeze, one in three each, 20% of the
+      // time (Fire types do not burn, Electric types are not paralyzed, Ice types do not freeze).
+      const pick = Math.min(2, Math.floor(rng() * 3));
+      const chance = pick === 2 ? freezeChance(0.2, tm) : 0.2;
+      if (!guarded && rng() < chance && (pick !== 2 || freezable)) {
+        const status = [PokemonStatus.BURNED, PokemonStatus.PARALYZED, PokemonStatus.FROZEN][pick];
+        const word = ['burned', 'paralyzed', 'frozen'][pick];
+        const immune = defender.types.includes(['Fire', 'Electric', 'Ice'][pick]);
+        if (defender.isAlive && !immune && defender.applyStatus(status)) {
+          result.statChanges.push([defender.playerId, word, 0, 'tri_attack']);
+          result.logLines.push(pick === 2 ? `${defender.logName} was frozen solid!` : `${defender.logName} was ${word}!`);
+        }
+      }
+    }
+    if (n === 'Ice Beam' && defender.isAlive && freezable && !guarded && rng() < freezeChance(ICE_BEAM_FREEZE_CHANCE, tm)) {
+      if (defender.applyStatus(PokemonStatus.FROZEN)) {
+        result.statChanges.push([defender.playerId, 'frozen', 0, 'ice_beam']);
+        result.logLines.push(`${defender.logName} was frozen solid!`);
+      }
+    }
+    // Flame Charge: its Speed rises a stage.
+    if (n === 'Flame Charge') {
+      const { newStage } = attacker.applyStatStage('speed', 1);
+      result.selfStatChanges.push([attacker.playerId, 'speed', 1, newStage]);
+      result.logLines.push(`${attacker.logName}'s Speed rose! (stage ${newStage})`);
+    }
+    if ((n === 'Fake Out' || n === 'Upper Hand') && defender.isAlive) {
+      result.flinched = true;
+      result.logLines.push(`${defender.logName} flinched! Movement skipped next turn.`);
+    }
+    if (n === 'Dragon Rush' && defender.isAlive && rng() < 0.2) {
+      result.flinched = true;
+      result.logLines.push(`${defender.logName} flinched! Movement skipped next turn.`);
     }
     if ((n === 'Air Slash' || n === 'Dark Pulse') && rng() < 0.3) {
       result.flinched = true;
@@ -578,7 +815,7 @@ export function executeMove(
       }
     }
 
-    // Recoil (Volt Tackle)
+    // Recoil (Volt Tackle, Head Smash…): more the more momentum it hit with.
     if (move.recoilFraction > 0 && actual > 0) {
       const recoilMult = voltTackleRecoilMultiplier(result.momentumMult);
       const recoilRaw = Math.floor(actual * move.recoilFraction * recoilMult);
@@ -614,19 +851,105 @@ export function executeMove(
     result.logLines.push(`Miss — ${result.missReason}`);
   }
 
-  // QA landing
-  if (n === 'Quick Attack') {
+  // A quick dash that made contact: it stops on the free tile beside the
+  // target nearest the path it dashed along, and waits there.
+  if (move.quickDash && result.hit && !opts.ramClash) {
     const blocked = tm.movementBlockersFor(attacker);
     const occupied = new Set(defender.tiles.map((t) => tileKey(t[0], t[1])));
-    const landing = qaLandingTile(attacker.tile, defender.tile, blocked, occupied, grid);
+    const landing = move.doublePass
+      ? passLandingTile(attacker.tile, defender.tile, blocked, occupied, grid)
+      : qaLandingTile(attacker.tile, defender.tile, blocked, occupied, grid);
     if (landing) {
       attacker.moveTo(landing);
       result.qaLandedAt = landing;
-      result.logLines.push(`${attacker.logName} lands at ${tileKey(landing[0], landing[1])} adjacent to opponent.`);
+      result.logLines.push(`${attacker.logName} lands at ${tileKey(landing[0], landing[1])}${move.doublePass ? ', two tiles short of its opponent' : ' adjacent to opponent'}.`);
     } else {
       result.logLines.push(`${attacker.logName} could not find adjacent landing tile.`);
     }
   }
 
+  // A ram attack (Flare Blitz, Take Down…): it runs into the target and knocks
+  // it back a tile — straight on, or (nothing free there) to a free tile
+  // beside it, the farthest from the attacker.
+  if (move.isRam && result.hit && defender.isAlive && !defender.huge && !opts.ramClash) {
+    const to = rammedTo(attacker, defender, tm, grid);
+    if (to) {
+      const from = defender.tile;
+      defender.moveTo(to);
+      result.knockback = { playerId: defender.playerId, from, to };
+      result.logLines.push(`${defender.logName} was knocked back to ${tileKey(to[0], to[1])}!`);
+    }
+  }
+
   return result;
+}
+
+/**
+ * An attack missed by its accuracy, its target dodges it: it side-steps to a
+ * free tile beside it, out of the attack's way — the one most off to the
+ * side of the line from the attacker, never toward it — if it stood where
+ * the attack was aimed and can move (alive, not huge). Moves it, and notes
+ * the dodge on `result`.
+ */
+function dodgeAside(attacker: Pokemon, defender: Pokemon, aimed: Tile | null | undefined, tm: TerrainManager,
+  grid: ReadonlySet<string>, result: MoveResult): void {
+  if (!defender.isAlive || defender.huge) return;
+  if (aimed && !defender.tiles.some((t) => t[0] === aimed[0] && t[1] === aimed[1])) return;
+  const blocked = tm.movementBlockersFor(defender);
+  const theirs = new Set(attacker.tiles.map((t) => tileKey(t[0], t[1])));
+  const plane = (t: Tile): [number, number] => [Math.sqrt(3) * (t[0] + t[1] / 2), 1.5 * t[1]];
+  const from = defender.tile, pf = plane(from), pa = plane(attacker.tile);
+  // The way the attack comes, attacker to target (unit, on the board's plane).
+  let wx = pf[0] - pa[0], wy = pf[1] - pa[1];
+  const wl = Math.hypot(wx, wy) || 1;
+  wx /= wl; wy /= wl;
+  let pick: Tile | null = null, best = -Infinity;
+  for (const [q, r] of hexNeighbors(from[0], from[1])) {
+    const k = tileKey(q, r);
+    if (!grid.has(k) || blocked.has(k) || theirs.has(k)) continue;
+    const p = plane([q, r]);
+    const dx = p[0] - pf[0], dy = p[1] - pf[1];
+    const along = dx * wx + dy * wy, aside = Math.abs(dx * wy - dy * wx);
+    // (Never back toward the attacker; most to the side, a little on away.)
+    if (along < -0.2) continue;
+    const score = aside + 0.1 * along;
+    if (score > best) { best = score; pick = [q, r]; }
+  }
+  if (!pick) return;
+  defender.moveTo(pick);
+  result.dodge = { playerId: defender.playerId, from, to: pick };
+  result.logLines.push(`${defender.logName} dodged to ${tileKey(pick[0], pick[1])}!`);
+}
+
+/** Dragon Rush's accuracy (as in the games). */
+const DRAGON_RUSH_ACCURACY = 0.75;
+
+/** Where a rammed target is knocked to: the tile straight behind it, or else a free one beside it, the farthest from the attacker. */
+function rammedTo(attacker: Pokemon, defender: Pokemon, tm: TerrainManager, grid: ReadonlySet<string>): Tile | null {
+  const blocked = tm.movementBlockersFor(defender);
+  const mine = new Set(attacker.tiles.map((t) => tileKey(t[0], t[1])));
+  const free = (t: Tile) => { const k = tileKey(t[0], t[1]); return grid.has(k) && !blocked.has(k) && !mine.has(k); };
+  const [dq, dr] = defender.tile, [aq, ar] = attacker.tile;
+  // Straight on: one step further along from the attacker (if it stands beside it).
+  if (hexDistance(aq, ar, dq, dr) === 1) {
+    const behind: Tile = [dq + (dq - aq), dr + (dr - ar)];
+    if (free(behind)) return behind;
+  }
+  let best: Tile | null = null, bestD = -1;
+  for (const [nq, nr] of hexNeighbors(dq, dr)) {
+    const t: Tile = [nq, nr];
+    if (!free(t)) continue;
+    const d = hexDistance(aq, ar, nq, nr);
+    if (d > bestD) { best = t; bestD = d; }
+  }
+  return best;
+}
+
+/**
+ * A move's chance to freeze, as the weather has it: none under the sun
+ * (Sunny Day), more in the rain (Rain Dance: × FREEZE_RAIN_MULT).
+ */
+export function freezeChance(base: number, tm: TerrainManager): number {
+  if (tm.isSunny()) return 0;
+  return Math.min(1, base * (tm.isRainy() ? FREEZE_RAIN_MULT : 1));
 }
