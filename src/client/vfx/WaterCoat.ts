@@ -34,6 +34,13 @@ const COAT_FREQ = 26.0, COAT_RUN = 0.55;
 const COAT_BUMP = 0.85;
 /** The vortex: how fast the water swirls round the body (rad/s), and how much it winds as it runs down (rad per body height). */
 const COAT_SPIN = 1.6, COAT_TWIST = 5.0;
+/**
+ * A vortex (WaterSkin's `vortex`: a disc of water, a shuriken): its pattern
+ * laid out round its centre in its own plane — how tightly its arms wind
+ * (radians per e-fold in toward the middle), how wide round it reads, how
+ * stretched along the way in, and how fast it drains in toward the centre.
+ */
+const VORTEX_WIND = 2.2, VORTEX_ROUND = 1.0, VORTEX_IN = 1.1, VORTEX_DRAIN = 0.55;
 /** How much of what is behind still shows through where the water faces you (0..1). */
 const COAT_CLEAR = 0.6;
 /** How deep the water reads (its blue extinction). */
@@ -163,6 +170,10 @@ class WaterSkin extends MaterialPluginBase {
   strands = false;
   /** Cel shaded (the coat): flat bands of its blues, white crests, inked round its silhouette — as the inked fire sphere. */
   cel = false;
+  /** How thick it stands off the skin (× COAT_THICK of its size): its ripples keep its size, so a thin coat flows as calmly as a thick one. */
+  thick = 1;
+  /** Swirling in toward a centre in its own plane (a disc's), instead of running down the body: its centre and its axis, in its own unposed space. */
+  vortex: { centre: [number, number, number]; axis: [number, number, number] } | null = null;
   /** The coat is fire (xorFire), not water: its tone (xfTone), and drawn into the auras' mask only. */
   fire = false;
   fireTone = 0;
@@ -204,7 +215,7 @@ class WaterSkin extends MaterialPluginBase {
   getUniforms() {
     return {
       ubo: [
-        { name: 'wsTime', size: 1, type: 'float' }, { name: 'wsSize', size: 1, type: 'float' },
+        { name: 'wsTime', size: 1, type: 'float' }, { name: 'wsSize', size: 1, type: 'float' }, { name: 'wsThick', size: 1, type: 'float' },
         { name: 'wsRise', size: 1, type: 'float' }, { name: 'wsFade', size: 1, type: 'float' },
         { name: 'wsTint', size: 3, type: 'vec3' }, { name: 'wsTop', size: 1, type: 'float' }, { name: 'wsDark', size: 3, type: 'vec3' },
         { name: 'wsBurst', size: 1, type: 'float' }, { name: 'wsSwell', size: 1, type: 'float' },
@@ -212,18 +223,23 @@ class WaterSkin extends MaterialPluginBase {
         { name: 'wsBase', size: 1, type: 'float' }, { name: 'wsAlpha', size: 1, type: 'float' }, { name: 'wsLift', size: 1, type: 'float' }, { name: 'wsBright', size: 1, type: 'float' }, { name: 'wsStrands', size: 1, type: 'float' }, { name: 'wsCel', size: 1, type: 'float' }, { name: 'wsFire', size: 1, type: 'float' }, { name: 'wsFireTone', size: 1, type: 'float' },
         { name: 'wsMain', size: 3, type: 'vec3' }, { name: 'wsHot', size: 3, type: 'vec3' },
         { name: 'wsDark2', size: 3, type: 'vec3' }, { name: 'wsMain2', size: 3, type: 'vec3' }, { name: 'wsHot2', size: 3, type: 'vec3' }, { name: 'wsPatch', size: 1, type: 'float' },
+        { name: 'wsVortex', size: 4, type: 'vec4' }, { name: 'wsVAxis', size: 3, type: 'vec3' },
       ],
       vertex: `#ifdef WATERSKIN
         uniform float wsSize; uniform float wsBurst; uniform float wsSwell; uniform float wsGrow; uniform float wsBase; uniform float wsLift;
       #endif`,
       fragment: `#ifdef WATERSKIN
-        uniform float wsTime; uniform float wsSize; uniform float wsRise; uniform float wsFade; uniform vec3 wsTint; uniform float wsTop; uniform vec3 wsDark; uniform float wsBurst; uniform float wsSwell; uniform float wsGrow; uniform float wsCut; uniform float wsMask; uniform float wsGlow; uniform vec4 wsSpare; uniform float wsAlpha; uniform float wsBright; uniform float wsStrands; uniform float wsCel; uniform float wsFire; uniform float wsFireTone; uniform vec3 wsMain; uniform vec3 wsHot; uniform vec3 wsDark2; uniform vec3 wsMain2; uniform vec3 wsHot2; uniform float wsPatch;
+        uniform float wsTime; uniform float wsSize; uniform float wsThick; uniform float wsRise; uniform float wsFade; uniform vec3 wsTint; uniform float wsTop; uniform vec3 wsDark; uniform float wsBurst; uniform float wsSwell; uniform float wsGrow; uniform float wsCut; uniform float wsMask; uniform float wsGlow; uniform vec4 wsSpare; uniform float wsAlpha; uniform float wsBright; uniform float wsStrands; uniform float wsCel; uniform float wsFire; uniform float wsFireTone; uniform vec3 wsMain; uniform vec3 wsHot; uniform vec3 wsDark2; uniform vec3 wsMain2; uniform vec3 wsHot2; uniform float wsPatch; uniform vec4 wsVortex; uniform vec3 wsVAxis;
       #endif`,
     };
   }
   private bindAll(ubo: UniformBuffer): void {
     ubo.updateFloat('wsTime', (performance.now() - this.start) / 1000);
     ubo.updateFloat('wsSize', this.size);
+    ubo.updateFloat('wsThick', this.thick);
+    const v = this.vortex;
+    ubo.updateFloat4('wsVortex', v ? v.centre[0] : 0, v ? v.centre[1] : 0, v ? v.centre[2] : 0, v ? 1 : 0);
+    ubo.updateFloat3('wsVAxis', v ? v.axis[0] : 0, v ? v.axis[1] : 1, v ? v.axis[2] : 0);
     ubo.updateFloat('wsRise', this.rise);
     ubo.updateFloat('wsFade', this.fade);
     ubo.updateFloat3('wsTint', ...this.tint);
@@ -262,7 +278,7 @@ class WaterSkin extends MaterialPluginBase {
         // Puffed out off the skin, before skinning: it keeps to the body in every pose.
         CUSTOM_VERTEX_UPDATE_POSITION: `#ifdef WATERSKIN
           // (A burst shell swells on out, fast at first.)
-          float wsOut = ${COAT_THICK.toFixed(3)} + (wsBurst >= 0.0 ? wsBase + wsGrow * (1.0 - (1.0 - wsBurst) * (1.0 - wsBurst)) : 0.0);
+          float wsOut = ${COAT_THICK.toFixed(3)} * wsThick + (wsBurst >= 0.0 ? wsBase + wsGrow * (1.0 - (1.0 - wsBurst) * (1.0 - wsBurst)) : 0.0);
 
           // (Bursting off on a hit: it swells on out, fast at first.)
           wsOut += ${SWELL_GROW.toFixed(3)} * (1.0 - (1.0 - wsSwell) * (1.0 - wsSwell));
@@ -286,6 +302,20 @@ class WaterSkin extends MaterialPluginBase {
         ${XOR_FIRE}
         // Spout's ripple: sums of sines, 0..1.
         float wsNoise(vec2 p) { vec2 s = sin(p * 0.6345) + sin(p * 1.62423); return dot(s, vec2(0.125)) + 0.5; }
+        // A vortex's place for the patterns: round its centre in its plane, in
+        // spiral arms winding in, and draining in toward it as time runs (a
+        // log of the radius, so it flows in for ever without a seam).
+        vec3 wsVortexQ(vec3 p, float size, float t) {
+          vec3 n = normalize(wsVAxis);
+          vec3 d = p - wsVortex.xyz;
+          vec3 f = d - n * dot(d, n);
+          vec3 e1 = normalize(cross(n, abs(n.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+          vec3 e2 = cross(n, e1);
+          float r = max(length(f) / max(size, 1e-3), 1e-3);
+          float l = log(r);
+          float a = atan(dot(f, e2), dot(f, e1)) + l * ${VORTEX_WIND.toFixed(2)};
+          return vec3(cos(a) * ${VORTEX_ROUND.toFixed(2)}, sin(a) * ${VORTEX_ROUND.toFixed(2)}, l * ${VORTEX_IN.toFixed(2)} + t * ${VORTEX_DRAIN.toFixed(2)});
+        }
         // Three sheets running down the body at different angles and speeds,
         // swirled round it as a vortex about its upright axis, winding
         // tighter as they run down.
@@ -340,7 +370,7 @@ class WaterSkin extends MaterialPluginBase {
       #endif`,
       CUSTOM_FRAGMENT_BEFORE_FRAGCOLOR: `#ifdef WATERSKIN
         {
-          vec3 q = wsLocal / max(wsSize, 1e-3);
+          vec3 q = wsVortex.w > 0.5 ? wsVortexQ(wsLocal, wsSize, wsTime) : wsLocal / max(wsSize, 1e-3);
           // Rising from the feet to past the top of the body (the spikes too):
           // a soft front a little above the line.
           float front = wsRise * (wsTop * 1.15 + 0.1 * wsSize) - wsLocal.y;
@@ -620,7 +650,9 @@ export class WaterCoat {
       /** A coat of fire (xorFire) over all the body, not water — its tone (xfTone) — and no bursts of noise off it. */
       fire?: { tone: number };
       /** Cel shaded (WaterSkin's `cel`). */
-      cel?: boolean } = {}) {
+      cel?: boolean;
+      /** How thick the coat stands off (WaterSkin's `thick`: × the usual; its ripples unchanged). */
+      thick?: number } = {}) {
     const element = opts.element ?? 'Water', coat = opts.coat ?? true;
     this.hasCoat = coat;
     this.mat = new StandardMaterial('waterCoat', scene);
@@ -633,6 +665,7 @@ export class WaterCoat {
     this.skin = new WaterSkin(this.mat, size, tint, element);
     if (opts.fire) { this.skin.fire = true; this.skin.fireTone = opts.fire.tone; }
     this.skin.cel = !!opts.cel;
+    this.skin.thick = opts.thick ?? 1;
     const all = body.filter((m) => m.isEnabled());
     const shells: Mesh[] = [], live: Mesh[] = [];
     for (const m of all) {
@@ -790,4 +823,31 @@ export class WaterCoat {
     this.fireMask?.mat.dispose();
     for (const l of this.layers) { l.mat.dispose(); l.maskMat?.dispose(); }
   }
+}
+
+/**
+ * A surface that is water itself (not a coat over one): the coat's water —
+ * Spout's ripples, the sky off it, its glints, soaked blue, cel shaded where
+ * `cel` — laid straight on a mesh's own skin, nothing puffed out, all of it
+ * shown at once (no rise). For parts made of water: Mega Greninja's shurikens.
+ * `size`: the model's height in its own units (the ripples' scale).
+ */
+export function waterSurface(scene: Scene, size: number, tint: RGB, cel = true,
+  vortex: { centre: [number, number, number]; axis: [number, number, number] } | null = null): StandardMaterial {
+  const mat = new StandardMaterial('waterSurface', scene);
+  // (Lit, so the mesh's normals come through to the shader: the plugin writes the colour itself.)
+  mat.diffuseColor.set(0, 0, 0);
+  mat.specularColor.set(0, 0, 0);
+  mat.alpha = 0.99; // (blended: what is behind shows through it, soaked)
+  // (No depth of its own, as the coat's: written, the water draws nothing.)
+  mat.disableDepthWrite = true;
+  mat.backFaceCulling = false;
+  const skin = new WaterSkin(mat, size, tint, 'Water');
+  skin.cel = cel;
+  skin.thick = 0;
+  skin.vortex = vortex;
+  // (All of it up at once: its rise's front far above anything of it.)
+  skin.rise = 1;
+  skin.top = size * 100;
+  return mat;
 }

@@ -61,6 +61,13 @@ const GROUND_BOW = 0.55;
 const CURVE = 0.6;
 const AIR_SOLE = 0.55; //    airborne: the cut sits this × standMax below the body
 const TINT = 0.30;
+/**
+ * Cel shaded, as the fire is: the glow in flat bands with hard edges — the
+ * outer glow, the inner glow, the hot line — each out to this many
+ * half-widths from the hot line; the fill's edge hard too. Each edge softened
+ * by AURA_CEL_AA pixels only (no stair-steps).
+ */
+const AURA_CEL_OUT = 2.6, AURA_CEL_IN = 1.25, AURA_CEL_LINE = 0.55, AURA_CEL_AA = 1.2;
 const AMP = 0.45;
 const LOW = 0.35;
 const FLICKER = 0.6;
@@ -458,10 +465,17 @@ bool ringAt(int i, vec2 q, vec2 uv, out float off, out float lineAt, out float h
   return true;
 }
 
-/** Glow weights at d half-widths from the hot line: outer glow, inner glow, core. */
-vec3 glowAt(float d) {
-  return vec3(pow(max(0.0, 1.0 - d / 4.6), 1.6), pow(max(0.0, 1.0 - d / 1.8), 1.4), 1.0 - smoothstep(0.35, 0.75, d));
+/**
+ * Glow weights at d half-widths from the hot line (aa: a pixel, in
+ * half-widths): outer glow, inner glow, core — cel shaded, flat bands with
+ * hard edges.
+ */
+float celEdge(float d, float at, float aa) { return 1.0 - smoothstep(at - aa, at + aa, d); }
+vec3 glowAt(float d, float aa) {
+  return vec3(celEdge(d, ${AURA_CEL_OUT.toFixed(2)}, aa), celEdge(d, ${AURA_CEL_IN.toFixed(2)}, aa), celEdge(d, ${AURA_CEL_LINE.toFixed(2)}, aa));
 }
+/** The fill inside the hot line (sd < 0 inside), its edge hard. */
+float fillAt(float sd, float aa) { return 1.0 - smoothstep(-${AURA_CEL_LINE.toFixed(2)} - aa, -${AURA_CEL_LINE.toFixed(2)} + aa, sd); }
 
 vec4 auraAt(int i, vec2 q, vec2 uv) {
   float off, lineAt, halfW, flick;
@@ -469,10 +483,10 @@ vec4 auraAt(int i, vec2 q, vec2 uv) {
   // Filled (struck): everything inside the hot line is the line itself.
   // Weights of the outer glow, the inner glow and the line (flickered), and
   // of the fill: filled, everything more than a line's width inside it.
-  float sd = (off - lineAt) / halfW;
+  float sd = (off - lineAt) / halfW, aa = ${AURA_CEL_AA.toFixed(2)} / max(halfW, 1.0);
   if (extra[i].w > 0.5)
-    return vec4(glowAt(max(sd, 0.0)) * flick, 1.0 - smoothstep(-1.0, -0.35, sd));
-  return vec4(glowAt(abs(sd)) * flick, 0.0);
+    return vec4(glowAt(max(sd, 0.0), aa) * flick, fillAt(sd, aa));
+  return vec4(glowAt(abs(sd), aa) * flick, 0.0);
 }
 
 void main(void) {
@@ -555,9 +569,10 @@ void main(void) {
               bool filled = extra[i].w > 0.5;
               if (!(filled && p.y >= b.y)) {
                 float sg = (yLine - p.y) / halfG; // > 0 outside (below the curve)
+                float aaG = ${AURA_CEL_AA.toFixed(2)} / max(halfG, 1.0);
                 vec4 wg = filled
-                  ? vec4(glowAt(max(sg, 0.0)) * flickG, 1.0 - smoothstep(-1.0, -0.35, sg))
-                  : vec4(glowAt(abs(sg)) * flickG, 0.0);
+                  ? vec4(glowAt(max(sg, 0.0), aaG) * flickG, fillAt(sg, aaG))
+                  : vec4(glowAt(abs(sg), aaG) * flickG, 0.0);
                 w = max(w, wg * inside);
               }
             }

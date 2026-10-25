@@ -63,7 +63,7 @@ import { fireTone } from '../vfx/xorFire.ts';
 import { RisingFire, FireSphere } from '../vfx/FireFx.ts';
 import { auraReach, auraLineReach, type UnitFx, type AuraHandle, type AuraOptions } from '../vfx/UnitFx.ts';
 import { elementFor, auraGlow, isFire, type RGB } from '../vfx/auraPalette.ts';
-import { WaterCoat, FIRE_BURSTS, BLUE_FIRE_TOWARD } from '../vfx/WaterCoat.ts';
+import { WaterCoat, FIRE_BURSTS, BLUE_FIRE_TOWARD, waterSurface } from '../vfx/WaterCoat.ts';
 import { SkinSampler, VertexSubset } from './skinSampler.ts';
 import { BODY_PARTS, BLADES, CLAW_ON_ATTACK, STRIKE_PARTS, partBones, partMeasureBone, regionFlags } from './bodyParts.ts';
 import { effectStart } from '../recipe/traef.js';
@@ -172,6 +172,27 @@ const FIRE_SPHERE_BANDS: Record<string, [RGB, RGB, RGB]> = {
 const LATTICE_SPHERES = new Set(['Steel', 'Rock', 'Ground', 'Ice']);
 /** The Water aura's coat cel shaded (WaterCoat's `cel`), as the inked fire sphere. */
 const WATER_CEL = true;
+/** Parts of a model that are water (by their shape's name): Mega Greninja's shurikens, held, holed and small. */
+const WATER_PARTS = /_(ana|mini)?shuriken_mesh_shape$/;
+/** Of them, the single discs, whose water swirls in toward their centre (the small ones are several to a shape). */
+const WATER_SWIRLS = /_(ana)?shuriken_mesh_shape$/;
+
+/** A flat disc's centre and its axis (unposed): its points' middle, and its normals summed one way. */
+function discOf(mesh: Mesh): { centre: [number, number, number]; axis: [number, number, number] } | null {
+  const p = mesh.getVerticesData(VertexBuffer.PositionKind), n = mesh.getVerticesData(VertexBuffer.NormalKind);
+  if (!p || !n || !p.length) return null;
+  const c = [0, 0, 0];
+  for (let i = 0; i < p.length; i += 3) { c[0] += p[i]; c[1] += p[i + 1]; c[2] += p[i + 2]; }
+  const k = 3 / p.length;
+  const a = [0, 0, 0], first = [n[0], n[1], n[2]];
+  for (let i = 0; i < n.length; i += 3) {
+    const s = n[i] * first[0] + n[i + 1] * first[1] + n[i + 2] * first[2] < 0 ? -1 : 1;
+    a[0] += n[i] * s; a[1] += n[i + 1] * s; a[2] += n[i + 2] * s;
+  }
+  const l = Math.hypot(a[0], a[1], a[2]) || 1;
+  return { centre: [c[0] * k, c[1] * k, c[2] * k], axis: [a[0] / l, a[1] / l, a[2] / l] };
+}
+
 /** A Water aura on the whole body a water tornado round it (WindFx.coat in the Water's tones), not the coat of water. */
 const WATER_TORNADO = true;
 /** An Electric aura's lightning strokes: this much thicker than the strokes earthing off other auras. */
@@ -296,8 +317,13 @@ interface Unit {
   flurry?: Map<'ground' | 'air', FlurryStrike[]>;
   /** Its per-frame upkeep (height, facing), removed when it is replaced. */
   upkeep: Observer<Scene> | null;
+  /** The water its water parts are made of (soakWaterParts: Mega Greninja's shurikens), if it has any. */
+  waterParts?: Material[];
   /** Its feet (every vertex skinned to a foot or toe bone), if its rig has any: they stand on the ground. */
   feet: VertexSubset | null;
+  /** Its feet up off the ground now (something else of it lowest: FEET_UP), and the frames till that is checked again. */
+  feetUp?: boolean;
+  feetCheck?: number;
 }
 
 /** Evolution: seconds to glow white (and to fade it), and for the surface to flow into the new shape. */
@@ -310,10 +336,16 @@ const TURN_SPEED = 7;
 
 /** Ground clamp: allowed sink before lifting (world units), and how fast it follows. */
 const CLAMP_EPS = 0.01;
-const CLAMP_UP = 25; //   per second, toward a deeper sink
 const CLAMP_DOWN = 6; //  per second, relaxing back
 /** How fast feet settle onto the ground (per second, of the gap). */
 const FEET_RATE = 20;
+/**
+ * Its feet stand it only while they are the lowest of it: when some other
+ * part hangs this far below them (× its height) — Mega Greninja upside down
+ * on its shuriken — its lowest point stands on the tile instead (as a body
+ * with no feet). Checked every FEET_UP_EVERY frames.
+ */
+const FEET_UP = 0.25, FEET_UP_EVERY = 6;
 /** Take-off / landing climb rate (world units per second) and the lowest cruise height. */
 const CLIMB_SPEED = 2.4;
 const MIN_FLIGHT = 0.9;
@@ -563,6 +595,7 @@ export class RecipeFactory implements UnitFactory {
       this.units.set(model.root, u);
       this.fx?.register(model.root, model.meshes, model.skeleton, model.props.map((p) => p.mesh));
       u.upkeep = this.scene.onBeforeRenderObservable.add(() => this.updateHeight(model.root, u));
+      u.waterParts = this.soakWaterParts(model);
       void model.player.play('idle', { fade: 0 });
       return model.root;
     } catch (e) {
@@ -572,6 +605,26 @@ export class RecipeFactory implements UnitFactory {
       this.fx?.register(node, node.getChildMeshes(), null);
       return node;
     }
+  }
+
+  /**
+   * Its parts made of water (WATER_PARTS: Mega Greninja's shurikens — the one
+   * it holds, the holed Water Shuriken it throws, the small ones): their own
+   * surface is the Water auras' water (waterSurface, cel shaded) in place of
+   * their texture, for good — so they are water through and through, spun
+   * and thrown as ever, their hole their own. A single disc of one (not the
+   * small ones, several to a shape) swirls as a vortex in toward its centre.
+   */
+  private soakWaterParts(model: RecipeModel): Material[] {
+    const parts = [...model.meshes, ...model.props.map((p) => p.mesh)].filter((m) => WATER_PARTS.test(m.name));
+    const tint = auraGlow('Water')[1];
+    return parts.map((m) => {
+      const water = waterSurface(this.scene, model.height, tint, WATER_CEL, WATER_SWIRLS.test(m.name) ? discOf(m) : null);
+      const multi = m.material as MultiMaterial | null;
+      if (multi?.subMaterials) multi.subMaterials.forEach((_, i) => { multi.subMaterials[i] = water; });
+      else m.material = water;
+      return water;
+    });
   }
 
   /**
@@ -3064,6 +3117,7 @@ export class RecipeFactory implements UnitFactory {
     holder.dispose(false, true);
     if (ua.lookAt) { const uo = this.units.get(ua.lookAt); if (uo?.lookAt === node) uo.lookAt = next; }
     if (ua.upkeep) this.scene.onBeforeRenderObservable.remove(ua.upkeep);
+    for (const m of ua.waterParts ?? []) m.dispose();
     this.units.delete(node);
     ua.model.dispose();
 
@@ -3080,6 +3134,7 @@ export class RecipeFactory implements UnitFactory {
     this.fx?.unregister(node);
     if (!u) { node.dispose(); return; }
     if (u.upkeep) this.scene.onBeforeRenderObservable.remove(u.upkeep);
+    for (const m of u.waterParts ?? []) m.dispose();
     this.units.delete(node);
     u.model.dispose();
   }
@@ -3246,25 +3301,39 @@ export class RecipeFactory implements UnitFactory {
     const step = CLIMB_SPEED * dt * (u.down ? 2 : 1);
     const d = u.hoverTarget - u.hover;
     u.hover += Math.abs(d) <= step ? d : Math.sign(d) * step;
+    // (Its feet up: something else of it the lowest — checked now and then, the whole skin being dear to measure.)
+    if (u.feet && !u.down && !u.leaping && u.hover <= 0.01 && (u.feetCheck = (u.feetCheck ?? 0) - 1) <= 0) {
+      u.feetCheck = FEET_UP_EVERY;
+      u.feetUp = u.feet.lowestY() - u.skin.lowestY() > FEET_UP * u.model.height * (root.scaling.y || 1);
+    }
     if (u.hover > 0.01) {
       u.clamp = 0;
-    } else if (u.feet && !u.down && !u.leaping) {
+    } else if (u.feet && !u.down && !u.leaping && !u.feetUp) {
       // On its feet: the lowest point of its feet stands exactly on the tile —
       // lifted if they sink, lowered if they float (some idles hold the body
       // up off the root).
+      // But no part of it below the tile, whatever its feet: never lower than
+      // keeps its lowest point on it (a tongue, a held shuriken, a dropped
+      // tail) — both from where it stands now. (Its skeleton brought up to
+      // this frame's pose first: else it is measured a frame late.)
+      u.model.skeleton.prepare(true);
       const off = root.position.y - u.feet.lowestY();
-      if (Number.isFinite(off)) u.clamp += off * Math.min(1, FEET_RATE * dt);
+      const under = root.position.y - CLAMP_EPS - u.skin.lowestY();
+      const feet = Number.isFinite(off) ? u.clamp + off * Math.min(1, FEET_RATE * dt) : u.clamp;
+      u.clamp = Number.isFinite(under) ? Math.max(feet, u.clamp + under) : feet;
     } else {
       // No feet (or lying down): its lowest point kept on the floor — lifted
       // if it sinks; and, with no feet at all (a snake, a fish, a blob),
       // lowered if it floats, down to its skeleton's own origin (the ground
       // its clips are made on: a snake's rest pose hangs its tail far below
       // where it lies; a true floater's idle holds it up above it).
+      u.model.skeleton.prepare(true); // (this frame's pose, not the last: see above)
       const sink = root.position.y - CLAMP_EPS - u.skin.lowestY();
-      const floor = u.feet ? 0 : Math.min(0, u.model.restBounds.min[1]) * (root.scaling.y || 1);
+      const floor = u.feet && !u.feetUp ? 0 : Math.min(0, u.model.restBounds.min[1]) * (root.scaling.y || 1);
       const want = Math.max(floor, u.clamp + sink);
-      // (Mid-leap, pitched, it is lifted at once: nothing of it ever below the ground.)
-      const rate = u.leaping && want > u.clamp ? Infinity : want > u.clamp ? CLAMP_UP : CLAMP_DOWN;
+      // (Sinking, it is lifted at once — nothing of it ever below the ground;
+      // floating, it settles back down at its own pace.)
+      const rate = want > u.clamp ? Infinity : CLAMP_DOWN;
       u.clamp += (want - u.clamp) * Math.min(1, rate * dt);
     }
     u.model.setLift((u.hover + u.clamp) / (root.scaling.y || 1));

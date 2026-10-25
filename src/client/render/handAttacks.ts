@@ -377,7 +377,8 @@ export function keepClearFully(rig: Rig, caps: Capsule[], r: Retargeted, rest = 
 const CLEAR_TO = 0.015, ROUNDS = 6;
 
 /** As a clip the player can play: a dense track for every bone it drives. */
-export function toClip(r: Retargeted, action: string, shown: unknown[]): { action: string; name: string; frames: number; fps: number; loop: boolean; duration: number; bind: Bind[]; vis: null[] } {
+/** A baked clip as the player plays it; `vis`: for each shape the player switches (its `shown`), which frames it is drawn (1) or not (0) — none, its usual. */
+export function toClip(r: Retargeted, action: string, shown: unknown[], vis?: (Uint8Array | null)[]): { action: string; name: string; frames: number; fps: number; loop: boolean; duration: number; bind: Bind[]; vis: (Uint8Array | null)[] } {
   const bind: Bind[] = [];
   for (const i of r.driven) {
     const rot = new Float32Array(r.frames * 4), pos = new Float32Array(r.frames * 3);
@@ -388,7 +389,7 @@ export function toClip(r: Retargeted, action: string, shown: unknown[]): { actio
     });
     bind.push({ bone: i, rot: { kind: 'dynamic', n: r.frames, keys: null, values: rot }, pos: { kind: 'dynamic', n: r.frames, keys: null, values: pos }, scale: null, cr: { k: 0 }, cp: { k: 0 }, cs: { k: 0 } });
   }
-  return { action, name: action, frames: r.frames, fps: r.fps, loop: false, duration: Math.max(1, r.frames - 1) / r.fps, bind, vis: shown.map(() => null) };
+  return { action, name: action, frames: r.frames, fps: r.fps, loop: false, duration: Math.max(1, r.frames - 1) / r.fps, bind, vis: shown.map((_, i) => vis?.[i] ?? null) };
 }
 
 // ── build: how a body is proportioned ──────────────────────────────────
@@ -806,4 +807,121 @@ export function aimTail(rig: Rig, r: Retargeted, tip: string, hit: number, aim: 
   });
   const driven = new Set(r.driven); for (const j of joints) driven.add(j);
   return { clip: { ...r, poses, driven }, from, to };
+}
+
+// ── a part spun on its own ─────────────────────────────────────────────
+
+/** A bone at rest, in its rig's space: where it is, and how it is turned (its frame: a point there is pos + rot · local). */
+export function restOf(rig: Rig, bone: string): { pos: V3; rot: Q } | null {
+  const i = rig.bones.findIndex((b) => b.name === bone);
+  if (i < 0) return null;
+  const { pos, rot } = fk(rig, rig.rest);
+  return { pos: pos[i], rot: rot[i] };
+}
+
+/** A point given in a bone's frame at rest, from the rig's space (`p` there). */
+export function toBoneFrame(rest: { pos: V3; rot: Q }, p: V3): V3 {
+  return qrot(qinv(rest.rot), sub(p, rest.pos));
+}
+
+/**
+ * `r` with `bone` (and all it carries) spun about its own `axis` through
+ * `pivot` — both in the bone's own frame — by `angles[f]` radians on each
+ * frame: on top of whatever the clip does with it, so it is carried as ever
+ * while it spins (a shuriken whirling in the hand that holds it).
+ */
+export function spinBone(rig: Rig, r: Retargeted, bone: string, pivot: V3, axis: V3, angles: number[]): Retargeted {
+  const i = rig.bones.findIndex((b) => b.name === bone);
+  if (i < 0) return r;
+  const o = i * STRIDE;
+  const poses = r.poses.map((P0, f) => {
+    const a = angles[Math.min(f, angles.length - 1)] ?? 0;
+    if (!a) return P0;
+    const P = P0.slice();
+    const lq: Q = [P0[o + 3], P0[o + 4], P0[o + 5], P0[o + 6]], lp: V3 = [P0[o], P0[o + 1], P0[o + 2]];
+    const s = qaxis(axis, a);
+    // Its frame turned about the pivot: L · T(c) · R · T(−c).
+    const q = qnorm(qmul(lq, s));
+    const t = add(lp, qrot(lq, sub(pivot, qrot(s, pivot))));
+    P[o] = t[0]; P[o + 1] = t[1]; P[o + 2] = t[2];
+    P[o + 3] = q[0]; P[o + 4] = q[1]; P[o + 5] = q[2]; P[o + 6] = q[3];
+    return P;
+  });
+  const driven = new Set(r.driven); driven.add(i);
+  return { ...r, poses, driven };
+}
+
+/** Where a bone is and how it is turned (its rig's space) on each frame of `r`. */
+export function poseOf(rig: Rig, r: Retargeted, bone: string): { pos: V3; rot: Q }[] {
+  const i = rig.bones.findIndex((b) => b.name === bone);
+  return r.poses.map((P) => { const { pos, rot } = fk(rig, P); return { pos: pos[i], rot: rot[i] }; });
+}
+
+/**
+ * `r` (a clip on `src`) laid on another rig, `dst`, by how far each bone is
+ * turned in the world from its rest — not from its parent — so rigs whose
+ * chains differ (bones one has and the other has not: Mega Greninja's
+ * waist_a between its waist and its spine) still take the same pose. A bone
+ * only `dst` has follows its parent as at rest. Places are `dst`'s own at
+ * rest (no travel: the ground stands it where it is).
+ */
+export function retargetWorld(src: Rig, r: Retargeted, dst: Rig): Retargeted {
+  const sNames = new Map(src.bones.map((b, i) => [b.name, i]));
+  const sRest = fk(src, src.rest), dRest = fk(dst, dst.rest);
+  const n = dst.bones.length;
+  const map = dst.bones.map((b) => sNames.get(b.name) ?? -1);
+  const driven = new Set<number>();
+  map.forEach((j, i) => { if (j >= 0) driven.add(i); });
+  const poses = r.poses.map((PS) => {
+    const s = fk(src, PS);
+    const P = dst.rest.slice();
+    const world: Q[] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const p = dst.parentIndex[i], j = map[i];
+      const parentW: Q = p >= 0 ? world[p] : [0, 0, 0, 1];
+      const o = i * STRIDE;
+      const restLocal: Q = [dst.rest[o + 3], dst.rest[o + 4], dst.rest[o + 5], dst.rest[o + 6]];
+      // Its turn from rest in the world, the source's; else as at rest under its parent.
+      world[i] = j >= 0 ? qnorm(qmul(qmul(s.rot[j], qinv(sRest.rot[j])), dRest.rot[i])) : qnorm(qmul(parentW, restLocal));
+      const lq = p >= 0 ? qnorm(qmul(qinv(parentW), world[i])) : world[i];
+      P[o + 3] = lq[0]; P[o + 4] = lq[1]; P[o + 5] = lq[2]; P[o + 6] = lq[3];
+    }
+    return P;
+  });
+  return { fps: r.fps, frames: r.frames, poses, driven };
+}
+
+/**
+ * `r` brought round to face straight ahead by its end: how far round its
+ * upper body is turned from its rest (its shoulder line, `shoulders`) taken
+ * back out at its `bone` (what carries the body, its waist) — none of it on
+ * the first frame, all of it on the last, eased between — so whatever
+ * follows, facing ahead, follows with no turn left (a throw's
+ * follow-through into a backflip). Its lean and its limbs are its own.
+ */
+export function faceAheadByEnd(rig: Rig, r: Retargeted, bone = 'waist', shoulders: [string, string] = ['left_arm_01', 'right_arm_01']): Retargeted {
+  const names = rig.bones.map((b) => b.name);
+  const i = names.indexOf(bone), iL = names.indexOf(shoulders[0]), iR = names.indexOf(shoulders[1]);
+  if (i < 0 || iL < 0 || iR < 0 || r.frames < 2) return r;
+  const parent = rig.parentIndex[i];
+  const rest = fk(rig, rig.rest);
+  // (Its shoulder line's heading round the upright.)
+  const lineHeading = (pos: V3[]) => { const s = sub(pos[iL], pos[iR]); return Math.atan2(s[0], s[2]); };
+  const h0 = lineHeading(rest.pos);
+  const smooth = (x: number) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
+  const poses = r.poses.map((P0, f) => {
+    const { pos, rot } = fk(rig, P0);
+    let h = lineHeading(pos) - h0;
+    while (h > Math.PI) h -= 2 * Math.PI;
+    while (h < -Math.PI) h += 2 * Math.PI;
+    const back = -h * smooth(f / (r.frames - 1));
+    if (Math.abs(back) < 1e-4) return P0;
+    const world = qnorm(qmul(qaxis([0, 1, 0], back), rot[i]));
+    const q = parent >= 0 ? qnorm(qmul(qinv(rot[parent]), world)) : world;
+    const P = P0.slice(), o = i * STRIDE;
+    P[o + 3] = q[0]; P[o + 4] = q[1]; P[o + 5] = q[2]; P[o + 6] = q[3];
+    return P;
+  });
+  const driven = new Set(r.driven); driven.add(i);
+  return { ...r, poses, driven };
 }
