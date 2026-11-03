@@ -130,7 +130,9 @@ export class FieldFx {
   private target: Record<string, number> = {};
   private time = 0;
   private tick: Observer<Scene>;
-  private readonly base: Look;
+  private base: Look;
+  /** The base as the board set it, for {@link setAir} to go back to. */
+  private boardBase: Look | null = null;
   private readonly curves = new ColorCurves();
   private readonly tiles = [...HEX_GRID].map((k) => keyToTile(k));
   private sun: Mesh | null = null;
@@ -165,6 +167,12 @@ export class FieldFx {
   /** What covers the field now (null: nothing): it fades in, and whatever was up before fades out. */
   set(weather: string | null, terrain: string | null): void {
     for (const k of Object.keys(this.target)) this.target[k] = k === weather || k === terrain ? 1 : 0;
+  }
+
+  /** Another ground's own air under the weather (an arena's: its fog's colour, start and end); null, the board's back. */
+  setAir(air: { fog: Color3; fogStart: number; fogEnd: number } | null): void {
+    this.boardBase ??= this.base;
+    this.base = air ? { ...this.boardBase, skyTop: air.fog.clone(), skyBottom: air.fog.clone(), fog: air.fog.clone(), fogStart: air.fogStart, fogEnd: air.fogEnd } : this.boardBase;
   }
 
   dispose(): void {

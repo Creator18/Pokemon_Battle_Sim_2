@@ -51,6 +51,7 @@ import { iceBlock, shatterIce, meltIce, ICE_ALPHA, type IceBlock } from './iceBl
 import { ICE_BOLT, PSY_BOLT, type LightningFx, type EarthOptions, type BoltColors } from '../vfx/LightningFx.ts';
 import type { SlashFx } from '../vfx/SlashFx.ts';
 import { QuickStepFx } from '../vfx/QuickStepFx.ts';
+import { gaitSpeed } from './gait.ts';
 import { flurryStrikes, buildFlurry, flurryShape, type FlurryStrike } from './flurry.ts';
 import { toClip, type Rig } from './handAttacks.ts';
 import { SparkleFx } from '../vfx/SparkleFx.ts';
@@ -244,6 +245,8 @@ const MOUTH_BONES = ['center_nose', 'nose', 'upper_jaw', 'jaw', 'lower_jaw_02', 
 
 const WALK_SPEED = 2.6 * TILE_SCALE; // world units / s (tiles are larger now)
 const RUN_SPEED = 4.4 * TILE_SCALE;
+/** How fast a hand-steered unit turns toward where it is steered (rad/s). */
+const STEER_TURN = 10;
 
 /** What buildPokemon returns, as far as this file uses it. */
 interface RecipeModel {
@@ -315,6 +318,10 @@ interface Unit {
   punch?: { key: 'attack' | 'swipe'; part: string | null };
   /** Its flurry's strikes (flurry.ts), worked out once on the ground and once in the air. */
   flurry?: Map<'ground' | 'air', FlurryStrike[]>;
+  /** Each gait's ground speed as its feet tell it (its rig's units a second; null: they can't), once asked. */
+  gait?: Map<string, number | null>;
+  /** Taking off or coming down (fly): its jump's clips play, steering only moves it. */
+  lofting?: boolean;
   /** Its per-frame upkeep (height, facing), removed when it is replaced. */
   upkeep: Observer<Scene> | null;
   /** The water its water parts are made of (soakWaterParts: Mega Greninja's shurikens), if it has any. */
@@ -349,6 +356,8 @@ const FEET_UP = 0.25, FEET_UP_EVERY = 6;
 /** Take-off / landing climb rate (world units per second) and the lowest cruise height. */
 const CLIMB_SPEED = 2.4;
 const MIN_FLIGHT = 0.9;
+/** How high a hand-steered flier flies (m). */
+const FLY_HEIGHT = 2.6;
 
 /** A strike part carrying fewer vertices than this shows nothing worth a coat (its skin is elsewhere). */
 const MIN_PART_VERTS = 24;
@@ -382,6 +391,8 @@ const THUNDER_CLEAR = 0.5, THUNDER_CLEAR_BODY = 0.7;
 const QS_DASH = 0.16, QS_GHOST_EVERY = 0.035;
 /** Its bursts' radii (× its height): small behind it as it goes, larger at the blow. */
 const QS_LAUNCH_BURST = 0.6, QS_HIT_BURST = 1.15;
+/** A chasing charge (chargeAt): how fast it runs (world units / s), and how long it may chase before it gives up (s). */
+const CHARGE_SPEED = 9, CHARGE_MAX_TIME = 3;
 /**
  * Aerial Ace (playAerialAce): how fast it goes (world units/s) and the least
  * its whole run takes (s); the loop behind its target (its reach, in tiles,
@@ -656,6 +667,84 @@ export class RecipeFactory implements UnitFactory {
     if (worldPath.length === 0) return;
     u.moving = true;
     try { await this.walk(u, node, worldPath, hover); } finally { u.moving = false; }
+  }
+
+  /**
+   * Steered by hand, a frame at a time (real time): `dir` the way it goes on
+   * the ground (its length 0..1, the stick's push) or null to stand; it turns
+   * toward it at STEER_TURN, goes at its walk or run pace, and plays to match.
+   * `pace` scales both (tired, it goes slower and its legs with it: its feet
+   * still keep their ground).
+   */
+  steer(node: TransformNode, dir: Vector3 | null, run: boolean, dt: number, pace = 1): void {
+    const u = this.units.get(node);
+    if (!u || u.down) return;
+    const push = dir ? Math.min(1, dir.length()) : 0;
+    const want = push < 0.05 ? 'idle' : run && u.model.player.has(this.act(u, 'run')) ? 'run' : 'walk';
+    const clip = this.act(u, want);
+    if (!u.lofting && u.model.player.active?.action !== clip && u.model.player.has(clip)) void u.model.player.play(clip, { fade: 0.15 });
+    u.moving = want !== 'idle';
+    if (!u.lofting) u.model.player.speed = u.moving ? pace : 1;
+    if (!dir || !u.moving) return;
+    const yaw = Math.atan2(dir.x, dir.z), now = node.rotation.y;
+    const d = Math.atan2(Math.sin(yaw - now), Math.cos(yaw - now)), step = STEER_TURN * dt;
+    this.setFacing(node, now + Math.max(-step, Math.min(step, d)));
+    // At the pace its feet keep (none to go by, or flying: the board's pace).
+    const paced = u.hoverTarget > 0 ? null : this.gaitOf(node, u, clip);
+    const v = (paced ?? (want === 'run' ? RUN_SPEED : WALK_SPEED)) * pace * push * dt / dir.length();
+    node.position.x += dir.x * v;
+    node.position.z += dir.z * v;
+  }
+
+  /**
+   * A hand-steered flier (one with an air idle) taking to the air (`up`) or
+   * landing: it springs up in its jump and climbs to FLY_HEIGHT in its jump's
+   * rise, or tips into its jump's fall, comes down in it and lands. False: it
+   * can't fly (or is already on its way up or down).
+   */
+  async fly(node: TransformNode, up: boolean): Promise<boolean> {
+    const u = this.units.get(node);
+    if (!u || u.down || u.lofting || !u.model.player.has('airIdle')) return false;
+    if (up === u.hoverTarget > 0) return true;
+    const player = u.model.player;
+    // (Its own clips its own way; steering only moves it till it is up or down.)
+    u.lofting = true;
+    try {
+      if (up) {
+        // Springs up (its jump's start), climbs in its jump's rise, then hovers.
+        if (player.has('jumpUpStart')) await player.play('jumpUpStart', { fade: 0.12 });
+        if (player.has('jumpUpLoop')) void player.play('jumpUpLoop', { fade: 0.1 });
+        await this.climbTo(u, FLY_HEIGHT);
+        void player.play('airIdle', { fade: 0.3 });
+      } else {
+        // Tips over into its jump's fall, comes down in it, and lands.
+        if (player.has('jumpDownStart')) await player.play('jumpDownStart', { fade: 0.2 });
+        if (player.has('jumpDownLoop')) void player.play('jumpDownLoop', { fade: 0.1 });
+        await this.climbTo(u, 0);
+        if (player.has('land')) await player.play('land', { fade: 0.08 });
+        if (!u.down) void player.play(u.moving ? 'walk' : 'idle', { fade: 0.25 });
+      }
+    } finally { u.lofting = false; }
+    return true;
+  }
+
+  /** Is it in the air (or on its way up)? */
+  isFlying(node: TransformNode): boolean {
+    return (this.units.get(node)?.hoverTarget ?? 0) > 0;
+  }
+
+  /** How high above the ground it is now (m): its flight, and anything lifting it. */
+  liftOf(node: TransformNode): number {
+    const u = this.units.get(node);
+    return u ? u.hover + u.clamp : 0;
+  }
+
+  /** How fast `clip` carries the unit over the ground (world units a second), as its feet tell it; null where they can't. */
+  private gaitOf(node: TransformNode, u: Unit, clip: string): number | null {
+    u.gait ??= new Map();
+    if (!u.gait.has(clip)) u.gait.set(clip, gaitSpeed(u.model.player as unknown as Rig, u.model.height, clip, this.onFours(node, [clip])));
+    const v = u.gait.get(clip);
+    return v == null ? null : v * u.model.root.scaling.x;
   }
 
   /** `wake`: unused now (no movement leaves dash rings); kept for its callers. */
@@ -1296,6 +1385,84 @@ export class RecipeFactory implements UnitFactory {
       });
     });
     if (!airborne) fx.dust(end, H);
+  }
+
+  /** The floor's height under (x, z) in the world (an arena's relief; null: flat, at 0): every unit stands on it. */
+  groundAt: ((x: number, z: number) => number) | null = null;
+
+  /** Where its feet are now, in the world (a four-legged one's front feet too): for its footprints. */
+  feetNow(node: TransformNode): Vector3[] {
+    const u = this.units.get(node);
+    if (!u) return [];
+    const limb = this.stanceOf(node) === 'quadruped' ? /^(left|right)_(foot|hand)$/ : /^(left|right)_foot$/;
+    return u.model.skeleton.bones.filter((b) => limb.test(b.name)).map((b) => b.getAbsolutePosition(u.model.root));
+  }
+
+  /** Keep it from turning to watch what it looks at (true), or let it again (false): its facing is then the caller's. */
+  holdLook(node: TransformNode, on: boolean): void {
+    const u = this.units.get(node);
+    if (u) u.lookHold = on;
+  }
+
+  /**
+   * A charge that chases (real time): it bursts off and runs at `chase()` —
+   * wherever that has got to, turning after it — until it is within `commit`
+   * of it; from there on it runs straight at where that was then, stopping
+   * `stop` short of it (so a dash then, just before contact, gets out of its
+   * way). Its impact burst and dust as it gets there. `onStep` is told each
+   * stretch it covers (m), and may stop it there (false: out of breath).
+   * Resolves where it stopped, on contact (or after `maxTime`, or stopped,
+   * however far it got).
+   */
+  async chargeAt(node: TransformNode, chase: () => Vector3,
+    opts: { element?: string; stop: number; commit: number; speed?: number; maxTime?: number; onStep?: (metres: number) => boolean }): Promise<Vector3> {
+    const u = this.units.get(node);
+    if (!u) return node.position.clone();
+    const fx = (this.quickStep ??= new QuickStepFx(this.scene));
+    const H = this.heightOf(node), tone = this.hueOf(node, opts.element ?? 'Normal');
+    const lift = () => new Vector3(0, u.hover + u.clamp, 0), airborne = u.hoverTarget > 0.05;
+    const speed = opts.speed ?? CHARGE_SPEED, maxTime = opts.maxTime ?? CHARGE_MAX_TIME;
+    const wayTo = (p: Vector3) => { const w = p.subtract(node.position); w.y = 0; return w.lengthSquared() < 1e-8 ? new Vector3(0, 0, 1) : w.normalize(); };
+    const burst = (at: Vector3, way: Vector3, size: number) => {
+      if (this.beams) this.beams.hemiBurst(at, way, size, tone, true);
+      else fx.hemisphere(at, way, size * 2, new Color3(...auraGlow(tone)[0]));
+    };
+    let way = wayTo(chase());
+    burst(node.position.add(lift()).add(new Vector3(0, H * 0.45, 0)).subtract(way.scale(H * 0.25)), way, H * QS_LAUNCH_BURST);
+    if (!airborne) fx.dust(node.position.clone(), H);
+    void u.model.player.play(this.act(u, 'run'), { fade: 0.12 });
+    u.moving = true;
+    let committed: Vector3 | null = null, goal = chase().clone();
+    try {
+      await new Promise<void>((done) => {
+        let t = 0;
+        const obs = this.scene.onBeforeRenderObservable.add(() => {
+          const dt = Math.min(0.05, this.scene.getEngine().getDeltaTime() / 1000);
+          t += dt;
+          if (!committed) {
+            goal = chase().clone();
+            const d = goal.subtract(node.position); d.y = 0;
+            if (d.length() <= opts.commit + opts.stop) committed = goal;
+          }
+          const aim = committed ?? goal;
+          way = wayTo(aim);
+          const end = aim.subtract(way.scale(opts.stop));
+          const left = end.subtract(node.position); left.y = 0;
+          const step = speed * dt;
+          this.setFacing(node, Math.atan2(way.x, way.z));
+          const arrived = left.length() <= step || Vector3.Dot(left, way) <= 0;
+          const went = arrived ? Math.max(0, Vector3.Dot(left, way)) : step;
+          if (arrived) { node.position.x = end.x; node.position.z = end.z; }
+          else { node.position.x += way.x * step; node.position.z += way.z * step; }
+          const going = opts.onStep ? opts.onStep(went) : true;
+          if (arrived || !going || t >= maxTime) { this.scene.onBeforeRenderObservable.remove(obs); done(); }
+        });
+      });
+    } finally { u.moving = false; }
+    const aim = committed ?? goal;
+    burst(Vector3.Lerp(node.position, aim, 0.5).add(lift().scale(0.5)).add(new Vector3(0, H * 0.45, 0)), way, H * QS_HIT_BURST);
+    if (!airborne) fx.dust(node.position.clone(), H);
+    return node.position.clone();
   }
 
   /** In a rolling attack or out of it: its crystal sphere rolls along with it while it is (Unit.rolling). */
@@ -2756,7 +2923,8 @@ export class RecipeFactory implements UnitFactory {
     return node.position.add(new Vector3(0, this.heightOf(node) * 0.5 + (u ? u.hover + u.clamp : 0), 0));
   }
 
-  private heightOf(node: TransformNode): number {
+  /** How tall it stands, as shown (world units). */
+  heightOf(node: TransformNode): number {
     const u = this.units.get(node);
     return u ? displayHeight(u.model.height) : 1.0;
   }
@@ -3306,8 +3474,11 @@ export class RecipeFactory implements UnitFactory {
       u.feetCheck = FEET_UP_EVERY;
       u.feetUp = u.feet.lowestY() - u.skin.lowestY() > FEET_UP * u.model.height * (root.scaling.y || 1);
     }
+    // The floor under it (an arena's relief: a flagstone, a dune), its feet set on it — 0 on flat ground.
+    const ground = this.groundAt ? this.groundAt(root.position.x, root.position.z) : 0;
+    const base = root.position.y + ground;
     if (u.hover > 0.01) {
-      u.clamp = 0;
+      u.clamp = ground;
     } else if (u.feet && !u.down && !u.leaping && !u.feetUp) {
       // On its feet: the lowest point of its feet stands exactly on the tile —
       // lifted if they sink, lowered if they float (some idles hold the body
@@ -3317,8 +3488,8 @@ export class RecipeFactory implements UnitFactory {
       // tail) — both from where it stands now. (Its skeleton brought up to
       // this frame's pose first: else it is measured a frame late.)
       u.model.skeleton.prepare(true);
-      const off = root.position.y - u.feet.lowestY();
-      const under = root.position.y - CLAMP_EPS - u.skin.lowestY();
+      const off = base - u.feet.lowestY();
+      const under = base - CLAMP_EPS - u.skin.lowestY();
       const feet = Number.isFinite(off) ? u.clamp + off * Math.min(1, FEET_RATE * dt) : u.clamp;
       u.clamp = Number.isFinite(under) ? Math.max(feet, u.clamp + under) : feet;
     } else {
@@ -3328,8 +3499,8 @@ export class RecipeFactory implements UnitFactory {
       // its clips are made on: a snake's rest pose hangs its tail far below
       // where it lies; a true floater's idle holds it up above it).
       u.model.skeleton.prepare(true); // (this frame's pose, not the last: see above)
-      const sink = root.position.y - CLAMP_EPS - u.skin.lowestY();
-      const floor = u.feet && !u.feetUp ? 0 : Math.min(0, u.model.restBounds.min[1]) * (root.scaling.y || 1);
+      const sink = base - CLAMP_EPS - u.skin.lowestY();
+      const floor = ground + (u.feet && !u.feetUp ? 0 : Math.min(0, u.model.restBounds.min[1]) * (root.scaling.y || 1));
       const want = Math.max(floor, u.clamp + sink);
       // (Sinking, it is lifted at once — nothing of it ever below the ground;
       // floating, it settles back down at its own pace.)
