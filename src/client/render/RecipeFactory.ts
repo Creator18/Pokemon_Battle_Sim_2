@@ -2576,7 +2576,9 @@ export class RecipeFactory implements UnitFactory {
     return this.wind.statChange(() => node.position.add(new Vector3(0, u ? u.hover + u.clamp : 0, 0)), this.heightOf(node), up, radius);
   }
 
-  playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null, margin: number, standUntil?: Promise<void>): ClashPlay {
+  /** `meetAt`: where they meet, as a share of the way from a to b (0.5: the middle) — fixed, both beams running to it; none: wherever their fronts cross. */
+  playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null, margin: number, standUntil?: Promise<void>,
+    meetAt?: number): ClashPlay {
     const ma = this.mouthOf(a), mb = this.mouthOf(b);
     const beamH = (n: TransformNode) => { const u = this.units.get(n); return u ? displayHeight(u.model.height) : 1.2; };
     const loser = winner === a ? b : winner === b ? a : null;
@@ -2590,8 +2592,8 @@ export class RecipeFactory implements UnitFactory {
     };
     let push = 0, over = false, burst = false, loserBurst = false;
     const ease = (t: number) => t * t * (3 - 2 * t);
-    // Where they met, as a share of the way from a's mouth to b's (-1: not yet).
-    let meetU = -1;
+    // Where they met, as a share of the way from a's mouth to b's (-1: not yet; fixed from the first, both beams aim there).
+    let meetU = meetAt ?? -1;
     const at = () => {
       if (meetU < 0) return null;
       const met = Vector3.Lerp(ma(), mb(), meetU);
@@ -2627,8 +2629,8 @@ export class RecipeFactory implements UnitFactory {
       const fa = playA.front?.(), fb = playB.front?.();
       if (L < 1e-4 || !fa || !fb) return;
       const ua = Vector3.Dot(fa.subtract(A), dir) / (L * L), ub = Vector3.Dot(fb.subtract(A), dir) / (L * L);
-      if (ua < ub) return;
-      meetU = Math.min(1 - CLASH_MEET, Math.max(CLASH_MEET, (ua + ub) / 2));
+      if (ua < ub - (meetAt !== undefined ? 0.02 : 0)) return;
+      if (meetAt === undefined) meetU = Math.min(1 - CLASH_MEET, Math.max(CLASH_MEET, (ua + ub) / 2));
       this.scene.onBeforeRenderObservable.remove(watch);
       // The blow: an impact frame, centred where they meet.
       const met = at();

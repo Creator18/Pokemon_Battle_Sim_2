@@ -31,6 +31,15 @@ export interface BeamSpec {
    * of its own); `scale` its rings' (PulseSpec.scale).
    */
   pulse?: { scale?: number };
+  /**
+   * Which beam it is: 1 (the default) the layered beam — core, body and torn
+   * skin, swirled; 2 the aura beam — its white core alone, rimmed in its
+   * type's spiking aura outline, rings of stars streaming along it (BeamFx:
+   * OUTLINE, RINGS). Both charge, launch and release alike.
+   */
+  style?: 1 | 2;
+  /** Beam 2's outline: 'cel' (default) a flat band in its type's outline colour; 'soft' a glow, fading out to its edge. */
+  outline?: 'cel' | 'soft';
 }
 
 /** A type's beam colours with the darker and lighter swapped: its fill as the heavy noise, its outline as the body. */

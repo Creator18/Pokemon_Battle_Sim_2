@@ -60,6 +60,51 @@ type RGB = [number, number, number];
 export const ROOT = 0.45; //                 the ball sits this far along the aim from the mouth (clear of the face)
 export const BEAM_R = [0.12, 0.18, 0.24]; // core, bright, torn skin
 /**
+ * The core's aura outline: a twin of each core piece (its tube, its ball, its
+ * clash half, its tip and bursts) in its type's aura outline colour, as wide
+ * again as OUTLINE_GROW, only its far side drawn (an inverted hull): behind
+ * its core, so only its rim shows — and solid, writing its depth, so nothing
+ * further off (the other beam) shows over it; it tears where the core
+ * does, a little less (OUTLINE_CUT × its cutoff), so the border rims its tears too.
+ */
+const OUTLINE = true, OUTLINE_GROW = 1.6, OUTLINE_CUT = 0.6;
+/** A soft outline's glow (BeamSpec.outline 'soft'): how far in from its edge it is whole (its facing, 0 edge-on … 1 straight behind). */
+const OUTLINE_SOFT_IN = 0.75;
+/**
+ * The outline's spikes: its edge risen into spikes that stream forward along
+ * the beam — measured from the egg's centre (the beam's origin) — each a
+ * steep rise and a slow fall (leaning forward, as a flame's tongue in the
+ * flow), staggered round the beam so they flicker rather than band. How far
+ * a spike rises (× the core's radius, on top of OUTLINE_GROW), how far apart
+ * they come (× the radius), how fast they travel (spikes a second), and how
+ * much round the beam staggers them.
+ */
+const SPIKE = 0.6, SPIKE_GAP = 1.6, SPIKE_RATE = 3.2, SPIKE_STAGGER = 0.45;
+/** And how far a spike's tip leans forward, the way the beam travels (× the core's radius, at a spike's full height). */
+const SPIKE_LEAN = 1.4;
+/** A spike's profile (GLSL): rising slowly from behind to its tip near its front, then falling away quickly (SPIKE_FRONT of it) — never a cliff. */
+const SPIKE_FRONT = 0.15;
+const SPIKE_GLSL = `float spikeAt(float along, float th, float rad, float time) {
+  float x = along / (${SPIKE_GAP.toFixed(2)} * rad) - time * ${SPIKE_RATE.toFixed(2)} + ${SPIKE_STAGGER.toFixed(2)} * sin(th * 3.0 + 1.7) + 0.25 * sin(th * 7.0 - 0.6);
+  float s = fract(x);
+  return s < ${(1 - SPIKE_FRONT).toFixed(2)} ? pow(s / ${(1 - SPIKE_FRONT).toFixed(2)}, 2.5) : (1.0 - s) / ${SPIKE_FRONT.toFixed(2)};
+}`;
+/**
+ * Rings of stars round the core, travelling from the mouth to the end: four-
+ * pointed stars (a diamond whose sides curve in: RING_STAR, 1 a plain diamond),
+ * each drawn out along the way it travels — its length RING_LEN of the
+ * circumference, its width round the ring RING_WIDE of it (long and thin). Round
+ * the ring, RING_SLOTS places a star may sit; whether one does follows a slow
+ * swell round it (RING_BUNCH: its waves round the ring), so they bunch in
+ * places and thin out in others. Two sets at once, evenly spaced along the
+ * beam: [how many, how fast (beam lengths a second)] — one slow, one fast.
+ * Each ring a new pattern every time round. On the core's surface
+ * (RING_GROW), in its type's outline colour.
+ */
+const RINGS = true, RING_SLOTS = 24, RING_LEN: [number, number] = [0.06, 0.16], RING_WIDE: [number, number] = [0.014, 0.024];
+const RING_STAR = 0.65, RING_BUNCH: [number, number] = [2, 4], RING_GROW = 1.06;
+const RING_SETS: [number, number][] = [[4, 0.35], [3, 0.8]];
+/**
  * The column is an elongated oval along its length: OVAL_END × its radius
  * where it leaves the egg and where it reaches the target, OVAL_MID × in the
  * middle (an ellipse between).
@@ -222,11 +267,20 @@ float fbm(vec3 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { v += a
 const MASTER_FRAG = /* glsl */ `
 precision highp float;
 varying float vAlong, vTh;
+#ifdef OUTLINE_TWIN
+varying float vFace;
+uniform float soft;
+#endif
 uniform vec3 color, rim, color2, color3;
 uniform float time, pan, cutoff, dark, multi;
 uniform vec2 nscale;
 ${NOISE}
 void main(void) {
+#ifdef OUTLINE_TWIN
+  // (An outline's near side, by the way its surface faces — not its triangles', which its leaning spikes fold: only its
+  // far side draws, behind its core.)
+  if (vFace > 0.0) discard;
+#endif
   // Seamless round the tube: the angle enters as a circle.
   vec3 q = vec3(vAlong * nscale.x - time * pan, cos(vTh) * nscale.y, sin(vTh) * nscale.y + time * ${CHURN.toFixed(2)});
   // UV displacement by a second noise: it warps and tears the pattern. It is
@@ -253,6 +307,15 @@ void main(void) {
     c = color * (0.85 + 0.45 * band);
     c = mix(rim, c, smoothstep(0.0, 0.12, t));
   }
+#ifdef OUTLINE_TWIN
+  // A soft outline (beam 2's 'soft'): not a cel band but a glow — strongest against the core, its lighter colour
+  // (\`rim\`) there, its outline colour out toward its edge, fading to nothing at it (its far side edge-on: vFace 0).
+  if (soft > 0.5) {
+    float k = smoothstep(0.0, ${OUTLINE_SOFT_IN.toFixed(2)}, -vFace);
+    gl_FragColor = vec4(mix(color, rim, k * k), k);
+    return;
+  }
+#endif
   gl_FragColor = vec4(c, 1.0);
 }`;
 
@@ -262,9 +325,14 @@ attribute vec3 position;
 attribute vec2 uv;
 uniform mat4 viewProjection;
 uniform vec3 origin, aim, side, upv;
-uniform float len, rad, time, disp, pan, split;
+uniform float len, rad, time, disp, pan, split, grow, spike;
+uniform vec3 eye;
 varying float vAlong, vTh;
+#ifdef OUTLINE_TWIN
+varying float vFace;
+#endif
 ${NOISE}
+${SPIKE_GLSL}
 void main(void) {
   float u = uv.x, th = uv.y * 6.2831853;
   vec3 n = cos(th) * side + sin(th) * upv;
@@ -280,9 +348,68 @@ void main(void) {
   r *= mix(sqrt(max(0.0, 1.0 - (1.0 - d) * (1.0 - d))), 1.0, split);
   r *= 1.0 + disp * (vn(vec3(along / rad * 0.9 - time * pan, cos(th) * 2.0, sin(th) * 2.0 + time * ${RIPPLE.toFixed(2)})) - 0.5);
   vAlong = along / rad; vTh = th;
-  gl_Position = viewProjection * vec4(origin + aim * along + n * r + position * 0.0, 1.0);
+  // (An outline's twin: as wide again as \`grow\` — its noise read as its core's, so it tears where its core does — and
+  // its spikes streaming forward from the egg's centre (\`spike\`: how far they rise). Unset: 1, none.)
+  float sk = spike > 0.0 ? spikeAt(along, th, rad, time) : 0.0;
+  float g = max(grow, 1.0) + spike * sk;
+  // (Its tip leaning forward, the way the beam travels: the higher, the further.)
+  float lean = spike > 0.0 ? ${SPIKE_LEAN.toFixed(2)} * rad * sk : 0.0;
+  gl_Position = viewProjection * vec4(origin + aim * (along + lean) + n * r * g + position * 0.0, 1.0);
+#ifdef OUTLINE_TWIN
+  // (Which way this point of it faces: out from the beam's axis, toward the eye or away.)
+  vFace = dot(n, normalize(eye - (origin + aim * along + n * r)));
+#endif
 }`;
 Effect.ShadersStore.beamTubeFragmentShader = MASTER_FRAG;
+
+// The core's rings of stars (RINGS): on its surface (its tube's shape, grown a touch), each fragment asks whether it
+// lies in a star of any ring of either set — where along the beam each ring is now, and the star (if any) in its slot.
+Effect.ShadersStore.beamRingsVertexShader = Effect.ShadersStore.beamTubeVertexShader;
+Effect.ShadersStore.beamRingsEggFragmentShader = Effect.ShadersStore.beamRingsFragmentShader = /* glsl */ `
+precision highp float;
+varying float vAlong, vTh;
+uniform vec3 color;
+uniform float time, len, rad, eggBack;
+float h1(float n) { return fract(sin(n * 127.1 + 311.7) * 43758.5453); }
+// In a star of one set's rings (n of them, \`speed\` beam lengths a second)? Measured in circumferences: along the beam
+// (a / C) and round it (t), C its girth mid-way along (its oval at its fullest).
+float inSet(float a, float t, float n, float speed, float seed) {
+  float C = 6.2831853 * rad * ${OVAL_MID.toFixed(2)};
+  float ac = a / C, lmax = ${(RING_LEN[1] / 2).toFixed(3)};
+  float slot = t * ${RING_SLOTS.toFixed(1)}, si = floor(slot), f = fract(slot);
+  for (int k = 0; k < 8; k++) {
+    if (float(k) >= n) break;
+    float run = time * speed + float(k) / n + seed;
+    // (Each ring's way: from the back of the egg at the mouth to the end of the beam.)
+    float at = (fract(run) * (len + eggBack) - eggBack) / C;
+    float da = abs(ac - at);
+    if (da > lmax) continue;
+    // (This ring's pattern, this time round.)
+    float id = floor(run) * 17.3 + float(k) * 5.1 + seed * 31.0;
+    // A star in this slot? As thick as the swell round the ring is here: bunched where it is high, sparse where low.
+    float waves = floor(mix(${RING_BUNCH[0].toFixed(1)}, ${(RING_BUNCH[1] + 0.99).toFixed(2)}, h1(id + 2.0)));
+    float swell = 0.5 + 0.5 * sin(6.2831853 * (t * waves + h1(id + 4.0)));
+    if (h1(si * 1.9 + id) > swell * swell * 1.2) continue;
+    // Its length along the beam and width round it (circumferences, half each way), where in its slot it sits.
+    float L = mix(${(RING_LEN[0] / 2).toFixed(3)}, lmax, h1(si + id * 0.7));
+    float Wd = mix(${(RING_WIDE[0] / 2).toFixed(4)}, ${(RING_WIDE[1] / 2).toFixed(4)}, h1(si * 2.3 + id));
+    float roomW = 0.5 - Wd * ${RING_SLOTS.toFixed(1)};
+    float off = (h1(si * 3.7 + id * 1.3 + 9.0) - 0.5) * 2.0 * max(roomW, 0.0);
+    // Along the beam it rides its ring (each star its own nudge); round it, in its slot.
+    float dl = abs(ac - at - (h1(si * 5.1 + id) - 0.5) * lmax * 0.6) / L;
+    float dw = abs((f - 0.5 - off) / ${RING_SLOTS.toFixed(1)}) / Wd;
+    // Its sides curving in: a four-pointed star (RING_STAR < 1; 1, a diamond).
+    if (pow(dl, ${RING_STAR.toFixed(2)}) + pow(dw, ${RING_STAR.toFixed(2)}) < 1.0) return 1.0;
+  }
+  return 0.0;
+}
+void main(void) {
+  float a = vAlong * rad, t = fract(vTh / 6.2831853);
+  float hit = 0.0;
+  ${RING_SETS.map(([n, v], i) => `hit = max(hit, inSet(a, t, ${n.toFixed(1)}, ${v.toFixed(3)}, ${(i * 0.37).toFixed(2)}));`).join(' ')}
+  if (hit < 0.5) discard;
+  gl_FragColor = vec4(color, 1.0);
+}`;
 
 // A split arc: a thinner beam along a curve from the contact point round the
 // target (a cubic Bezier p0..p3), drawn out to reachU of its length.
@@ -328,10 +455,16 @@ attribute vec3 position;
 attribute vec2 uv;
 uniform mat4 world, viewProjection;
 uniform vec3 origin, aim, side, upv;
-uniform float time, disp, pan, rad, egg;
+uniform float time, disp, pan, rad, egg, grow, spike;
+uniform vec3 eye;
 varying float vAlong, vTh;
+#ifdef OUTLINE_TWIN
+varying float vFace;
+#endif
 ${NOISE}
+${SPIKE_GLSL}
 void main(void) {
+  float onCap = 0.0;
   vec3 p = position * (1.0 + disp * (vn(position * 3.0 + vec3(0.0, 0.0, time * pan)) - 0.5));
   // The egg (its poles lie along the aim, +y forward): the back half full,
   // the front drawn out and narrowing into the column.
@@ -348,21 +481,45 @@ void main(void) {
   vec3 rel = w.xyz - origin;
   vAlong = dot(rel, aim) / max(rad, 1e-4);
   vTh = atan(dot(rel, upv), dot(rel, side));
-  gl_Position = viewProjection * w;
+  // (An outline's twin: grown in its own shape by \`grow\`, its noise read as its core's — and, a clash's half, cut where its
+  // core is, at the seam: never past it into the other beam's half. Unset: 1.)
+  // (Its spikes as the tube's: by how far along from the egg's centre it is, and round.)
+  float sk = spike > 0.0 ? spikeAt(dot(rel, aim), vTh, rad, time) : 0.0;
+  vec3 pg = p * (max(grow, 1.0) + spike * sk);
+  /*SEAM*/
+  // (Its tip leaning forward, the way the beam travels: the higher, the further.)
+  gl_Position = viewProjection * (world * vec4(pg, 1.0) + vec4(aim * ${SPIKE_LEAN.toFixed(2)} * rad * sk, 0.0));
+#ifdef OUTLINE_TWIN
+  // (Which way this point of it faces: out from its centre — a clash half's flat back, toward the other beam.)
+  vec3 nrm = onCap > 0.5 ? aim : normalize(w.xyz - vec3(world[3]));
+  // (An egg's front, drawn out into the column: it faces out from the beam's axis, as the tube does — out from its centre
+  // it would face forward, and its near side, side-on, would count as its far side and show over the core.)
+  float fwd = dot(w.xyz - vec3(world[3]), aim);
+  if (egg > 0.0 && onCap < 0.5 && fwd > 0.0) nrm = normalize(w.xyz - vec3(world[3]) - aim * fwd + 1e-5 * side);
+  vFace = dot(nrm, normalize(eye - w.xyz));
+#endif
 }`;
 Effect.ShadersStore.beamMeshFragmentShader = MASTER_FRAG;
+// (The core's rings round its egg at the mouth, where they start: the egg's shape, the rings' own fragment — RINGS.)
+Effect.ShadersStore.beamRingsEggVertexShader = Effect.ShadersStore.beamMeshVertexShader;
 
 // A clash's hemisphere: the half on this beam's side, running a little past
 // the clash plane (its front flattened there) and torn away across it by its
 // noise — so the other beam's half, torn the same way, blends into it.
 Effect.ShadersStore.beamClashVertexShader = Effect.ShadersStore.beamMeshVertexShader
   .replace('varying float vAlong, vTh;', 'varying float vAlong, vTh, vSeam;')
-  .replace('vec4 w = world * vec4(p, 1.0);', `p.y = min(p.y, ${CLASH_SEAM.toFixed(2)});
+  .replace('vec4 w = world * vec4(p, 1.0);', `onCap = p.y > ${CLASH_SEAM.toFixed(2)} ? 1.0 : 0.0;
+  p.y = min(p.y, ${CLASH_SEAM.toFixed(2)});
   vSeam = p.y;
-  vec4 w = world * vec4(p, 1.0);`);
+  vec4 w = world * vec4(p, 1.0);`)
+  .replace('/*SEAM*/', `pg.y = min(pg.y, ${CLASH_SEAM.toFixed(2)});
+  sk = 0.0; // (No lean here: it would carry its spikes past the seam, into the other beam's half.)`);
 Effect.ShadersStore.beamClashFragmentShader = MASTER_FRAG
-  .replace('varying float vAlong, vTh;', 'varying float vAlong, vTh, vSeam;')
-  .replace('if (n < cutoff) discard;', `float cutHere = mix(cutoff, 1.0, smoothstep(-${CLASH_SEAM.toFixed(2)}, ${CLASH_SEAM.toFixed(2)}, vSeam));
+  .replace('varying float vAlong, vTh;', `varying float vAlong, vTh, vSeam;
+uniform float grow;`)
+  // (Torn away across the seam, to blend into the other half — but not an outline's twin: its back, flat at the seam, is the
+  // rim behind its core, seen from its own side before the other half's.)
+  .replace('if (n < cutoff) discard;', `float cutHere = grow > 1.0 ? cutoff : mix(cutoff, 1.0, smoothstep(-${CLASH_SEAM.toFixed(2)}, ${CLASH_SEAM.toFixed(2)}, vSeam));
   if (n < cutHere) discard;`)
   .replace('float t = clamp((n - cutoff) / max(1.0 - cutoff, 1e-3), 0.0, 1.0);', 'float t = clamp((n - cutHere) / max(1.0 - cutHere, 1e-3), 0.0, 1.0);');
 
@@ -538,6 +695,10 @@ export interface BeamPalette { skin: RGB; body: RGB; skins?: RGB[] }
 
 export interface BeamShot {
   element: string;
+  /** Beam 1 (default: the layered beam) or beam 2 (the aura beam: its core alone, outlined, ringed) — BeamSpec.style. */
+  style?: 1 | 2;
+  /** Beam 2's outline: 'cel' (a flat band) or 'soft' (a glow) — BeamSpec.outline. */
+  outline?: 'cel' | 'soft';
   /** Its own colours (beamMoves), over the type's. */
   palette?: BeamPalette;
   /** Its noise bursts all along the column past the starting egg (PUFFS): flame billowing. */
@@ -870,6 +1031,8 @@ class Beam implements BeamHandle {
   private rootShells: { mesh: Mesh; layer: Layer; i: number; phase: number }[] = [];
   /** A clash's hemisphere: the beam's three layers, then the other beam's skin, sparse. */
   private hemis: { mesh: Mesh; layer: Layer; r: number; tear: number }[] = [];
+  /** The core's outline: each core piece's twin (OUTLINE). */
+  private outlines: { src: Mesh; core: ShaderMaterial; twin: Mesh; mat: ShaderMaterial; rings: boolean }[] = [];
   private clashNoise: ClashNoise | null = null;
   private slashes: { mesh: Mesh; layer: Layer }[] = [];
   private swirls: { mesh: Mesh; mat: ShaderMaterial }[] = [];
@@ -1113,8 +1276,99 @@ class Beam implements BeamHandle {
       size: 0.011 * H, lengthPerSpeed: 0.015, gravity: 0, drag: 3.5, turbulence: 0.8 * H, splitChance: 0, intensity: 0.75,
     }));
 
+    // Beam 2 (the aura beam): its core's aura outline — a twin of each core piece, in the move's colour — and its rings;
+    // the rest of the layered beam (its body and skin, swirls, sparks) never shown.
+    const aura = shot.style === 2;
+    if (aura) this.onlyCore();
+    if (OUTLINE && aura) {
+      const core = [this.tubes[0], this.balls[0], this.tips[0], this.hemis[0],
+        ...this.shells.filter((x) => x.i === 0), ...this.rootShells.filter((x) => x.i === 0), ...this.puffs.filter((x) => x.i === 0)];
+      // (In its type's aura outline colour — the line round a Pokémon's aura, and the beam's own skin: its body's colour is too pale to show against the white.)
+      // (Soft: a glow from its body's lighter colour against the core out to that outline colour at its edge.)
+      const soft = shot.outline === 'soft' ? col.main : undefined;
+      for (const piece of core) if (piece) this.outlineOf(piece.mesh, piece.layer.mat, col.dark, undefined, soft);
+    }
+    // Its rings of stars, round the core's tube (RINGS).
+    if (RINGS && aura && this.tubes[0]) this.outlineOf(this.tubes[0].mesh, this.tubes[0].layer.mat, col.dark, { shader: 'beamRings', grow: RING_GROW, near: true, name: 'Rings' });
+    // (Starting on its egg at the mouth: the same rings on it, on one way with the tube's.)
+    if (RINGS && aura && this.balls[0]) this.outlineOf(this.balls[0].mesh, this.balls[0].layer.mat, col.dark, { shader: 'beamRingsEgg', grow: RING_GROW, near: true, name: 'Rings' });
     this.setBeamVisible(false);
     this.tick = scene.onBeforeRenderObservable.add(() => this.update());
+  }
+
+  /**
+   * Beam 2: everything of the layered beam but its core kept from view — its
+   * body and skin layers (column, egg, tip and bursts, clash half), its swirls
+   * and its sparks. (Its layer mask, which the beam's own updates never touch:
+   * they go on running, unseen.)
+   */
+  private onlyCore(): void {
+    const hidden = [...this.tubes.slice(1), ...this.balls.slice(1), ...this.tips.slice(1), ...this.hemis.slice(1),
+      ...this.shells.filter((x) => x.i > 0), ...this.rootShells.filter((x) => x.i > 0), ...this.puffs.filter((x) => x.i > 0),
+      ...this.swirls, ...this.arcs.filter((_, k) => k % BEAM_R.length > 0)].map((x) => x.mesh);
+    for (const m of [...hidden, this.chargeSparks.mesh, this.streamSparks.mesh]) m.layerMask = 0;
+  }
+
+  /**
+   * A twin of `src` (its core's shader), flat in `color`, drawn from behind only: its outline (synced each frame:
+   * syncOutlines). `as`: another shader on its shape instead (its rings), grown so much, its near side drawn.
+   */
+  private outlineOf(src: Mesh, core: ShaderMaterial, color: RGB, as?: { shader: string; grow: number; near: boolean; name: string },
+    soft?: RGB): void {
+    const path = as ? { vertex: as.shader, fragment: as.shader } : (core as unknown as { _shaderPath: { vertex: string; fragment: string } })._shaderPath;
+    const opts = (core as unknown as { _options: { attributes: string[]; uniforms: string[] } })._options;
+    // (Its own define, so its own compiled effect: sharing its core's — compiled first, without \`grow\` among its uniforms —
+    // its grow would never reach the shader.)
+    const mat = new ShaderMaterial(`${core.name}${as?.name ?? 'Outline'}`, this.scene, path, {
+      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft'], defines: ['#define OUTLINE_TWIN'],
+      // (A soft outline is see-through at its edge: blended, writing no depth of its own.)
+      needAlphaBlending: !!soft,
+    });
+    // (An outline: both sides, its near side dropped by the way it faces — see MASTER_FRAG. Its rings: their near side.)
+    mat.backFaceCulling = !!as;
+    mat.cullBackFaces = !!as?.near;
+    mat.setColor3('color', new Color3(...color));
+    mat.setColor3('rim', new Color3(...(soft ?? color)));
+    mat.setFloat('soft', soft ? 1 : 0);
+    if (soft) mat.disableDepthWrite = true;
+    mat.setFloat('dark', 1);
+    mat.setFloat('multi', 0);
+    mat.setFloat('grow', as?.grow ?? OUTLINE_GROW);
+    // (The outline spikes; its rings don't.)
+    mat.setFloat('spike', as ? 0 : SPIKE);
+    const twin = src.clone(`${src.name}${as?.name ?? 'Outline'}`, src.parent, true) as Mesh;
+    twin.material = mat;
+    if (src.rotationQuaternion) twin.rotationQuaternion = src.rotationQuaternion.clone();
+    this.prepare(twin);
+    twin.setEnabled(false);
+    this.outlines.push({ src, core, twin, mat, rings: !!as });
+  }
+
+  /** Each outline as its core is this frame: where it is, its shape, its noise (a little less torn). */
+  private syncOutlines(): void {
+    type Store = { _floats: Record<string, number>; _vectors3: Record<string, Vector3>; _vectors2: Record<string, Vector2> };
+    // The rings' one way, egg and tube alike: the tube's length and girth, and how far back the egg reaches.
+    const tube = this.tubes[0]?.layer.mat as unknown as Store | undefined;
+    const eye = this.scene.activeCamera?.globalPosition;
+    for (const { src, core, twin, mat, rings } of this.outlines) {
+      const on = src.isEnabled(false) && src.isVisible;
+      twin.setEnabled(on);
+      if (!on) continue;
+      twin.position.copyFrom(src.position);
+      if (src.rotationQuaternion && twin.rotationQuaternion) twin.rotationQuaternion.copyFrom(src.rotationQuaternion);
+      twin.scaling.copyFrom(src.scaling);
+      twin.layerMask = src.layerMask;
+      const from = core as unknown as Store;
+      for (const [k, v] of Object.entries(from._floats)) if (k !== 'dark' && k !== 'multi' && k !== 'grow' && k !== 'spike') mat.setFloat(k, k === 'cutoff' ? v * OUTLINE_CUT : v);
+      for (const [k, v] of Object.entries(from._vectors3)) mat.setVector3(k, v);
+      for (const [k, v] of Object.entries(from._vectors2)) mat.setVector2(k, v);
+      if (eye) mat.setVector3('eye', eye);
+      if (rings && tube) {
+        mat.setFloat('len', tube._floats.len ?? 0);
+        mat.setFloat('rad', tube._floats.rad ?? 1);
+        mat.setFloat('eggBack', this.backR);
+      }
+    }
   }
 
   origin(): Vector3 {
@@ -1251,7 +1505,8 @@ class Beam implements BeamHandle {
     const at = (clash ? clash.at() : null) ?? origin.add(aim.scale(contactAt));
     const toAim = new Quaternion();
     Quaternion.FromUnitVectorsToRef(Y, aim, toAim);
-    if (this.shot.clashNoise && !this.clashNoise && clash && clash.ball !== false) this.clashNoise = this.shot.clashNoise();
+    // (Beam 2: no clash noise — its clash ball its core and outline alone.)
+    if (this.shot.clashNoise && !this.clashNoise && clash && clash.ball !== false && this.shot.style !== 2) this.clashNoise = this.shot.clashNoise();
     let noiseR = 0, noiseShow = 0;
     this.hemis.forEach(({ mesh, layer, r, tear }, i) => {
       mesh.setEnabled(g > 0.01 && clash?.ball !== false);
@@ -1397,6 +1652,11 @@ class Beam implements BeamHandle {
   }
 
   private update(): void {
+    this.step();
+    if (!this.finished) this.syncOutlines();
+  }
+
+  private step(): void {
     const dt = Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
     this.time += dt;
     const H = this.H;
@@ -1669,6 +1929,7 @@ class Beam implements BeamHandle {
     for (const sp of [this.chargeSparks, this.streamSparks]) sp.dispose();
     const meshes = [...this.tubes, ...this.arcs, ...this.balls, ...this.tips, ...this.shells, ...this.puffs, ...this.rootShells, ...this.hemis, ...this.slashes, ...this.swirls, ...this.dust].map((x) => x.mesh);
     for (const m of meshes) { m.material?.dispose(); m.dispose(); }
+    for (const o of this.outlines) { o.mat.dispose(); o.twin.dispose(); }
   }
 }
 
