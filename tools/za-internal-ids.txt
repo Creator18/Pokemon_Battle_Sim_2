@@ -242,3 +242,8 @@
 979 - Runerigus
 980 - Mr. Rime
 981 - Sirfetch'd
+# Gen 9 (the DLC, its own numbering above 1000), identified by their bone and mesh names (2026-11-10):
+# pm1107 cloth + eyefire meshes, pm1108 body/front/shoulder armour, pm1109 left/right blade + longblade meshes.
+1107 - Charcadet
+1108 - Armarouge
+1109 - Ceruledge

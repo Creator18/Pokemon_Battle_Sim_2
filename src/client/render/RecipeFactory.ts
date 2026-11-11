@@ -471,6 +471,10 @@ const CROSS_TRACE = 0.7, CROSS_GHOSTS = 0.3, CROSS_GHOST_EVERY = 0.06, CROSS_GHO
 const CROSS_SECOND_HIT = 0.1, CROSS_REACH = 0.22, CROSS_INNER = 0.2, CROSS_BURST = 0.3;
 /** A cross by one with more than one arm a side (Machamp): how many frames its swing is watched before its trail locks to the arm moving most. */
 const CROSS_PICK = 4;
+/** A single slash on a plain attack (Charizard's Dragon Claw): how long before its blow its arm is traced from (s). */
+const CROSS_ATTACK_LEAD = 0.15;
+/** A single slash (Dragon Claw): how long its sweep round its sphere takes (s), by the clock — its normal pace, not a cross's quick one. */
+const CROSS_SINGLE_SWEEP = 0.32;
 /** Cross slashes laid on a sphere round the attacker (ArcSlashFx.trail `sphere`), not flat along the arm. */
 const CROSS_SPHERE = true;
 /** Its sphere's radius (× the attacker's height): about its arm's reach. */
@@ -1440,16 +1444,19 @@ export class RecipeFactory implements UnitFactory {
    * swings, a burst at each blow. `onBlow(i)`: at each (0, then 1), for the
    * caller's hit. Resolves on the second blow. One with no swipe swipes once.
    */
-  async playCrossSlash(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: (i: number) => void): Promise<void> {
+  async playCrossSlash(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: (i: number) => boolean | void, single = false): Promise<void> {
     const u = this.units.get(node);
-    if (!u || this.strikeKey(u, true) !== 'swipe') { await this.playAttackLunge(node, targetPos, true); onBlow?.(0); return; }
+    // (One whose claw is its plain attack — Charizard, CLAW_ON_ATTACK — slashes on that: a single slash only; a cross
+    // needs a swipe to mirror.)
+    const onAttack = !!u && this.strikeKey(u, true) !== 'swipe';
+    if (!u || (onAttack && !single)) { await this.playAttackLunge(node, targetPos, true); onBlow?.(0); return; }
     const player = u.model.player, rig = player as unknown as Rig;
     const fx = (this.arcSlash ??= new ArcSlashFx(this.scene));
-    const part = this.impactPart(node, 'swipe') ?? 'right_hand';
+    const part = this.impactPart(node, onAttack ? 'attack' : 'swipe') ?? 'right_hand';
     const partner = part.replace(/^(left|right)/, (m) => (m === 'left' ? 'right' : 'left'));
     const end = this.act(u, 'swipeEnd');
     // Its mirrored strike, made once.
-    if (u.crossStrike === undefined) {
+    if (!onAttack && u.crossStrike === undefined) {
       const baked = bakeHandAttack(rig, [end], sampleTrack, { id: 0, species: '', clip: 'swipe', hand: part, height: u.model.height, hitTime: 0 });
       u.crossStrike = baked ? 'crossStrike' : null;
       if (baked) player.clips.set('crossStrike', toClip(mirrorClip(rig, retarget(baked, rig, u.model.height)), 'crossStrike', (player as unknown as { shown: unknown[] }).shown));
@@ -1487,23 +1494,32 @@ export class RecipeFactory implements UnitFactory {
     // (Its right, across its middle; where its blows land: its two slashes cross there, on its sphere.)
     const right = new Vector3(Math.cos(node.rotation.y), 0, -Math.sin(node.rotation.y));
     const sphere = CROSS_SPHERE ? { centre: () => node.position.add(new Vector3(0, H * 0.5, 0)), radius: H * CROSS_SPHERE_R, across: right,
-      contact: targetPos.add(new Vector3(0, H * 0.5, 0)) } : undefined;
+      contact: targetPos.add(new Vector3(0, H * 0.5, 0)), sweep: single ? CROSS_SINGLE_SWEEP : undefined } : undefined;
     const ghosts = (secs: number) => { for (let t = 0; t < secs; t += CROSS_GHOST_EVERY) setTimeout(() => this.afterimage(node, CROSS_GHOST), t * 1000); };
+    // (Its burst on the target only if the blow lands: onBlow says, false if it missed.)
     const blow = (i: number) => {
+      if (onBlow?.(i) === false) return;
       const way = targetPos.subtract(node.position); way.y = 0;
       if (way.lengthSquared() > 1e-6 && this.beams) this.beams.hemiBurst(targetPos.add(new Vector3(0, H * 0.5, 0)), way.normalize().scale(-1), H * CROSS_BURST, hue, false);
-      onBlow?.(i);
     };
-    // The first: its swipe attack; traced from its strike's start.
+    // The first: its swipe attack; traced from its strike's start — or, on its plain attack, from CROSS_ATTACK_LEAD s
+    // before its blow (where its attack's blow lands: HIT_AT of it, at most HIT_CAP in).
     const struck = this.playAttackLunge(node, targetPos, true);
-    await new Promise<void>((res) => {
-      const o = this.scene.onBeforeRenderObservable.add(() => { if (player.active?.action === end) { this.scene.onBeforeRenderObservable.remove(o); res(); } });
-    });
+    if (onAttack) {
+      const hitAt = Math.min(HIT_CAP, (player.clips.get(this.act(u, 'attack'))?.duration ?? 0.6) * HIT_AT);
+      await sleep(Math.max(0, hitAt - CROSS_ATTACK_LEAD));
+    } else {
+      await new Promise<void>((res) => {
+        const o = this.scene.onBeforeRenderObservable.add(() => { if (player.active?.action === end) { this.scene.onBeforeRenderObservable.remove(o); res(); } });
+      });
+    }
     const first = fx.trail({ element: hue, height: H, sample: sampler(part), trace: CROSS_TRACE, sphere });
-    ghosts(CROSS_GHOSTS);
+    // (Afterimages for a cross's quick pair only: a single slash goes at its normal pace, without.)
+    if (!single) ghosts(CROSS_GHOSTS);
     await struck;
     blow(0);
-    if (!u.crossStrike || u.down) return;
+    // (A single slash — Dragon Claw — ends at its first blow.)
+    if (single || !u.crossStrike || u.down) return;
     // The second, straight out of the first's blow: the mirrored strike, quicker, its partner arm traced.
     await sleep(CROSS_NEXT);
     void player.play(u.crossStrike, { fade: 0.06, speed: CROSS_SPEED }).then(() => {

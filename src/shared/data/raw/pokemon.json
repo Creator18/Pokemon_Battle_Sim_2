@@ -11806,6 +11806,110 @@
    ]
   },
   {
+   "name": "Charcadet",
+   "types": [
+    "Fire"
+   ],
+   "hp": 40,
+   "inflated_hp": 100,
+   "attack": 50,
+   "defense": 40,
+   "sp_atk": 50,
+   "sp_def": 40,
+   "speed": 35,
+   "level": 50,
+   "can_pass_through": false,
+   "sprite_id": 935,
+   "model_id": "pm1107_00_00",
+   "description": "The Fire Child Pokémon.",
+   "compatible_terrain": [
+    "Will-O-Wisp",
+    "Sunny Day"
+   ],
+   "compatible_status": [
+    "Swords Dance",
+    "Taunt"
+   ],
+   "compatible_ranged": [
+    "Flamethrower",
+    "Air Slash"
+   ],
+   "compatible_physical": [
+    "Fire Fang",
+    "Quick Attack"
+   ]
+  },
+  {
+   "name": "Armarouge",
+   "types": [
+    "Fire",
+    "Psychic"
+   ],
+   "hp": 85,
+   "inflated_hp": 135,
+   "attack": 60,
+   "defense": 100,
+   "sp_atk": 125,
+   "sp_def": 80,
+   "speed": 75,
+   "level": 50,
+   "can_pass_through": false,
+   "sprite_id": 936,
+   "model_id": "pm1108_00_00",
+   "description": "The Fire Warrior Pokémon.",
+   "compatible_terrain": [
+    "Will-O-Wisp",
+    "Sunny Day"
+   ],
+   "compatible_status": [
+    "Calm Mind",
+    "Hypnosis"
+   ],
+   "compatible_ranged": [
+    "Flamethrower",
+    "Psychic"
+   ],
+   "compatible_physical": [
+    "Fire Fang",
+    "Psycho Cut"
+   ]
+  },
+  {
+   "name": "Ceruledge",
+   "types": [
+    "Fire",
+    "Ghost"
+   ],
+   "hp": 75,
+   "inflated_hp": 125,
+   "attack": 125,
+   "defense": 80,
+   "sp_atk": 60,
+   "sp_def": 100,
+   "speed": 85,
+   "level": 50,
+   "can_pass_through": false,
+   "sprite_id": 937,
+   "model_id": "pm1109_00_00",
+   "description": "The Fire Blades Pokémon.",
+   "compatible_terrain": [
+    "Will-O-Wisp",
+    "Sunny Day"
+   ],
+   "compatible_status": [
+    "Destiny Bond",
+    "Swords Dance"
+   ],
+   "compatible_ranged": [
+    "Flamethrower",
+    "Shadow Ball"
+   ],
+   "compatible_physical": [
+    "Fire Fang",
+    "Shadow Sneak"
+   ]
+  },
+  {
    "name": "Mega Venusaur",
    "types": [
     "Grass",

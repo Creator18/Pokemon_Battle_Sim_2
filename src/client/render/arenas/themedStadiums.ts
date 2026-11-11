@@ -277,7 +277,10 @@ export function iceStadium(scene: Scene, at = Vector3.Zero()): Arena {
   k.owned.push(floorDetail(scene, mat, FLOOR_W, FLOOR_D, 'frost', 9));
   const mirror = new MirrorTexture('iceMirror', ICE_MIRROR, scene, true);
   mirror.mirrorPlane = new Plane(0, -1, 0, at.y);
-  mirror.renderListPredicate = (m) => m !== rink && m.isEnabled() && m.isVisible && m.name !== 'kitGround';
+  // (Only what the camera itself draws: a mesh kept off its layers — beam 2's hidden beam-1 layers, layerMask 0 —
+  // would otherwise show in the ice though nowhere above it.)
+  mirror.renderListPredicate = (m) => m !== rink && m.isEnabled() && m.isVisible && m.name !== 'kitGround'
+    && (m.layerMask & (scene.activeCamera?.layerMask ?? 0x0fffffff)) !== 0;
   mirror.level = ICE_SHINE;
   mirror.adaptiveBlurKernel = 12;
   mat.reflectionTexture = mirror;

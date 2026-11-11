@@ -28,12 +28,14 @@ import { elementFor } from '../vfx/auraPalette.ts';
 import { POUR_COST, RUSH_COST, RUSH_FREE, type Stamina } from './Stamina.ts';
 
 /** Moves the move data doesn't carry yet: their type and power, and how they play. */
-const OWN_MOVES: Record<string, { type: string; power: number; kind: 'rampage' | 'cross' }> = {
+const OWN_MOVES: Record<string, { type: string; power: number; kind: 'rampage' | 'cross' | 'slash' }> = {
   Outrage: { type: 'Dragon', power: 120, kind: 'rampage' },
   // Crosses: one slash from each arm in quick succession (RecipeFactory.playCrossSlash).
   'Cross Chop': { type: 'Fighting', power: 100, kind: 'cross' },
   'Cross Poison': { type: 'Poison', power: 70, kind: 'cross' },
   'X-Scissor': { type: 'Bug', power: 80, kind: 'cross' },
+  // A single slash: the cross's first blow alone — its swipe, its sphere slash.
+  'Dragon Claw': { type: 'Dragon', power: 80, kind: 'slash' },
 };
 /** A dash dodges a move whose contact comes within this long of its start (s). */
 const DODGE_WINDOW = 0.35;
@@ -82,7 +84,7 @@ export class RealtimeMoves {
     const type = own?.type ?? moveType(name), power = own?.power ?? move?.basePower ?? 60;
     const beam = beamFor(name);
     if (beam) return this.pour(node, target, name, holding);
-    if (own?.kind === 'cross') return this.cross(node, target, type);
+    if (own?.kind === 'cross' || own?.kind === 'slash') return this.cross(node, target, type, own.kind === 'slash');
     if (!move?.isRam && own?.kind !== 'rampage') return false;
     // In its aura, after it — as far as its breath takes it.
     const aura = f.aura(node, { element: type, edge: 'tongues', reach: 'body' });
@@ -131,8 +133,22 @@ export class RealtimeMoves {
    * each blow asked on its own whether it landed (a dash at either dodges it).
    * True if either did.
    */
-  private async cross(node: TransformNode, target: TransformNode, type: string): Promise<boolean> {
+  private async cross(node: TransformNode, target: TransformNode, type: string, single = false): Promise<boolean> {
     const f = this.factory;
+    // A single slash (Dragon Claw): no rush — let loose where it stands, at the target; it lands if the target is in reach.
+    if (single) {
+      let hit = false;
+      await f.playCrossSlash(node, target.position.clone(), type, () => {
+        // (Out of reach: it just misses — no burst, nothing said. Dodged: said so.)
+        if (!this.within(node, target, node.position)) return false;
+        if (this.evaded(target)) { this.dodged(target); return false; }
+        hit = true;
+        const flinch = f.playHitReact(target);
+        this.hooks.onStruck?.(target, flinch);
+        return true;
+      }, true);
+      return hit;
+    }
     const stop = STOP_SHORT * (f.heightOf(node) + f.heightOf(target));
     const stamina = this.hooks.staminaOf?.(node) ?? null;
     let rushed = 0;
@@ -145,11 +161,12 @@ export class RealtimeMoves {
     if (!this.within(node, target, at)) { this.say(node, 'Out of breath!', '#FCD34D'); return false; }
     let landed = false;
     await f.playCrossSlash(node, target.position.clone(), type, () => {
-      if (this.evaded(target) || !this.within(node, target, node.position)) { this.dodged(target); return; }
+      if (this.evaded(target) || !this.within(node, target, node.position)) { this.dodged(target); return false; }
       landed = true;
       const flinch = f.playHitReact(target);
       this.hooks.onStruck?.(target, flinch);
-    });
+      return true;
+    }, single);
     return landed;
   }
 

@@ -163,7 +163,7 @@ export interface TrailSlashOptions {
    * centre, and the sphere's own shader drawing the band along it on its surface; its stacked layers on spheres
    * round the same centre a little larger and smaller; a faint bubble, rim-lit about the path.
    */
-  sphere?: { centre: () => Vector3; radius?: number; across?: Vector3; contact?: Vector3 };
+  sphere?: { centre: () => Vector3; radius?: number; across?: Vector3; contact?: Vector3; sweep?: number };
   /**
    * On a sphere, the mirror image of another slash (the second of a cross): `of`'s path reflected across the plane
    * through its centre whose normal is `across` (the attacker's right: left and right swapped), on `of`'s own sphere —
@@ -224,6 +224,8 @@ const CROSS_PAST = 0.25;
  */
 /** A thrown slash: how long past its trace it may fly at most (s) before it goes anyway. */
 const FLY_MAX = 2;
+/** A slash swept by the clock (sphere \`sweep\`): how long it is held whole before it goes (s). */
+const SWEEP_HOLD = 0.12;
 /** A thrown slash: how long it takes to turn to face its mark as it sets off (s). */
 const FLY_TURN = 0.12;
 /** A thrown blade (fly `blade`): how far round its sphere it sweeps (radians), and how far it is tipped forward toward its mark. */
@@ -453,7 +455,7 @@ export class ArcSlashFx {
     // its follow-through, CROSS_PAST beyond the plane down the attacker's middle (every great circle crosses it, so it
     // always can, unbent) — its mirror image, made alike, meets it there: an X. At least SPH_MIN_SWEEP round.
     const across = sph?.across;
-    let arc: SlashArc | null = null, shown = 0;
+    let arc: SlashArc | null = null, shown = 0, sweptAt = -1;
     const arcAt = (c: SlashArc, a: number) => c.e1.scale(Math.cos(a)).addInPlace(c.e2.scale(Math.sin(a)));
     const angOn = (c: SlashArc, d: Vector3) => Math.atan2(Vector3.Dot(d, c.e2), Vector3.Dot(d, c.e1));
     // (Where its circle crosses the attacker's middle — two places, half a turn apart — the one nearest a0..head.)
@@ -475,7 +477,7 @@ export class ArcSlashFx {
       return c.lengthSquared() < 1e-8 ? null : c.normalize();
     };
     const fitArc = (): SlashArc | null => {
-      const n = dirs.length, d1 = dirs[1], cw = contactWay(), end = cw ?? dirs[n - 1];
+      const n = dirs.length, d1 = dirs[Math.min(1, n - 1)], cw = contactWay(), end = cw ?? dirs[n - 1];
       const axis = Vector3.Cross(d1, end);
       if (axis.lengthSquared() < ARC_FIT_MIN * ARC_FIT_MIN) return null;
       axis.normalize();
@@ -565,6 +567,10 @@ export class ArcSlashFx {
           const again = past && lull < END_LULL * peak && v > lull * 1.5;
           if (past) lull = Math.min(lull, v);
           if (!grown && (slow || turned || again)) { grown = true; grownT = t; }
+          // (A swing too short to set its circle as it went — fewer than ARC_FIT_POINTS of it, Charizard's claw — sets
+          // it now, from what there is: its start, and the way to its contact (or its end); its follow-through then
+          // sweeps the whole slash round.)
+          if (grown && across && !arc && !mir && dirs.length >= (sph?.contact ? 1 : 2)) { arc = fitArc(); if (arc) shown = arc.a0; }
           if (mir && src && src.centre) {
             // A mirror image: the other's reflected path laid as this one's part swings (all of it once its swing ends).
             if (!centre) { centre = src.centre.clone(); radius = src.radius; firstT = t; }
@@ -601,7 +607,13 @@ export class ArcSlashFx {
         }
         if (t >= o.trace && (!arc || shown >= arc.target - 1e-3 || t >= o.trace + ARC_FOLLOW_MAX) && (!o.fly || landed || t >= o.trace + FLY_MAX)) endT = t;
       }
-      if (arc) {
+      if (arc && sph?.sweep) {
+        // (Swept by the clock — a single slash, sphere \`sweep\` s, from its circle being set: a part whose swing
+        // runs off its circle, or ends unseen, still draws it whole — then held SWEEP_HOLD s, and it goes.)
+        if (sweptAt < 0) sweptAt = t;
+        shown = arc.a0 + (arc.target - arc.a0) * Math.min(1, (t - sweptAt) / sph.sweep);
+        if (endT < 0 && t - sweptAt >= sph.sweep + SWEEP_HOLD) { endT = t; grown = true; }
+      } else if (arc) {
         // (While its part swings, as far round as it has come — mirrored, in step with it; its swing over, on round.)
         shown = Math.max(shown, arc.head);
         if (grown) shown += ARC_FOLLOW * dt;

@@ -347,6 +347,10 @@ uniform vec3 eye;
 varying float vAlong, vTh;
 #ifdef OUTLINE_TWIN
 varying float vFace;
+// Where the camera drawing this is: from its own view matrix, so a mirror's pass (the ice's reflection) judges its
+// near and far sides from the mirrored camera, not the real one (\`eye\`).
+uniform mat4 view;
+vec3 viewEye() { vec3 t = view[3].xyz; return -vec3(dot(view[0].xyz, t), dot(view[1].xyz, t), dot(view[2].xyz, t)); }
 #endif
 ${NOISE}
 ${SPIKE_GLSL}
@@ -374,7 +378,7 @@ void main(void) {
   gl_Position = viewProjection * vec4(origin + aim * (along + lean) + n * r * g + position * 0.0, 1.0);
 #ifdef OUTLINE_TWIN
   // (Which way this point of it faces: out from the beam's axis, toward the eye or away.)
-  vFace = dot(n, normalize(eye - (origin + aim * along + n * r)));
+  vFace = dot(n, normalize(viewEye() - (origin + aim * along + n * r)));
 #endif
 }`;
 Effect.ShadersStore.beamTubeFragmentShader = MASTER_FRAG;
@@ -507,6 +511,10 @@ uniform vec3 eye;
 varying float vAlong, vTh;
 #ifdef OUTLINE_TWIN
 varying float vFace;
+// Where the camera drawing this is: from its own view matrix, so a mirror's pass (the ice's reflection) judges its
+// near and far sides from the mirrored camera, not the real one (\`eye\`).
+uniform mat4 view;
+vec3 viewEye() { vec3 t = view[3].xyz; return -vec3(dot(view[0].xyz, t), dot(view[1].xyz, t), dot(view[2].xyz, t)); }
 #endif
 ${NOISE}
 ${SPIKE_GLSL}
@@ -543,7 +551,7 @@ void main(void) {
   // it would face forward, and its near side, side-on, would count as its far side and show over the core.)
   float fwd = dot(w.xyz - vec3(world[3]), aim);
   if (egg > 0.0 && onCap < 0.5 && fwd > 0.0) nrm = normalize(w.xyz - vec3(world[3]) - aim * fwd + 1e-5 * side);
-  vFace = dot(nrm, normalize(eye - w.xyz));
+  vFace = dot(nrm, normalize(viewEye() - w.xyz));
 #endif
 }`;
 Effect.ShadersStore.beamMeshFragmentShader = MASTER_FRAG;
@@ -1356,7 +1364,8 @@ class Beam implements BeamHandle {
     const hidden = [...this.tubes.slice(1), ...this.balls.slice(1), ...this.tips.slice(1), ...this.hemis.slice(1),
       ...this.shells.filter((x) => x.i > 0), ...this.rootShells.filter((x) => x.i > 0), ...this.puffs.filter((x) => x.i > 0),
       ...this.swirls, ...this.arcs.filter((_, k) => k % BEAM_R.length > 0)].map((x) => x.mesh);
-    for (const m of [...hidden, this.chargeSparks.mesh, this.streamSparks.mesh]) m.layerMask = 0;
+    // (Its charge kept as beam 1's — the sparks gathering into its egg before it is let go; only those off its contact go.)
+    for (const m of [...hidden, this.streamSparks.mesh]) m.layerMask = 0;
   }
 
   /**
@@ -1370,7 +1379,7 @@ class Beam implements BeamHandle {
     // (Its own define, so its own compiled effect: sharing its core's — compiled first, without \`grow\` among its uniforms —
     // its grow would never reach the shader.)
     const mat = new ShaderMaterial(`${core.name}${as?.name ?? 'Outline'}`, this.scene, path, {
-      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft'], defines: ['#define OUTLINE_TWIN'],
+      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view'], defines: ['#define OUTLINE_TWIN'],
       // (A soft outline is see-through at its edge: blended, writing no depth of its own.)
       needAlphaBlending: !!soft,
     });
