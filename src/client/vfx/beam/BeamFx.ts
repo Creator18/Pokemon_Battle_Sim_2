@@ -127,6 +127,8 @@ const BOLT_THICK: [number, number] = [0.45, 2.4];
  * middle (an ellipse between).
  */
 const OVAL_END = 0.7, OVAL_MID = 1.2;
+/** Beam 2 (the aura beam): its column swells fuller mid-way, OVAL_MID_AURA × (in place of OVAL_MID). */
+const OVAL_MID_AURA = 1.6;
 /** Each ball layer is its tube layer a little swollen, so the tube flows out of it. */
 const BALL_OVER = 1.45;
 const SPHERE_R = BEAM_R.map((r) => r * BALL_OVER);
@@ -137,6 +139,21 @@ const SPHERE_R = BEAM_R.map((r) => r * BALL_OVER);
  * at its start, so it runs straight into the column. EGG_IN s to take shape.
  */
 const EGG_BACK = 1.15, EGG_FRONT = 2.2, EGG_IN = 0.25;
+/**
+ * Beam 2 (the aura beam): its starting egg grows to AURA_EGG × as it pours, so it
+ * stands apart from the narrower column.
+ */
+const AURA_EGG = 1.6;
+/**
+ * Beam 2: its core always shows over its starting egg's outline, from any
+ * angle — the egg's own, the column, its end (the tip and its bursts) and its
+ * half of a clash's ball. Those cores mark the pixels they draw in their beam's stencil bit (one of
+ * CORE_STENCIL_BITS, by beam, so one beam's core never shows through another's
+ * ball outline in a clash); the starting ball's outline is drawn after them
+ * (BALL_OUTLINE_GROUP, keeping the scene's depth) and skips those pixels. Every
+ * other outline, and everything else, still hides by depth as usual.
+ */
+const CORE_STENCIL_BITS = [0x10, 0x20, 0x40, 0x80], BALL_OUTLINE_GROUP = 2;
 const EGG_TIP = OVAL_END / BALL_OVER;
 const SWIRL_R = 0.30, SWIRL_W = 0.05, SWIRLS = 3;
 /**
@@ -287,6 +304,8 @@ varying float vAlong, vTh;
 #ifdef OUTLINE_TWIN
 varying float vFace;
 uniform float soft;
+// (Beam 2's starting egg's outline: drawn whole, both sides — its cores shown over it by the stencil instead.)
+uniform float whole;
 #endif
 uniform vec3 color, rim, color2, color3;
 uniform float time, pan, cutoff, dark, multi;
@@ -296,7 +315,7 @@ void main(void) {
 #ifdef OUTLINE_TWIN
   // (An outline's near side, by the way its surface faces — not its triangles', which its leaning spikes fold: only its
   // far side draws, behind its core.)
-  if (vFace > 0.0) discard;
+  if (whole < 0.5 && vFace > 0.0) discard;
 #endif
   // Seamless round the tube: the angle enters as a circle.
   vec3 q = vec3(vAlong * nscale.x - time * pan, cos(vTh) * nscale.y, sin(vTh) * nscale.y + time * ${CHURN.toFixed(2)});
@@ -343,6 +362,8 @@ attribute vec2 uv;
 uniform mat4 viewProjection;
 uniform vec3 origin, aim, side, upv;
 uniform float len, rad, time, disp, pan, split, grow, spike;
+// (How full it is mid-way, × \`rad\`: unset (0), OVAL_MID.)
+uniform float ovalMid;
 uniform vec3 eye;
 varying float vAlong, vTh;
 #ifdef OUTLINE_TWIN
@@ -362,7 +383,8 @@ void main(void) {
   // until it splits on the target: then its far end opens out to full width
   // (\`split\` 0..1), straight into the arcs, with no neck where they part.
   float c = mix(2.0 * u - 1.0, min(2.0 * u, 1.0) - 1.0, split);
-  float r = rad * mix(${OVAL_END.toFixed(2)}, ${OVAL_MID.toFixed(2)}, sqrt(max(0.0, 1.0 - c * c)));
+  float mid = ovalMid > 0.0 ? ovalMid : ${OVAL_MID.toFixed(2)};
+  float r = rad * mix(${OVAL_END.toFixed(2)}, mid, sqrt(max(0.0, 1.0 - c * c)));
   // A round dome at the front while it races out (as long as the end is wide).
   float cap = rad * ${OVAL_END.toFixed(2)};
   float d = clamp((len - along) / cap, 0.0, 1.0);
@@ -922,7 +944,7 @@ export class BeamFx {
     warm.setEnabled(false);
     const warmMat = new ShaderMaterial('hemiWarmMat', scene, { vertex: 'beamClash', fragment: 'beamClash' }, {
       attributes: ['position', 'uv'],
-      uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'egg', 'split', 'time', 'disp', 'pan',
+      uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'egg', 'split', 'time', 'disp', 'pan',
         'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
     });
     warmMat.backFaceCulling = false;
@@ -961,7 +983,7 @@ export class BeamFx {
       const mesh = MeshBuilder.CreateSphere(`hemiBurst${i}`, { diameter: 2, segments: 24 }, scene);
       const mat = new ShaderMaterial(`hemiBurstMat${i}`, scene, { vertex: 'beamClash', fragment: 'beamClash' }, {
         attributes: ['position', 'uv'],
-        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'egg', 'split', 'time', 'disp', 'pan',
+        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'egg', 'split', 'time', 'disp', 'pan',
           'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
       });
       mat.backFaceCulling = false;
@@ -1122,7 +1144,7 @@ class Beam implements BeamHandle {
     const masterMat = (name: string, shader: string, l: LayerDef): Layer => {
       const mat = new ShaderMaterial(name, scene, { vertex: shader, fragment: shader }, {
         attributes: ['position', 'uv'],
-        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'egg', 'split', 'time', 'disp', 'pan',
+        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'egg', 'split', 'time', 'disp', 'pan',
           'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
       });
       // (Only its own skin: a clash's streaks of the other beam keep their one colour.)
@@ -1345,6 +1367,7 @@ class Beam implements BeamHandle {
       // (Soft: a glow from its body's lighter colour against the core out to that outline colour at its edge.)
       const soft = shot.outline === 'soft' ? col.main : undefined;
       for (const piece of core) if (piece) this.outlineOf(piece.mesh, piece.layer.mat, col.dark, undefined, soft);
+      this.coreOverBallOutline();
     }
     // Its rings of stars, round the core's tube (RINGS).
     if (RINGS && aura && this.tubes[0]) this.outlineOf(this.tubes[0].mesh, this.tubes[0].layer.mat, col.dark, { shader: 'beamRings', grow: RING_GROW, near: true, name: 'Rings' });
@@ -1368,6 +1391,34 @@ class Beam implements BeamHandle {
     for (const m of [...hidden, this.streamSparks.mesh]) m.layerMask = 0;
   }
 
+  /** Beam 2: its column, end and clash-ball cores over its starting ball's outline, always (CORE_STENCIL_BITS). */
+  private coreOverBallOutline(): void {
+    const ball = this.balls[0];
+    const twin = ball && this.outlines.find((o) => o.src === ball.mesh && !o.rings);
+    if (!twin) return;
+    const bit = CORE_STENCIL_BITS[this.id % CORE_STENCIL_BITS.length];
+    // The cores that show over it: the egg's own (its front, drawn out into the column, would otherwise lie under its
+    // outline seen from above), the column, the tip and its bursts, its half of a clash's ball.
+    const cores = [ball, this.tubes[0], this.tips[0], this.hemis[0], ...this.shells.filter((x) => x.i === 0)];
+    for (const piece of cores) {
+      if (!piece) continue;
+      const st = piece.layer.mat.stencil;
+      st.enabled = true;
+      st.func = Constants.ALWAYS; st.funcRef = bit; st.funcMask = 0xff; st.mask = bit;
+      st.opStencilFail = Constants.KEEP; st.opDepthFail = Constants.KEEP; st.opStencilDepthPass = Constants.REPLACE;
+    }
+    // (The ball's outline in a later group, which keeps the depth and stencil drawn so far: it is still hidden by
+    // whatever stands in front of it, as before.)
+    this.scene.setRenderingAutoClearDepthStencil(BALL_OUTLINE_GROUP, false, false, false);
+    twin.twin.renderingGroupId = BALL_OUTLINE_GROUP;
+    // Drawn whole first — both sides, not just its far side — then the stencil sets what shows over it.
+    twin.mat.setFloat('whole', 1);
+    const st = twin.mat.stencil;
+    st.enabled = true;
+    st.func = Constants.NOTEQUAL; st.funcRef = bit; st.funcMask = bit; st.mask = 0x00;
+    st.opStencilFail = Constants.KEEP; st.opDepthFail = Constants.KEEP; st.opStencilDepthPass = Constants.KEEP;
+  }
+
   /**
    * A twin of `src` (its core's shader), flat in `color`, drawn from behind only: its outline (synced each frame:
    * syncOutlines). `as`: another shader on its shape instead (its rings), grown so much, its near side drawn.
@@ -1379,7 +1430,7 @@ class Beam implements BeamHandle {
     // (Its own define, so its own compiled effect: sharing its core's — compiled first, without \`grow\` among its uniforms —
     // its grow would never reach the shader.)
     const mat = new ShaderMaterial(`${core.name}${as?.name ?? 'Outline'}`, this.scene, path, {
-      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view'], defines: ['#define OUTLINE_TWIN'],
+      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole'], defines: ['#define OUTLINE_TWIN'],
       // (A soft outline is see-through at its edge: blended, writing no depth of its own.)
       needAlphaBlending: !!soft,
     });
@@ -1389,6 +1440,7 @@ class Beam implements BeamHandle {
     mat.setColor3('color', new Color3(...color));
     mat.setColor3('rim', new Color3(...(soft ?? color)));
     mat.setFloat('soft', soft ? 1 : 0);
+    mat.setFloat('whole', 0);
     if (soft) mat.disableDepthWrite = true;
     mat.setFloat('dark', 1);
     mat.setFloat('multi', 0);
@@ -1812,13 +1864,16 @@ class Beam implements BeamHandle {
     const egg = this.opened ? smoothstep(SNAP + POP, SNAP + POP + EGG_IN, this.t) : 0;
     // How far its ball reaches back toward the attacker (the outermost layer, the egg's back).
     // Winning a clash, its egg swells (CLASH_EDGE_EGG) — not a bolt's: its egg keeps its size.
-    const swell = 1 + CLASH_EDGE_EGG * (this.shot.bolt ? 0 : edge);
-    this.backR = SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell * (1 + (EGG_BACK - 1) * egg);
+    let swell = 1 + CLASH_EDGE_EGG * (this.shot.bolt ? 0 : edge);
+    // Beam 2: its egg growing as it pours (AURA_EGG).
+    if (this.shot.style === 2) swell *= 1 + (AURA_EGG - 1) * egg;
+    const shape = egg;
+    this.backR = SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell * (1 + (EGG_BACK - 1) * shape);
     // Its tip: the outermost layer's front, drawn out as the ball becomes the egg.
     this.eggTipPt.copyFrom(origin).addInPlace(aim.scale(
-      SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell * (1 + (EGG_FRONT - 1) * egg)));
+      SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell * (1 + (EGG_FRONT - 1) * shape)));
     this.balls.forEach(({ mesh, layer }, i) => {
-      layer.mat.setFloat('egg', egg);
+      layer.mat.setFloat('egg', shape);
       mesh.position.copyFrom(origin);
       mesh.scaling.setAll(Math.max(1e-3, SPHERE_R[i] * H * this.W * ball * swell));
       mesh.rotationQuaternion!.copyFrom(poleToAim);
@@ -1935,6 +1990,7 @@ class Beam implements BeamHandle {
       const m = layer.mat;
       m.setVector3('origin', origin); m.setVector3('aim', aim); m.setVector3('side', side); m.setVector3('upv', up);
       m.setFloat('len', len); m.setFloat('rad', BEAM_R[i] * H * this.W * width * COLUMN * (this.shot.bolt ? BOLT_SKIN_R : 1));
+      m.setFloat('ovalMid', this.shot.style === 2 ? OVAL_MID_AURA : OVAL_MID);
       m.setFloat('split', split);
       m.setFloat('time', this.time + i * 1.7);
       const billow = this.shot.burstAlong && i === BEAM_R.length - 1 ? BILLOW_SKIN : this.shot.bolt ? BOLT_SKIN : 1;
