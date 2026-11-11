@@ -201,6 +201,11 @@ export function bc1Block(src, o, out, stride, bx, by, width, height) {
 // BC4: one channel — two 8-bit endpoints and 3-bit indices (the alpha block
 // of BC3). Written to R, G and B (a grey mask or luminance), alpha opaque.
 export function bc4Block(src, o, out, stride, bx, by, width, height) {
+  bc4Channel(src, o, out, stride, bx, by, width, height, -1);
+}
+
+// One BC4 channel (8 bytes) into channel \`ch\` of the output (0 R, 1 G), or into R, G and B (-1, a grey).
+function bc4Channel(src, o, out, stride, bx, by, width, height, ch) {
   const e0 = src[o], e1 = src[o + 1];
   const pal = [e0, e1];
   if (e0 > e1) for (let k = 1; k < 7; k++) pal.push(((7 - k) * e0 + k * e1) / 7 | 0);
@@ -214,8 +219,15 @@ export function bc4Block(src, o, out, stride, bx, by, width, height) {
     if (x >= width || y >= height) continue;
     const v = pal[idx];
     const d = y * stride + x * 4;
-    out[d] = v; out[d + 1] = v; out[d + 2] = v; out[d + 3] = 255;
+    if (ch < 0) { out[d] = v; out[d + 1] = v; out[d + 2] = v; } else out[d + ch] = v;
+    out[d + 3] = 255;
   }
+}
+
+// BC5: two BC4 channels (a normal map's X and Y) — R, then G; B left full (the surface's Z, near enough).
+export function bc5Block(src, o, out, stride, bx, by, width, height) {
+  bc4Channel(src, o, out, stride, bx, by, width, height, 0);
+  bc4Channel(src, o + 8, out, stride, bx, by, width, height, 1);
 }
 
 // Decode a whole deswizzled surface.
@@ -225,7 +237,7 @@ export function decodeSurface(tex) {
   const out = new Uint8Array(stride * height).fill(255);
   const wb = Math.ceil(width / 4), hb = Math.ceil(height / 4);
   const step = tex.bytesPerBlock;
-  const fn = format === 'BC7' ? bc7Block : format === 'BC1' ? bc1Block : format === 'BC4' ? bc4Block : null;
+  const fn = format === 'BC7' ? bc7Block : format === 'BC1' ? bc1Block : format === 'BC4' ? bc4Block : format === 'BC5' ? bc5Block : null;
   if (!fn) throw new Error('no decoder for ' + format);
   for (let by = 0; by < hb; by++) {
     for (let bx = 0; bx < wb; bx++) {

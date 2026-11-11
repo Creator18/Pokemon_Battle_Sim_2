@@ -84,10 +84,27 @@ const SPIKE = 0.6, SPIKE_GAP = 1.6, SPIKE_RATE = 3.2, SPIKE_STAGGER = 0.45;
 const SPIKE_LEAN = 1.4;
 /** A spike's profile (GLSL): rising slowly from behind to its tip near its front, then falling away quickly (SPIKE_FRONT of it) — never a cliff. */
 const SPIKE_FRONT = 0.15;
+/** Winding up: its ball's spikes, straight out — how many patches round it and up it, and how fast each beats (a second). */
+const WIND_SPIKES_ROUND = 16, WIND_SPIKES_UP = 9, WIND_SPIKE_RATE = 2.6;
+/** How long its spikes take to go from straight out to leaning, as it is let go (s). */
+const WINDUP_EASE = 0.25;
 const SPIKE_GLSL = `float spikeAt(float along, float th, float rad, float time) {
   float x = along / (${SPIKE_GAP.toFixed(2)} * rad) - time * ${SPIKE_RATE.toFixed(2)} + ${SPIKE_STAGGER.toFixed(2)} * sin(th * 3.0 + 1.7) + 0.25 * sin(th * 7.0 - 0.6);
   float s = fract(x);
   return s < ${(1 - SPIKE_FRONT).toFixed(2)} ? pow(s / ${(1 - SPIKE_FRONT).toFixed(2)}, 2.5) : (1.0 - s) / ${SPIKE_FRONT.toFixed(2)};
+}
+// Winding up (the ball before it is let go): spikes straight out from its centre, all round it - in patches round the
+// ball (WIND_SPIKES_ROUND round, WIND_SPIKES_UP up), each its own beat, highest at its patch's middle, gone at its
+// edges (so they never tear), with no lean.
+float spikeRound(vec3 d, float time) {
+  float a = atan(d.z, d.x) / 6.2831853 + 0.5, b = acos(clamp(d.y, -1.0, 1.0)) / 3.14159265;
+  vec2 g = vec2(a * ${WIND_SPIKES_ROUND.toFixed(1)}, b * ${WIND_SPIKES_UP.toFixed(1)});
+  vec2 id = floor(g), f = fract(g) - 0.5;
+  float h = fract(sin(dot(mod(id, vec2(${WIND_SPIKES_ROUND.toFixed(1)}, 99.0)), vec2(12.9898, 78.233))) * 43758.5453);
+  float tip = pow(max(0.0, 1.0 - length(f) * 2.0), 1.6);
+  float s = fract(time * ${WIND_SPIKE_RATE.toFixed(2)} * (0.7 + 0.6 * h) + h);
+  float beat = s < ${(1 - SPIKE_FRONT).toFixed(2)} ? pow(s / ${(1 - SPIKE_FRONT).toFixed(2)}, 2.5) : (1.0 - s) / ${SPIKE_FRONT.toFixed(2)};
+  return tip * beat;
 }`;
 /**
  * Rings of stars round the core, travelling from the mouth to the end: four-
@@ -101,8 +118,10 @@ const SPIKE_GLSL = `float spikeAt(float along, float th, float rad, float time) 
  * Each ring a new pattern every time round. On the core's surface
  * (RING_GROW), in its type's outline colour.
  */
-const RINGS = true, RING_SLOTS = 24, RING_LEN: [number, number] = [0.06, 0.16], RING_WIDE: [number, number] = [0.014, 0.024];
+const RINGS = true, RING_SLOTS = 48, RING_LEN: [number, number] = [0.2, 0.5], RING_WIDE: [number, number] = [0.004, 0.008];
 const RING_STAR = 0.65, RING_BUNCH: [number, number] = [2, 4], RING_GROW = 1.06;
+/** How full a ring is (of its slots, where its swell is highest; a third of that where lowest). */
+const RING_FILL = 0.9;
 const RING_SETS: [number, number][] = [[4, 0.35], [3, 0.8]];
 /**
  * Beam 2's rings of lightning: bolts looped round the core on the stars' way (the back of the egg to the end of the
@@ -154,6 +173,8 @@ const AURA_EGG = 1.6;
  * other outline, and everything else, still hides by depth as usual.
  */
 const CORE_STENCIL_BITS = [0x10, 0x20, 0x40, 0x80], BALL_OUTLINE_GROUP = 2;
+/** Beam 2's outline laid on the ground where it would dip under it: how far above it (world units). */
+const OUTLINE_GROUND_LIFT = 0.01;
 const EGG_TIP = OVAL_END / BALL_OVER;
 const SWIRL_R = 0.30, SWIRL_W = 0.05, SWIRLS = 3;
 /**
@@ -303,6 +324,11 @@ precision highp float;
 varying float vAlong, vTh;
 #ifdef OUTLINE_TWIN
 varying float vFace;
+// (A clash: not drawn past the plane through where it meets the other beam — seamOn — so its outline never crosses
+// into the other's side. vSeamW: where this point of it is drawn, in the world.)
+varying vec3 vSeamW;
+uniform vec3 seamP, seamN;
+uniform float seamOn;
 uniform float soft;
 // (Beam 2's starting egg's outline: drawn whole, both sides — its cores shown over it by the stencil instead.)
 uniform float whole;
@@ -316,6 +342,7 @@ void main(void) {
   // (An outline's near side, by the way its surface faces — not its triangles', which its leaning spikes fold: only its
   // far side draws, behind its core.)
   if (whole < 0.5 && vFace > 0.0) discard;
+  if (seamOn > 0.5 && dot(vSeamW - seamP, seamN) > 0.0) discard;
 #endif
   // Seamless round the tube: the angle enters as a circle.
   vec3 q = vec3(vAlong * nscale.x - time * pan, cos(vTh) * nscale.y, sin(vTh) * nscale.y + time * ${CHURN.toFixed(2)});
@@ -372,6 +399,13 @@ varying float vFace;
 // near and far sides from the mirrored camera, not the real one (\`eye\`).
 uniform mat4 view;
 vec3 viewEye() { vec3 t = view[3].xyz; return -vec3(dot(view[0].xyz, t), dot(view[1].xyz, t), dot(view[2].xyz, t)); }
+// (A clash: not drawn past the plane through where it meets the other beam — seamOn — so its outline never crosses
+// into the other's side. vSeamW: where this point of it is drawn, in the world.)
+varying vec3 vSeamW;
+uniform vec3 seamP, seamN;
+uniform float seamOn;
+// (Never under the ground: what would dip below it is laid on it instead, so the outline shows over the ground.)
+uniform float groundY;
 #endif
 ${NOISE}
 ${SPIKE_GLSL}
@@ -397,8 +431,13 @@ void main(void) {
   float g = max(grow, 1.0) + spike * sk;
   // (Its tip leaning forward, the way the beam travels: the higher, the further.)
   float lean = spike > 0.0 ? ${SPIKE_LEAN.toFixed(2)} * rad * sk : 0.0;
-  gl_Position = viewProjection * vec4(origin + aim * (along + lean) + n * r * g + position * 0.0, 1.0);
+  vec3 drawnAt = origin + aim * (along + lean) + n * r * g + position * 0.0;
 #ifdef OUTLINE_TWIN
+  drawnAt.y = max(drawnAt.y, groundY + ${OUTLINE_GROUND_LIFT.toFixed(3)});
+#endif
+  gl_Position = viewProjection * vec4(drawnAt, 1.0);
+#ifdef OUTLINE_TWIN
+  vSeamW = drawnAt;
   // (Which way this point of it faces: out from the beam's axis, toward the eye or away.)
   vFace = dot(n, normalize(viewEye() - (origin + aim * along + n * r)));
 #endif
@@ -413,6 +452,15 @@ precision highp float;
 varying float vAlong, vTh;
 uniform vec3 color;
 uniform float time, len, rad, eggBack;
+#ifdef OUTLINE_TWIN
+// (A clash: not drawn past the plane through where it meets the other beam — seamOn — so its outline never crosses
+// into the other's side. vSeamW: where this point of it is drawn, in the world.)
+varying vec3 vSeamW;
+uniform vec3 seamP, seamN;
+uniform float seamOn;
+// (Never under the ground: what would dip below it is laid on it instead, so the outline shows over the ground.)
+uniform float groundY;
+#endif
 float h1(float n) { return fract(sin(n * 127.1 + 311.7) * 43758.5453); }
 // In a star of one set's rings (n of them, \`speed\` beam lengths a second)? Measured in circumferences: along the beam
 // (a / C) and round it (t), C its girth mid-way along (its oval at its fullest).
@@ -432,7 +480,7 @@ float inSet(float a, float t, float n, float speed, float seed) {
     // A star in this slot? As thick as the swell round the ring is here: bunched where it is high, sparse where low.
     float waves = floor(mix(${RING_BUNCH[0].toFixed(1)}, ${(RING_BUNCH[1] + 0.99).toFixed(2)}, h1(id + 2.0)));
     float swell = 0.5 + 0.5 * sin(6.2831853 * (t * waves + h1(id + 4.0)));
-    if (h1(si * 1.9 + id) > swell * swell * 1.2) continue;
+    if (h1(si * 1.9 + id) > ${RING_FILL.toFixed(2)} * (0.35 + 0.65 * swell)) continue;
     // Its length along the beam and width round it (circumferences, half each way), where in its slot it sits.
     float L = mix(${(RING_LEN[0] / 2).toFixed(3)}, lmax, h1(si + id * 0.7));
     float Wd = mix(${(RING_WIDE[0] / 2).toFixed(4)}, ${(RING_WIDE[1] / 2).toFixed(4)}, h1(si * 2.3 + id));
@@ -474,6 +522,9 @@ float inBand(float a, float t, float n, float speed, float seed) {
   return best;
 }
 void main(void) {
+#ifdef OUTLINE_TWIN
+  if (seamOn > 0.5 && dot(vSeamW - seamP, seamN) > 0.0) discard;
+#endif
   float a = vAlong * rad, t = fract(vTh / 6.2831853);
   float hit = 0.0;
   ${RING_SETS.map(([n, v], i) => `hit = max(hit, inSet(a, t, ${n.toFixed(1)}, ${v.toFixed(3)}, ${(i * 0.37).toFixed(2)}));`).join(' ')}
@@ -529,6 +580,7 @@ attribute vec2 uv;
 uniform mat4 world, viewProjection;
 uniform vec3 origin, aim, side, upv;
 uniform float time, disp, pan, rad, egg, grow, spike;
+uniform float windup; // winding up (1: its ball before it is let go): spikes straight out, all round, no lean
 uniform vec3 eye;
 varying float vAlong, vTh;
 #ifdef OUTLINE_TWIN
@@ -537,6 +589,13 @@ varying float vFace;
 // near and far sides from the mirrored camera, not the real one (\`eye\`).
 uniform mat4 view;
 vec3 viewEye() { vec3 t = view[3].xyz; return -vec3(dot(view[0].xyz, t), dot(view[1].xyz, t), dot(view[2].xyz, t)); }
+// (A clash: not drawn past the plane through where it meets the other beam — seamOn — so its outline never crosses
+// into the other's side. vSeamW: where this point of it is drawn, in the world.)
+varying vec3 vSeamW;
+uniform vec3 seamP, seamN;
+uniform float seamOn;
+// (Never under the ground: what would dip below it is laid on it instead, so the outline shows over the ground.)
+uniform float groundY;
 #endif
 ${NOISE}
 ${SPIKE_GLSL}
@@ -562,11 +621,19 @@ void main(void) {
   // core is, at the seam: never past it into the other beam's half. Unset: 1.)
   // (Its spikes as the tube's: by how far along from the egg's centre it is, and round.)
   float sk = spike > 0.0 ? spikeAt(dot(rel, aim), vTh, rad, time) : 0.0;
+  // (Winding up: straight out from the ball's centre instead, all round it.)
+  if (spike > 0.0 && windup > 0.0) sk = mix(sk, spikeRound(normalize(p), time), windup);
   vec3 pg = p * (max(grow, 1.0) + spike * sk);
   /*SEAM*/
   // (Its tip leaning forward, the way the beam travels: the higher, the further.)
-  gl_Position = viewProjection * (world * vec4(pg, 1.0) + vec4(aim * ${SPIKE_LEAN.toFixed(2)} * rad * sk, 0.0));
+  // (Not while winding up: straight out, then.)
+  vec4 drawnAt = world * vec4(pg, 1.0) + vec4(aim * ${SPIKE_LEAN.toFixed(2)} * rad * sk * (1.0 - windup), 0.0);
 #ifdef OUTLINE_TWIN
+  drawnAt.y = max(drawnAt.y, groundY + ${OUTLINE_GROUND_LIFT.toFixed(3)});
+#endif
+  gl_Position = viewProjection * drawnAt;
+#ifdef OUTLINE_TWIN
+  vSeamW = drawnAt.xyz;
   // (Which way this point of it faces: out from its centre — a clash half's flat back, toward the other beam.)
   vec3 nrm = onCap > 0.5 ? aim : normalize(w.xyz - vec3(world[3]));
   // (An egg's front, drawn out into the column: it faces out from the beam's axis, as the tube does — out from its centre
@@ -768,7 +835,8 @@ export function coloursFor(element: string, palette?: BeamPalette): Colours {
  * heavy noise a patchwork of those colours instead (Tri Attack: fire,
  * electricity and ice), in patches drifting with the noise.
  */
-export interface BeamPalette { skin: RGB; body: RGB; skins?: RGB[] }
+/** `core`: beam 2's core in this colour, not the one drawn from its body (which a red would turn pink). */
+export interface BeamPalette { skin: RGB; body: RGB; skins?: RGB[]; core?: RGB }
 
 export interface BeamShot {
   element: string;
@@ -1127,7 +1195,7 @@ class Beam implements BeamHandle {
     this.H = shot.height;
     // (Beam 2's core in its own colour where its type's hot fill reads wrong: Dark's comes out pink.)
     const base = coloursFor(shot.element, shot.palette);
-    const coreHot = shot.style === 2 ? BEAM2_CORE[shot.element] : undefined;
+    const coreHot = shot.style === 2 ? shot.palette?.core ?? BEAM2_CORE[shot.element] : undefined;
     const col = (this.col = coreHot ? { ...base, hot: coreHot, accent: coreHot } : base);
     const H = this.H;
 
@@ -1391,11 +1459,12 @@ class Beam implements BeamHandle {
     for (const m of [...hidden, this.streamSparks.mesh]) m.layerMask = 0;
   }
 
-  /** Beam 2: its column, end and clash-ball cores over its starting ball's outline, always (CORE_STENCIL_BITS). */
+  /** Beam 2: its column, end and clash-ball cores over its starting ball's outline and its clash ball's, always (CORE_STENCIL_BITS). */
   private coreOverBallOutline(): void {
     const ball = this.balls[0];
-    const twin = ball && this.outlines.find((o) => o.src === ball.mesh && !o.rings);
-    if (!twin) return;
+    // (Its two balls' outlines: the starting egg's, and its half of a clash's ball — the same rule for both.)
+    const twins = [ball, this.hemis[0]].map((b) => b && this.outlines.find((o) => o.src === b.mesh && !o.rings)).filter((t): t is NonNullable<typeof t> => !!t);
+    if (!twins.length) return;
     const bit = CORE_STENCIL_BITS[this.id % CORE_STENCIL_BITS.length];
     // The cores that show over it: the egg's own (its front, drawn out into the column, would otherwise lie under its
     // outline seen from above), the column, the tip and its bursts, its half of a clash's ball.
@@ -1410,13 +1479,15 @@ class Beam implements BeamHandle {
     // (The ball's outline in a later group, which keeps the depth and stencil drawn so far: it is still hidden by
     // whatever stands in front of it, as before.)
     this.scene.setRenderingAutoClearDepthStencil(BALL_OUTLINE_GROUP, false, false, false);
-    twin.twin.renderingGroupId = BALL_OUTLINE_GROUP;
-    // Drawn whole first — both sides, not just its far side — then the stencil sets what shows over it.
-    twin.mat.setFloat('whole', 1);
-    const st = twin.mat.stencil;
-    st.enabled = true;
-    st.func = Constants.NOTEQUAL; st.funcRef = bit; st.funcMask = bit; st.mask = 0x00;
-    st.opStencilFail = Constants.KEEP; st.opDepthFail = Constants.KEEP; st.opStencilDepthPass = Constants.KEEP;
+    for (const twin of twins) {
+      twin.twin.renderingGroupId = BALL_OUTLINE_GROUP;
+      // Drawn whole first — both sides, not just its far side — then the stencil sets what shows over it.
+      twin.mat.setFloat('whole', 1);
+      const st = twin.mat.stencil;
+      st.enabled = true;
+      st.func = Constants.NOTEQUAL; st.funcRef = bit; st.funcMask = bit; st.mask = 0x00;
+      st.opStencilFail = Constants.KEEP; st.opDepthFail = Constants.KEEP; st.opStencilDepthPass = Constants.KEEP;
+    }
   }
 
   /**
@@ -1430,7 +1501,7 @@ class Beam implements BeamHandle {
     // (Its own define, so its own compiled effect: sharing its core's — compiled first, without \`grow\` among its uniforms —
     // its grow would never reach the shader.)
     const mat = new ShaderMaterial(`${core.name}${as?.name ?? 'Outline'}`, this.scene, path, {
-      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole'], defines: ['#define OUTLINE_TWIN'],
+      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY'], defines: ['#define OUTLINE_TWIN'],
       // (A soft outline is see-through at its edge: blended, writing no depth of its own.)
       needAlphaBlending: !!soft,
     });
@@ -1456,13 +1527,23 @@ class Beam implements BeamHandle {
   }
 
   /** Each outline as its core is this frame: where it is, its shape, its noise (a little less torn). */
+  /** Winding up (1) till it is let go, then eased to 0 over WINDUP_EASE s: its ball's spikes, straight out, then leaning. */
+  private windup = 1;
   private syncOutlines(): void {
+    this.windup = this.opened ? Math.max(0, this.windup - Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000) / WINDUP_EASE) : 1;
     type Store = { _floats: Record<string, number>; _vectors3: Record<string, Vector3>; _vectors2: Record<string, Vector2> };
     // The rings' one way, egg and tube alike: the tube's length and girth, and how far back the egg reaches.
     const tube = this.tubes[0]?.layer.mat as unknown as Store | undefined;
     const eye = this.scene.activeCamera?.globalPosition;
+    // Its clash's plane: through where it meets the other beam, facing the way it goes there (from its mouth).
+    const met = this.shot.clash?.at() ?? null;
+    const way = met ? met.subtract(this.anchor) : null;
+    const seam = met && way && way.lengthSquared() > 1e-8 ? { at: met, way: way.normalize() } : null;
+    // The ground under it: where its user stands (a flier: the board's, 0).
+    const groundY = this.shot.feet?.()?.y ?? 0;
     for (const { src, core, twin, mat, rings } of this.outlines) {
-      const on = src.isEnabled(false) && src.isVisible;
+      // (Its rings — lightning and stars — only once it is let go: none on the ball as it winds up.)
+      const on = src.isEnabled(false) && src.isVisible && (!rings || this.opened);
       twin.setEnabled(on);
       if (!on) continue;
       twin.position.copyFrom(src.position);
@@ -1474,6 +1555,12 @@ class Beam implements BeamHandle {
       for (const [k, v] of Object.entries(from._vectors3)) mat.setVector3(k, v);
       for (const [k, v] of Object.entries(from._vectors2)) mat.setVector2(k, v);
       if (eye) mat.setVector3('eye', eye);
+      // (Winding up till it is let go: its ball's spikes straight out, eased into the beam's lean as it opens.)
+      mat.setFloat('windup', this.windup);
+      // (A clash: cut at the plane through where it meets the other, facing the way it goes.)
+      if (seam) { mat.setFloat('seamOn', 1); mat.setVector3('seamP', seam.at); mat.setVector3('seamN', seam.way); }
+      else mat.setFloat('seamOn', 0);
+      mat.setFloat('groundY', groundY);
       if (rings && tube) {
         mat.setFloat('len', tube._floats.len ?? 0);
         mat.setFloat('rad', tube._floats.rad ?? 1);

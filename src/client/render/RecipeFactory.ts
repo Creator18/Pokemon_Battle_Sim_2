@@ -180,6 +180,8 @@ const WATER_CEL = true;
  * (burnFlames): material names that burn too. (None needed yet: Ceruledge's plume and blades are flagged by its model.)
  */
 const FLAME_PARTS: Record<string, RegExp> = {};
+/** Parts not drawn (hideParts), by species (its name's start): material names — Zygarde's glowing shell over its coil. */
+const HIDDEN_PARTS: Record<string, RegExp> = { Zygarde: /_eff_body_d$/, 'Mega Zygarde': /_eff_body_d$/ };
 /** Parts of a model that are water (by their shape's name): Mega Greninja's shurikens, held, holed and small. */
 const WATER_PARTS = /_(ana|mini)?shuriken_mesh_shape$/;
 /** Of them, the single discs, whose water swirls in toward their centre (the small ones are several to a shape). */
@@ -631,6 +633,7 @@ export class RecipeFactory implements UnitFactory {
       model.root.scaling.setAll(scale);
       model.root.metadata = { species: species.name, playerId, facing: 0, recipe: true, shiny };
       this.burnFlames(model, species.name, shiny, displayHeight(model.height));
+      this.hideParts(model, species.name);
       const u: Unit = { model, down: false, skin: new SkinSampler(model.meshes, model.skeleton), hoverTarget: 0, hover: 0, clamp: 0, lookAt: null, moving: false, types: species.types,
         strikeParts: new Map(), strikeRegions: new Map(), skinCounts: new Map(), species: species.name, upkeep: null, feet: feetOf(model) };
       this.units.set(model.root, u);
@@ -690,6 +693,20 @@ export class RecipeFactory implements UnitFactory {
         flame ??= bodyFlameMaterial(this.scene, element, model.height); // (the noise is in the model's own space)
         multi.subMaterials[i] = flame;
       });
+    }
+  }
+
+  /**
+   * Parts it is not drawn with (HIDDEN_PARTS, by species): meshes whose material is named so — Zygarde's glowing
+   * shell over its coil (an added glow the game lays over it), which hid its green body and black spots.
+   */
+  private hideParts(model: RecipeModel, species: string): void {
+    const rule = Object.entries(HIDDEN_PARTS).find(([name]) => species.startsWith(name))?.[1];
+    if (!rule) return;
+    for (const mesh of [...model.meshes, ...model.props.map((p) => p.mesh)]) {
+      const multi = mesh.material as MultiMaterial | null;
+      const mats = multi?.subMaterials ?? (mesh.material ? [mesh.material] : []);
+      if (mats.length && mats.every((m) => !!m && rule.test(m.name))) mesh.isVisible = false;
     }
   }
 

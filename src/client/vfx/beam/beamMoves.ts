@@ -86,6 +86,27 @@ export const BEAM_MOVES: Record<string, BeamSpec> = {
   'Light of Ruin': { element: 'Fairy', palette: { skin: [0.03, 0.03, 0.04], body: [0.92, 0.92, 0.95] } },
   // Mega Zygarde's: a pink heavy noise over a purple light noise.
   'Nihil Light': { element: 'Dragon', palette: { skin: [1.0, 0.25, 0.65], body: [0.55, 0.2, 0.95] } },
+  // Roar of Time (Dialga's): beam 2 in Dialga's colours — a deep steel-navy outline and rings round a pale steel-cyan
+  // core (its body's blue, its chest's glow).
+  'Roar of Time': { element: 'Dragon', style: 2, palette: { skin: [0.06, 0.13, 0.4], body: [0.55, 0.8, 1.0] } },
+  // Photon Geyser (Necrozma's): beam 2 in Ultra Necrozma's colours — a deep amber-gold outline and rings round a pale
+  // gold-white core (its golden body, its blazing light).
+  'Photon Geyser': { element: 'Psychic', style: 2, palette: { skin: [0.62, 0.34, 0.0], body: [1.0, 0.86, 0.32] } },
+  // Core Enforcer (Zygarde's): beam 2 in Zygarde's colours, from its model — its near-black body as the outline and
+  // rings, its acid lime-green round a lime-white core.
+  'Core Enforcer': { element: 'Dragon', style: 2, palette: { skin: [0.05, 0.05, 0.04], body: [0.45, 0.85, 0.1] } },
+  // Fleur Cannon (Magearna's): beam 2 in Mega Magearna's colours, from its model — its crimson as the outline and
+  // rings round a gold-white core (its gold trim).
+  'Fleur Cannon': { element: 'Fairy', style: 2, palette: { skin: [0.55, 0.03, 0.07], body: [0.95, 0.76, 0.21] } },
+  // Eternabeam (Eternatus's): beam 2 in Eternatus's colours — its dark violet body as the outline and rings round its
+  // glowing crimson core (set outright: drawn from the red, it would come out pink).
+  'Eternabeam': { element: 'Dragon', style: 2, palette: { skin: [0.16, 0.03, 0.24], body: [0.9, 0.08, 0.18], core: [0.78, 0.02, 0.06] } },
+  // Electro Shot (Archaludon's): beam 2 in Archaludon's colours — its dark steel-navy plates as the outline and rings
+  // round the electric yellow of its glowing seams (set outright, so it stays yellow).
+  'Electro Shot': { element: 'Electric', style: 2, palette: { skin: [0.1, 0.14, 0.26], body: [1.0, 0.86, 0.18], core: [0.98, 0.84, 0.12] } },
+  // Dragon Energy (Regidrago's): beam 2 in Regidrago's black and red — a black outline and rings round a deep red core
+  // (set outright, so it stays red).
+  'Dragon Energy': { element: 'Dragon', style: 2, palette: { skin: [0.03, 0.02, 0.02], body: [0.85, 0.06, 0.08], core: [0.78, 0.03, 0.05] } },
 };
 
 export function beamFor(moveName: string | null | undefined): BeamSpec | null {

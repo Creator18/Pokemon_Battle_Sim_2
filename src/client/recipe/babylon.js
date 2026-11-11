@@ -43,7 +43,9 @@ function layerPluginClass(B) {
      *               finished pixel is mixed toward that colour by `amount` (hit flash)
      */
     constructor(material, mask, layers, flash, emission = null, highlight = null) {
-      super(material, 'LayerComposite', 200, { LAYERCOMPOSITE: false });
+      super(material, 'LayerComposite', 200, { LAYERCOMPOSITE: false, LCADD: false });
+      // Added as light (an effect: alpha mode Add): its glow shaped by its albedo, so only its pattern lights.
+      this.additive = false;
       this.mask = mask;
       this.flash = flash;
       // What it lights by itself (emissionColors), and the highlight's mask (an eye's catchlight).
@@ -61,7 +63,7 @@ function layerPluginClass(B) {
       this._enable(true);
     }
     getClassName() { return 'LayerCompositePlugin'; }
-    prepareDefines(defines) { defines.LAYERCOMPOSITE = this._isEnabled; }
+    prepareDefines(defines) { defines.LAYERCOMPOSITE = this._isEnabled; defines.LCADD = this._isEnabled && this.additive; }
     getSamplers(samplers) { samplers.push('lymSampler', 'hlSampler'); }
     getActiveTextures(list) { if (this.mask) list.push(this.mask); if (this.hl) list.push(this.hl); }
     hasTexture(t) { return t === this.mask || t === this.hl; }
@@ -106,6 +108,7 @@ function layerPluginClass(B) {
         CUSTOM_FRAGMENT_DEFINITIONS: `#ifdef LAYERCOMPOSITE
           uniform sampler2D lymSampler;
           uniform sampler2D hlSampler;
+          vec4 lcAlbG;
           vec3 lcToSRGB(vec3 v) {
             return mix(v * 12.92, 1.055 * pow(max(v, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), v));
           }
@@ -116,6 +119,7 @@ function layerPluginClass(B) {
             // (The albedo times the layers: a grey one is only a brightness — Z-A's own models — but the DLC's
             // Gen 9 ones carry their colour in it, which taking its red alone would grey out.)
             vec3 lcAlb = baseColor.rgb;
+            lcAlbG = baseColor;
             vec4 lcMask = texture2D(lymSampler, vDiffuseUV);
             vec3 lcLin = lcLayer0.rgb;
             lcLin = mix(lcLin, lcLayer1.rgb, lcMask.r * lcLayer1.a);
@@ -154,6 +158,10 @@ function layerPluginClass(B) {
             float lcHl = max(max(lcH.r, lcH.g), lcH.b) * lcHighlight.a;
             color.rgb = mix(color.rgb + lcToSRGB(lcE), lcToSRGB(lcHighlight.rgb), lcHl);
           }
+          #ifdef LCADD
+          // (Added as light: only where its albedo is bright, and its alpha says.)
+          color.rgb *= lcAlbG.rgb * lcAlbG.a;
+          #endif
           color.rgb = mix(color.rgb, lcFlash.rgb * (0.82 + 0.18 * dot(color.rgb, vec3(0.333))), lcFlash.a);
         #endif`,
       };
@@ -232,7 +240,21 @@ export function buildPokemon(B, scene, data, { shadowGenerator = null } = {}) {
     mat.diffuseTexture = tex(m.albedo) || white;
     mat.specularColor = new B.Color3(0.08, 0.08, 0.08);
     mat.specularPower = 24;
-    new Plugin(mat, tex(m.mask) || black, m.layers, flash, m.emission, m.emission?.highlight ? tex(m.highlight) : null);
+    const lc = new Plugin(mat, tex(m.mask) || black, m.layers, flash, m.emission, m.emission?.highlight ? tex(m.highlight) : null);
+    if (m.alpha === 'Add') { lc.additive = true; lc.markAllDefinesAsDirty?.(); }
+    // How it is drawn over what is behind it (the material's alpha mode): added, as light — an effect's glow (Zygarde's
+    // cells and its glowing coils) — writing no depth; or see-through by its albedo's alpha (Blend, and pre-multiplied
+    // blending, drawn as plain blending: the composite is not pre-multiplied). Else solid (Opaque).
+    if (m.alpha === 'Add' || m.alpha === 'Blend' || m.alpha === 'BlendPreMultiAlpha') {
+      mat.transparencyMode = B.Material.MATERIAL_ALPHABLEND;
+      if (m.alpha === 'Add') {
+        mat.alphaMode = 1; // ALPHA_ADD
+        mat.disableDepthWrite = true;
+      } else {
+        mat.alphaMode = 2; // ALPHA_COMBINE
+        if (mat.diffuseTexture !== white) { mat.diffuseTexture.hasAlpha = true; mat.useAlphaFromDiffuseTexture = true; }
+      }
+    }
     // (Its flame noise, if it has one — it is fire — for the game to burn: metadata.fireMask.)
     if (m.fire && tex(m.fire)) mat.metadata = { ...(mat.metadata || {}), fireMask: tex(m.fire) };
     materials.set(m.name, mat);
