@@ -175,6 +175,11 @@ const FIRE_SPHERE_BANDS: Record<string, [RGB, RGB, RGB]> = {
 const LATTICE_SPHERES = new Set(['Steel', 'Rock', 'Ground', 'Ice']);
 /** The Water aura's coat cel shaded (WaterCoat's `cel`), as the inked fire sphere. */
 const WATER_CEL = true;
+/**
+ * Parts made of fire beyond the model's own `fire` material and those its model gives the flame noise, by species
+ * (burnFlames): material names that burn too. (None needed yet: Ceruledge's plume and blades are flagged by its model.)
+ */
+const FLAME_PARTS: Record<string, RegExp> = {};
 /** Parts of a model that are water (by their shape's name): Mega Greninja's shurikens, held, holed and small. */
 const WATER_PARTS = /_(ana|mini)?shuriken_mesh_shape$/;
 /** Of them, the single discs, whose water swirls in toward their centre (the small ones are several to a shape). */
@@ -673,7 +678,11 @@ export class RecipeFactory implements UnitFactory {
       const multi = mesh.material as MultiMaterial | null;
       if (!multi?.subMaterials) continue;
       multi.subMaterials.forEach((m, i) => {
-        if (!m || !/_fire(_[a-z0-9]+)?$/.test(m.name)) return;
+        if (!m) return;
+        // Fire: its own \`fire\` material, one its model gives the flame noise (a Gen 9 DLC model's fire_msk:
+        // Armarouge's crest, Ceruledge's plume and blades, Charcadet's flames), or one named for it (FLAME_PARTS).
+        const flagged = !!(m.metadata as { fireMask?: unknown } | null)?.fireMask;
+        if (!(/_fire(_[a-z0-9]+)?$/.test(m.name) || flagged || FLAME_PARTS[species]?.test(m.name))) return;
         flame ??= bodyFlameMaterial(this.scene, element, model.height); // (the noise is in the model's own space)
         multi.subMaterials[i] = flame;
       });

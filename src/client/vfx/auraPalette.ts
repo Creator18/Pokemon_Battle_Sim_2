@@ -107,7 +107,7 @@ const BLUE_FLAMES = new Set(['Mega Charizard X']);
 /** …and those whose flames are blue only when shiny. */
 const SHINY_BLUE_FLAMES = new Set(['Emboar']);
 /** Pokémon whose flames are ghostly (violet, as on their bodies): their Fire wears GhostFire's colours. */
-const GHOST_FLAMES = new Set(['Litwick', 'Lampent', 'Chandelure', 'Mega Chandelure']);
+const GHOST_FLAMES = new Set(['Litwick', 'Lampent', 'Chandelure', 'Mega Chandelure', 'Ceruledge']);
 
 /**
  * The colours a Pokémon's move of `element` wears: its type's, except where

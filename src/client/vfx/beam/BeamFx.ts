@@ -109,6 +109,8 @@ const RING_SETS: [number, number][] = [[4, 0.35], [3, 0.8]];
  * beam), in sets at their own speeds — [how many, how fast (beam lengths a second)].
  */
 const BANDS: [number, number][] = [[2, 0.22], [2, 0.5], [1, 0.95]];
+/** Beam 2's core, by type, where its hot fill (drawn from its aura's fill: coloursFor) reads wrong — Dark's is pink. */
+const BEAM2_CORE: Record<string, RGB> = { Dark: [0.9, 0.08, 0.1] };
 /**
  * Its plain rings as lightning (shaped as LightningFx's strokes, but all in the aura outline's colour): each a
  * bolt looped round the beam, never a steady ring — a zigzag of BOLT_CORNERS corners round it, each jogging along the
@@ -1093,7 +1095,10 @@ class Beam implements BeamHandle {
     const scene = (this.scene = fx.scene);
     this.front = new Promise((r) => { this.resolveFront = r; });
     this.H = shot.height;
-    const col = (this.col = coloursFor(shot.element, shot.palette));
+    // (Beam 2's core in its own colour where its type's hot fill reads wrong: Dark's comes out pink.)
+    const base = coloursFor(shot.element, shot.palette);
+    const coreHot = shot.style === 2 ? BEAM2_CORE[shot.element] : undefined;
+    const col = (this.col = coreHot ? { ...base, hot: coreHot, accent: coreHot } : base);
     const H = this.H;
 
     // The master-shader layers: hot core, bright, torn black skin. Each

@@ -15,7 +15,13 @@
   const o = { a: 'Lucario', moveA: 'Aura Sphere', b: 'Charizard', moveB: 'Dragon Pulse', ...(window.__clashBB ?? {}) };
   const T = (q, r) => P.board.standPoint(q, r).clone(); const V = T(0, 0).constructor;
   const A = T(-2, 2), Bp = T(2, 2);
-  const a = await f.createPokemon(S.getSpecies(o.a), 1), b = await f.createPokemon(S.getSpecies(o.b), 2);
+  // (Either side a species, or a model folder the roster has no entry for yet: { name, model: 'pm1109_00_00',
+  // like: 'Aegislash', types } — built from that folder, its stats borrowed from \`like\`.)
+  const speciesOf = (x) => (typeof x === 'object'
+    ? { ...S.getSpecies(x.like), name: x.name, types: x.types ?? S.getSpecies(x.like).types, modelId: x.model }
+    : S.getSpecies(x));
+  const nameOf = (x) => (typeof x === 'object' ? x.name : x);
+  const a = await f.createPokemon(speciesOf(o.a), 1), b = await f.createPokemon(speciesOf(o.b), 2);
   a.position.copyFrom(A); b.position.copyFrom(Bp); f.faceEachOther(a, b);
   const w = Bp.subtract(A).normalize(), side = new V(w.z, 0, -w.x), c = T(0, 2).add(new V(0, 1.2, 0));
   const cam = sc.activeCamera; cam.lowerRadiusLimit = 0.3; cam.upperRadiusLimit = 100; cam.attachControl(document.querySelector('canvas'), true);
@@ -23,10 +29,13 @@
   const label = document.createElement('div');
   Object.assign(label.style, { position: 'fixed', left: '50%', top: '16px', transform: 'translateX(-50%)', padding: '8px 14px', background: 'rgba(20,24,40,0.85)',
     color: '#fff', font: '600 16px system-ui', borderRadius: '8px', zIndex: 60 });
-  label.textContent = `${o.a} — ${o.moveA}  vs  ${o.b} — ${o.moveB}`;
+  const named = (m) => (typeof m === 'object' ? m.label ?? `${m.element} beam ${m.style ?? 1}` : m);
+  label.textContent = `${nameOf(o.a)} — ${named(o.moveA)}  vs  ${nameOf(o.b)} — ${named(o.moveB)}`;
   document.body.append(label);
   // A move's clash spec, as battles make it: a beam's own, or a ball's (it flies in and becomes its half of the ball).
+  // (Or a beam's spec itself, in place of a move: { element: 'Dark', style: 2, label: 'Dark beam 2' }.)
   const specOf = (name) => {
+    if (typeof name === 'object') { const { label: _l, ...spec } = name; return spec; }
     const beam = B.beamFor(name);
     if (beam) return beam;
     const ball = Ba.ballFor(name);

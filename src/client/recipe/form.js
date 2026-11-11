@@ -60,11 +60,15 @@ export function parseForm(id, files) {
     // What it lights by itself (an eye's catchlight), and the mask the highlight follows.
     emission: emissionColors(m),
     highlight: m.textures.HighlightMaskMap ? basename(m.textures.HighlightMaskMap) : null,
+    // Whether it is fire: a Gen 9 DLC model gives its flames a flame noise (fire_msk, bound as their displacement
+    // map) — Armarouge's crest, Ceruledge's plume and blades.
+    fire: /fire_msk/.test(m.textures.DisplacementMap || '') ? basename(m.textures.DisplacementMap) : null,
   }));
   const matByName = new Map(materials.map((m) => [m.name, m]));
 
   // --- mesh layout: root[1] shapes; [0] name, [3] layouts ([0] attributes
-  //     {[1] kind, [3] type, [4] offset}), [4] ranges {[0] count, [1] first, [3] material}
+  //     {[1] kind, [2] index (a second UV set, a second tangent: 1), [3] type, [4] offset}),
+  //     [4] ranges {[0] count, [1] first, [3] material}
   const MS = openFb(get('.trmsh'));
   const shapes = [];
   const sv = MS.fvec(MS.root, 1);
@@ -76,7 +80,7 @@ export function parseForm(id, files) {
     const attrs = [];
     for (let i = 0; i < av.n; i++) {
       const a = MS.ent(av, i);
-      attrs.push({ kind: MS.fint(a, 1), type: MS.fint(a, 3), off: MS.fint(a, 4) });
+      attrs.push({ kind: MS.fint(a, 1), index: MS.fint(a, 2) || 0, type: MS.fint(a, 3), off: MS.fint(a, 4) });
     }
     const stride = attrs.reduce((m, a) => Math.max(m, a.off + (SIZE[a.type] || 4)), 0);
     const mv = MS.fvec(s, 4);
@@ -107,7 +111,9 @@ export function parseForm(id, files) {
     const V = Math.floor(vtx.length / s.stride);
     const dv = new DataView(vtx.buffer, vtx.byteOffset, vtx.byteLength);
     const A = {};
-    for (const a of s.attrs) A[a.kind] = a;
+    // (Each kind's first set only: a shape with two UV sets — the DLC's Gen 9 models — has its textures on the first;
+    // keeping the last put every texture through its second, its colours in the wrong places.)
+    for (const a of s.attrs) if (!a.index && !A[a.kind]) A[a.kind] = a;
     const positions = new Float32Array(V * 3);
     const normals = new Float32Array(V * 3);
     const uvs = new Float32Array(V * 2);
@@ -161,6 +167,7 @@ export function textureNames(form) {
     if (m.albedo) s.add(m.albedo);
     if (m.mask) s.add(m.mask);
     if (m.highlight && m.emission?.highlight) s.add(m.highlight);
+    if (m.fire) s.add(m.fire);
   }
   return [...s];
 }

@@ -9,7 +9,7 @@
 // `B` is the Babylon namespace — the CDN global in the test page, or an object
 // of the classes the game imports. Nothing here reaches for a global.
 //
-// COLOUR ON THE GPU. The albedo is only a brightness; the colour is up to five
+// COLOUR ON THE GPU. The albedo is only a brightness (but a Gen 9 DLC model's is in colour); the colour is up to five
 // constants per material, picked per texel by the _lym mask. A material plugin
 // composites them in the fragment shader at full texture resolution — the same
 // stack the toolkit runs on the CPU (layer 0 under, R/G/B/A paint layers 1–4
@@ -113,14 +113,16 @@ function layerPluginClass(B) {
         // baseColor holds the albedo sample here (DIFFUSE is on: the albedo is the diffuse texture).
         CUSTOM_FRAGMENT_UPDATE_DIFFUSE: `#ifdef LAYERCOMPOSITE
           {
-            float lcLum = baseColor.r;
+            // (The albedo times the layers: a grey one is only a brightness — Z-A's own models — but the DLC's
+            // Gen 9 ones carry their colour in it, which taking its red alone would grey out.)
+            vec3 lcAlb = baseColor.rgb;
             vec4 lcMask = texture2D(lymSampler, vDiffuseUV);
             vec3 lcLin = lcLayer0.rgb;
             lcLin = mix(lcLin, lcLayer1.rgb, lcMask.r * lcLayer1.a);
             lcLin = mix(lcLin, lcLayer2.rgb, lcMask.g * lcLayer2.a);
             lcLin = mix(lcLin, lcLayer3.rgb, lcMask.b * lcLayer3.a);
             lcLin = mix(lcLin, lcLayer4.rgb, lcMask.a * lcLayer4.a);
-            baseColor.rgb = lcToSRGB(lcLin) * lcLum;
+            baseColor.rgb = lcToSRGB(lcLin) * lcAlb;
             // Cel: a little more saturated (pushed out from its own grey).
             float lcGrey = dot(baseColor.rgb, vec3(0.299, 0.587, 0.114));
             baseColor.rgb = max(mix(vec3(lcGrey), baseColor.rgb, ${CEL_SATURATION.toFixed(2)}), 0.0);
@@ -231,6 +233,8 @@ export function buildPokemon(B, scene, data, { shadowGenerator = null } = {}) {
     mat.specularColor = new B.Color3(0.08, 0.08, 0.08);
     mat.specularPower = 24;
     new Plugin(mat, tex(m.mask) || black, m.layers, flash, m.emission, m.emission?.highlight ? tex(m.highlight) : null);
+    // (Its flame noise, if it has one — it is fire — for the game to burn: metadata.fireMask.)
+    if (m.fire && tex(m.fire)) mat.metadata = { ...(mat.metadata || {}), fireMask: tex(m.fire) };
     materials.set(m.name, mat);
   }
 
