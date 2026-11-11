@@ -49,20 +49,22 @@ function swapped(element: string): BeamPalette {
 }
 
 export const BEAM_MOVES: Record<string, BeamSpec> = {
-  'Dragon Pulse': { element: 'Dragon' },
-  'Hyper Beam': { element: 'Normal' },
+  // Beam 2, the aura beam (its outlined white core, its spikes, rings of stars and bands): Dragon Pulse, Hyper Beam,
+  // Solar Beam, Flash Cannon, Steel Beam.
+  'Dragon Pulse': { element: 'Dragon', style: 2 },
+  'Hyper Beam': { element: 'Normal', style: 2 },
   // An icy thunderbolt, out of a beam's starting egg.
   'Ice Beam': { element: 'Ice', bolt: true },
   'Aurora Beam': { element: 'Ice' },
-  'Solar Beam': { element: 'Grass' },
-  'Flash Cannon': { element: 'Steel' },
+  'Solar Beam': { element: 'Grass', style: 2 },
+  'Flash Cannon': { element: 'Steel', style: 2 },
   // A psychic bolt, out of a beam's starting egg (as Ice Beam).
   'Psybeam': { element: 'Psychic', bolt: true },
   'Signal Beam': { element: 'Bug' },
   'Charge Beam': { element: 'Electric' },
   'Hydro Pump': { element: 'Water' },
   'Hydro Cannon': { element: 'Water' },
-  'Steel Beam': { element: 'Steel' },
+  'Steel Beam': { element: 'Steel', style: 2 },
   // A fire beam, billowing all along.
   'Flamethrower': { element: 'Fire', burstAlong: true },
   // Flamethrower's billowing flame in fire and psychic together: its torn

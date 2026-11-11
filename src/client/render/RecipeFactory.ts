@@ -53,7 +53,9 @@ import type { SlashFx } from '../vfx/SlashFx.ts';
 import { QuickStepFx } from '../vfx/QuickStepFx.ts';
 import { gaitSpeed } from './gait.ts';
 import { flurryStrikes, buildFlurry, flurryShape, type FlurryStrike } from './flurry.ts';
-import { toClip, type Rig } from './handAttacks.ts';
+import { toClip, bakeHandAttack, retarget, mirrorClip, type Rig } from './handAttacks.ts';
+import { sampleTrack } from '../recipe/tranm.js';
+import { ArcSlashFx } from '../vfx/ArcSlashFx.ts';
 import { SparkleFx } from '../vfx/SparkleFx.ts';
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
 import type { ClawSpec } from '../vfx/slashMoves.ts';
@@ -238,6 +240,8 @@ const FLASH_FADE = 0.22; // s back to normal
 
 /** Seconds a beam keeps pouring after its front has struck. */
 const BEAM_HOLD = 0.8;
+/** A ball in a clash: how much of its way to where they meet it must have flown before its half of the clash's ball takes over. */
+const CLASH_BALL_ARRIVE = 0.97;
 /** A beam clash: how long the beams hold even before one pushes (s), and how long a bare win takes to push the ball back (s). */
 const CLASH_STANDOFF = 0.9, CLASH_PUSH = 2.0;
 /** Bones that mark the snout, best first: the beam pours from the mean of the first two found. */
@@ -320,6 +324,8 @@ interface Unit {
   flurry?: Map<'ground' | 'air', FlurryStrike[]>;
   /** Each gait's ground speed as its feet tell it (its rig's units a second; null: they can't), once asked. */
   gait?: Map<string, number | null>;
+  /** Its mirrored strike (a cross's second blow: its swipe's strike, left and right swapped), once made. */
+  crossStrike?: string | null;
   /** Taking off or coming down (fly): its jump's clips play, steering only moves it. */
   lofting?: boolean;
   /** Its per-frame upkeep (height, facing), removed when it is replaced. */
@@ -450,6 +456,20 @@ const SWEEP_STEP = 0.05, SWEEP_MIN = 1;
 const SWEEP_AROUND = 0.15;
 /** A swipe's blow lands SWIPE_HIT s into its strike clip (on its first frames: EFFECTS.md, clawEnd at phase 0). */
 const SWIPE_HIT = 0.03;
+/**
+ * A cross (playCrossSlash): how long each arm's swing is traced at most (s), how long afterimages are left along it
+ * (s) and how often, how solid; how soon after the first blow the second strike comes (s), how much quicker it plays,
+ * when in it its blow falls (s, at its own pace); its slash's edge past the part and its inner edge (× its height);
+ * its burst's size (× its height).
+ */
+const CROSS_TRACE = 0.7, CROSS_GHOSTS = 0.3, CROSS_GHOST_EVERY = 0.06, CROSS_GHOST = 0.6, CROSS_NEXT = 0.15, CROSS_SPEED = 1.25;
+const CROSS_SECOND_HIT = 0.1, CROSS_REACH = 0.22, CROSS_INNER = 0.2, CROSS_BURST = 0.3;
+/** A cross by one with more than one arm a side (Machamp): how many frames its swing is watched before its trail locks to the arm moving most. */
+const CROSS_PICK = 4;
+/** Cross slashes laid on a sphere round the attacker (ArcSlashFx.trail `sphere`), not flat along the arm. */
+const CROSS_SPHERE = true;
+/** Its sphere's radius (× the attacker's height): about its arm's reach. */
+const CROSS_SPHERE_R = 0.75;
 
 /**
  * The motion a strike is measured on: the plain attack clip, or a swipe (its
@@ -573,6 +593,7 @@ export class RecipeFactory implements UnitFactory {
   private lastClaw = new WeakMap<TransformNode, number>();
   /** The quick step's pieces (Quick Attack), once one is played. */
   private quickStep: QuickStepFx | null = null;
+  private arcSlash: ArcSlashFx | null = null;
   /** A Grass aura's meadow patch: built once, instanced. */
   private meadowSrc: Mesh | null = null;
   /** The impact frame (a beam clash's blow), once one fires. */
@@ -1395,7 +1416,98 @@ export class RecipeFactory implements UnitFactory {
     const u = this.units.get(node);
     if (!u) return [];
     const limb = this.stanceOf(node) === 'quadruped' ? /^(left|right)_(foot|hand)$/ : /^(left|right)_foot$/;
-    return u.model.skeleton.bones.filter((b) => limb.test(b.name)).map((b) => b.getAbsolutePosition(u.model.root));
+    // (Against its skinned mesh, under its handedness flip: against its root, left and right would come out mirrored.)
+    const skinned = u.model.meshes.find((m) => m.skeleton) ?? u.model.meshes[0];
+    return u.model.skeleton.bones.filter((b) => limb.test(b.name)).map((b) => b.getAbsolutePosition(skinned));
+  }
+
+  /**
+   * A cross (Cross Chop, Cross Poison, X-Scissor): two slashes in quick
+   * succession, one from each arm. Its swipe attack (wind-up, step in,
+   * strike), then straight out of its blow the same strike mirrored (its other
+   * arm, no wind-up, CROSS_SPEED quicker) — each slash flowing along the arm
+   * that throws it (ArcSlashFx.trail: only its swing, staying as the arm pulls
+   * back, gone as it comes to rest), afterimages of the body left along both
+   * swings, a burst at each blow. `onBlow(i)`: at each (0, then 1), for the
+   * caller's hit. Resolves on the second blow. One with no swipe swipes once.
+   */
+  async playCrossSlash(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: (i: number) => void): Promise<void> {
+    const u = this.units.get(node);
+    if (!u || this.strikeKey(u, true) !== 'swipe') { await this.playAttackLunge(node, targetPos, true); onBlow?.(0); return; }
+    const player = u.model.player, rig = player as unknown as Rig;
+    const fx = (this.arcSlash ??= new ArcSlashFx(this.scene));
+    const part = this.impactPart(node, 'swipe') ?? 'right_hand';
+    const partner = part.replace(/^(left|right)/, (m) => (m === 'left' ? 'right' : 'left'));
+    const end = this.act(u, 'swipeEnd');
+    // Its mirrored strike, made once.
+    if (u.crossStrike === undefined) {
+      const baked = bakeHandAttack(rig, [end], sampleTrack, { id: 0, species: '', clip: 'swipe', hand: part, height: u.model.height, hitTime: 0 });
+      u.crossStrike = baked ? 'crossStrike' : null;
+      if (baked) player.clips.set('crossStrike', toClip(mirrorClip(rig, retarget(baked, rig, u.model.height)), 'crossStrike', (player as unknown as { shown: unknown[] }).shown));
+    }
+    const H = this.heightOf(node), hue = this.hueOf(node, element);
+    // (Its parts measured against its skinned mesh, under its handedness flip: against its root, mirrored.)
+    const skinned = u.model.meshes.find((m) => m.skeleton) ?? u.model.meshes[0];
+    // Its part's bone — or, with no bone by that name (Machamp: right_a_hand, right_b_hand), that side's like
+    // bones, followed for the swing's first frames and then locked to whichever has moved most: the arm swinging.
+    const sampler = (name: string) => {
+      const bones = u.model.skeleton.bones;
+      const exact = bones.find((b) => b.name === name);
+      const [, side, rest] = /^(left|right)_(.+)$/.exec(name) ?? [];
+      const like = exact ? [exact] : side ? bones.filter((b) => new RegExp(`^${side}_([a-z]_)?${rest}(_[a-z])?$`).test(b.name)) : [];
+      const moved = like.map(() => 0), last: (Vector3 | null)[] = like.map(() => null);
+      let frames = 0, bone = like.length === 1 ? like[0] : null;
+      return () => {
+        if (!bone && like.length) {
+          like.forEach((b, i) => { const q = b.getAbsolutePosition(skinned).clone(); if (last[i]) moved[i] += q.subtract(last[i]!).length(); last[i] = q; });
+          const lead = like[moved.indexOf(Math.max(...moved))];
+          if (++frames >= CROSS_PICK) bone = lead;
+          return sampleAt(lead);
+        }
+        return bone ? sampleAt(bone) : null;
+      };
+    };
+    const sampleAt = (bone: Bone) => {
+      const p = bone.getAbsolutePosition(skinned).clone();
+      const out = p.subtract(node.position.add(new Vector3(0, H * 0.5, 0)));
+      if (out.lengthSquared() < 1e-6) return null;
+      out.normalize();
+      return { tip: p.add(out.scale(H * CROSS_REACH)), base: p.subtract(out.scale(H * CROSS_INNER)) };
+    };
+    // Laid on a sphere round its middle (the anime slash's bubble), or flat along its arm (off).
+    // (Its right, across its middle; where its blows land: its two slashes cross there, on its sphere.)
+    const right = new Vector3(Math.cos(node.rotation.y), 0, -Math.sin(node.rotation.y));
+    const sphere = CROSS_SPHERE ? { centre: () => node.position.add(new Vector3(0, H * 0.5, 0)), radius: H * CROSS_SPHERE_R, across: right,
+      contact: targetPos.add(new Vector3(0, H * 0.5, 0)) } : undefined;
+    const ghosts = (secs: number) => { for (let t = 0; t < secs; t += CROSS_GHOST_EVERY) setTimeout(() => this.afterimage(node, CROSS_GHOST), t * 1000); };
+    const blow = (i: number) => {
+      const way = targetPos.subtract(node.position); way.y = 0;
+      if (way.lengthSquared() > 1e-6 && this.beams) this.beams.hemiBurst(targetPos.add(new Vector3(0, H * 0.5, 0)), way.normalize().scale(-1), H * CROSS_BURST, hue, false);
+      onBlow?.(i);
+    };
+    // The first: its swipe attack; traced from its strike's start.
+    const struck = this.playAttackLunge(node, targetPos, true);
+    await new Promise<void>((res) => {
+      const o = this.scene.onBeforeRenderObservable.add(() => { if (player.active?.action === end) { this.scene.onBeforeRenderObservable.remove(o); res(); } });
+    });
+    const first = fx.trail({ element: hue, height: H, sample: sampler(part), trace: CROSS_TRACE, sphere });
+    ghosts(CROSS_GHOSTS);
+    await struck;
+    blow(0);
+    if (!u.crossStrike || u.down) return;
+    // The second, straight out of the first's blow: the mirrored strike, quicker, its partner arm traced.
+    await sleep(CROSS_NEXT);
+    void player.play(u.crossStrike, { fade: 0.06, speed: CROSS_SPEED }).then(() => {
+      if (!u.down && player.active?.action === u.crossStrike) void player.play(this.act(u, 'idle'), { fade: 0.25 });
+    });
+    // (On its sphere, the first's mirror image — left and right swapped across its middle — drawn as the other arm
+    // swings: a cross, whatever its swipe is like; Scizor's is more a thrust than a sweep, its strike mirrored alone
+    // all but the same as the first.)
+    fx.trail({ element: hue, height: H, sample: sampler(partner), trace: CROSS_TRACE / CROSS_SPEED, sphere,
+      mirror: sphere ? { of: first, across: right, speed: CROSS_SPEED } : undefined });
+    ghosts(CROSS_GHOSTS / CROSS_SPEED);
+    await sleep(SWIPE_HIT + CROSS_SECOND_HIT / CROSS_SPEED);
+    blow(1);
   }
 
   /** Keep it from turning to watch what it looks at (true), or let it again (false): its facing is then the caller's. */
@@ -1886,8 +1998,9 @@ export class RecipeFactory implements UnitFactory {
       root: muzzles || spec.eggless ? 0 : undefined,
       // No dust round the feet of a unit in the air (and only once for twins).
       feet: () => (i > 0 || (u && u.hover > 0.05) ? null : node.position),
-      // (Cannon beams aim straight at their meeting point, not along the gaze.)
-      facing: meet ? undefined : () => node.rotation.y, targetSize: () => (target ? this.heightOf(target) : height),
+      // (Cannon beams aim straight at their meeting point, not along the gaze; and so does a beam in a clash, straight
+      // from its mouth to the clash point — the two shafts one straight line, mouth to mouth, not two side by side.)
+      facing: meet || clash ? undefined : () => node.rotation.y, targetSize: () => (target ? this.heightOf(target) : height),
       targetPoses: target ? (fn) => this.everyStruckPose(target, fn) : undefined,
       // A twin's second beam leaves the clash's ball to the first.
       clash: clash && i > 0 ? { ...clash, ball: false } : clash,
@@ -2395,15 +2508,41 @@ export class RecipeFactory implements UnitFactory {
       const head = Math.max(a1 + (a1 - a0) * WIND_COAT_HEAD, still ? foot + H() * WIND_COAT_TALL : -Infinity);
       const radius = r * WIND_COAT_CLEAR;
       if (WIND_COAT_SHAPE === 'sphere') {
-        // A sphere round the body's middle, wide enough to hold all of it.
-        let far = 0;
-        u.skin.forEachPoint((p) => { far = Math.max(far, Vector3.Distance(p, mid0)); });
-        const d = Math.max(0.4, 2 * (far || H() / 2) * WIND_COAT_CLEAR);
+        // A sphere round the body's middle, wide enough to hold all of it — steady (steadyMid, steadyD: never
+        // shaken by its flapping wings).
+        const d = steadyD;
+        mid0 = steadyMid;
         // (Standing on the ground: the ground under it, where it fades out.)
         const floor = still && u.hover <= 0.05 ? node.position.y : undefined;
         return { base: mid0.subtract(axis.scale(d / 2)), axis, height: d, radius: d / 2, floor };
       }
       return { base: mid.add(axis.scale(foot)), axis, height: Math.max(0.2, head - foot), radius };
+    };
+    // Its sphere steady, as the fire sphere is (never its flapping wings): on the body's mass — the mean of its points,
+    // which a wing hardly moves, unlike its bounds, which a wingtip stretches — set off by where its bounds' middle
+    // lies from that, learnt slowly (a wingbeat's swing averages away), both in the body's own frame (it turns with it
+    // at once), held off where it stands (as high as it flies); its size the most it reaches over its first moments,
+    // then kept.
+    const steadyMid = node.position.clone(), bias = Vector3.Zero(), off = Vector3.Zero(), sum = Vector3.Zero();
+    let steadyD = H(), sized = 0;
+    const steady = (dt: number, mid: Vector3, n: number) => {
+      const anchor = node.position.add(new Vector3(0, u.hover + u.clamp, 0));
+      sum.setAll(0);
+      u.skin.forEachPoint((p) => { sum.addInPlace(p); });
+      const mass = n ? sum.scale(1 / n) : mid.clone();
+      const yaw = node.rotation.y;
+      const turn = (v: Vector3, by: number) => new Vector3(v.x * Math.cos(by) + v.z * Math.sin(by), v.y, -v.x * Math.sin(by) + v.z * Math.cos(by));
+      Vector3.LerpToRef(bias, turn(mid.subtract(mass), -yaw), sized === 0 ? 1 : 1 - Math.exp(-dt * FIRE_SPHERE_LEARN), bias);
+      const wantOff = turn(mass.add(turn(bias, yaw)).subtractInPlace(anchor), -yaw);
+      Vector3.LerpToRef(off, wantOff, sized === 0 ? 1 : 1 - Math.exp(-dt * FIRE_SPHERE_FOLLOW), off);
+      steadyMid.copyFrom(anchor).addInPlace(turn(off, yaw));
+      if (sized < FIRE_SPHERE_SIZING) {
+        let far = 0;
+        u.skin.forEachPoint((p) => { far = Math.max(far, Vector3.Distance(p, steadyMid)); });
+        const want = Math.max(0.4, 2 * (far || H() / 2) * WIND_COAT_CLEAR);
+        steadyD = sized === 0 ? want : Math.max(steadyD, want);
+        sized += Math.max(dt, 1e-3);
+      }
     };
     const follow = (dt: number) => {
       // How it moves (eased, so a single frame's step never flips it).
@@ -2424,6 +2563,7 @@ export class RecipeFactory implements UnitFactory {
       u.skin.forEachPoint((p) => { Vector3.CheckExtends(p, lo, hi); n++; });
       if (!n) { lo.copyFrom(node.position); hi.copyFrom(node.position).addInPlaceFromFloats(0, H(), 0); }
       const mid = Vector3.Center(lo, hi);
+      if (WIND_COAT_SHAPE === 'sphere') steady(dt, mid, n);
       // Upright, it is as tight and as small as the one along the way (its
       // width and length), standing from its foot on the tile.
       const move = place(way.clone(), false, mid, n);
@@ -2702,8 +2842,13 @@ export class RecipeFactory implements UnitFactory {
     // The ball itself, flying at the other; where the two meet, it goes (its half takes over).
     const ball = throwBall(this.beams!, { element, colours, height, from: mouth, target: toTarget, targetSize: () => this.heightOf(other),
       feet: () => (u && u.hover > 0.05 ? null : node.position), overlay, vanish: true, noise });
+    // (It goes only once it has flown there: where they meet can be known from the first — a clash meeting at a
+    // fixed point, `meetAt` — long before the ball has even left the hand.)
     const meets = this.scene.onBeforeRenderObservable.add(() => {
-      if (!clash.at()) return;
+      const at = clash.at();
+      if (!at) return;
+      const m = mouth(), way = at.subtract(m), far = way.lengthSquared();
+      if (far > 1e-6 && Vector3.Dot(ball.position().subtract(m), way) < far * CLASH_BALL_ARRIVE) return;
       this.scene.onBeforeRenderObservable.remove(meets);
       ball.vanish();
       half.open();

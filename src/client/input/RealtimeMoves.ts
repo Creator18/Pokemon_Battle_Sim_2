@@ -28,8 +28,12 @@ import { elementFor } from '../vfx/auraPalette.ts';
 import { POUR_COST, RUSH_COST, RUSH_FREE, type Stamina } from './Stamina.ts';
 
 /** Moves the move data doesn't carry yet: their type and power, and how they play. */
-const OWN_MOVES: Record<string, { type: string; power: number; kind: 'rampage' }> = {
+const OWN_MOVES: Record<string, { type: string; power: number; kind: 'rampage' | 'cross' }> = {
   Outrage: { type: 'Dragon', power: 120, kind: 'rampage' },
+  // Crosses: one slash from each arm in quick succession (RecipeFactory.playCrossSlash).
+  'Cross Chop': { type: 'Fighting', power: 100, kind: 'cross' },
+  'Cross Poison': { type: 'Poison', power: 70, kind: 'cross' },
+  'X-Scissor': { type: 'Bug', power: 80, kind: 'cross' },
 };
 /** A dash dodges a move whose contact comes within this long of its start (s). */
 const DODGE_WINDOW = 0.35;
@@ -66,6 +70,7 @@ export class RealtimeMoves {
   /** Is `name` one this plays (a beam, a ram, a rampage)? */
   plays(name: string): boolean {
     return !!beamFor(name) || !!getMove(name)?.isRam || !!OWN_MOVES[name];
+
   }
 
   /**
@@ -77,6 +82,7 @@ export class RealtimeMoves {
     const type = own?.type ?? moveType(name), power = own?.power ?? move?.basePower ?? 60;
     const beam = beamFor(name);
     if (beam) return this.pour(node, target, name, holding);
+    if (own?.kind === 'cross') return this.cross(node, target, type);
     if (!move?.isRam && own?.kind !== 'rampage') return false;
     // In its aura, after it — as far as its breath takes it.
     const aura = f.aura(node, { element: type, edge: 'tongues', reach: 'body' });
@@ -118,6 +124,33 @@ export class RealtimeMoves {
     this.vfx?.playMove(elementFor(type, node.metadata?.species, !!node.metadata?.shiny), node.position.clone(), target.position.clone(), power >= 100);
     await held;
     return true;
+  }
+
+  /**
+   * A cross: charged in (as a rampage, but no aura), then its two slashes —
+   * each blow asked on its own whether it landed (a dash at either dodges it).
+   * True if either did.
+   */
+  private async cross(node: TransformNode, target: TransformNode, type: string): Promise<boolean> {
+    const f = this.factory;
+    const stop = STOP_SHORT * (f.heightOf(node) + f.heightOf(target));
+    const stamina = this.hooks.staminaOf?.(node) ?? null;
+    let rushed = 0;
+    const at = await f.chargeAt(node, () => target.position, { element: type, stop, commit: COMMIT, onStep: (m) => {
+      rushed += m;
+      if (!stamina || rushed <= RUSH_FREE) return true;
+      stamina.drain(Math.min(m, rushed - RUSH_FREE) * RUSH_COST);
+      return !stamina.empty;
+    } });
+    if (!this.within(node, target, at)) { this.say(node, 'Out of breath!', '#FCD34D'); return false; }
+    let landed = false;
+    await f.playCrossSlash(node, target.position.clone(), type, () => {
+      if (this.evaded(target) || !this.within(node, target, node.position)) { this.dodged(target); return; }
+      landed = true;
+      const flinch = f.playHitReact(target);
+      this.hooks.onStruck?.(target, flinch);
+    });
+    return landed;
   }
 
   /**

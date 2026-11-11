@@ -105,6 +105,21 @@ const RINGS = true, RING_SLOTS = 24, RING_LEN: [number, number] = [0.06, 0.16], 
 const RING_STAR = 0.65, RING_BUNCH: [number, number] = [2, 4], RING_GROW = 1.06;
 const RING_SETS: [number, number][] = [[4, 0.35], [3, 0.8]];
 /**
+ * Beam 2's rings of lightning: bolts looped round the core on the stars' way (the back of the egg to the end of the
+ * beam), in sets at their own speeds — [how many, how fast (beam lengths a second)].
+ */
+const BANDS: [number, number][] = [[2, 0.22], [2, 0.5], [1, 0.95]];
+/**
+ * Its plain rings as lightning (shaped as LightningFx's strokes, but all in the aura outline's colour): each a
+ * bolt looped round the beam, never a steady ring — a zigzag of BOLT_CORNERS corners round it, each jogging along the
+ * beam up to BOLT_JAG (of the circumference), a finer crackle on it (BOLT_CRACKLE corners, BOLT_FINE of the jag), re-
+ * struck every BOLT_RESTRIKE s (each ring on its own beat); its half-width (of the circumference: BOLT_RIM; BOLT_CORE its middle).
+ */
+const BOLT_CORNERS = 9, BOLT_JAG = 0.06, BOLT_CRACKLE = 31, BOLT_FINE = 0.3, BOLT_RESTRIKE = 0.075;
+const BOLT_CORE = 0.008, BOLT_RIM = 0.02;
+/** Each ring its own thickness (× BOLT_RIM: thinnest, thickest), new each time it sets off down the beam. */
+const BOLT_THICK: [number, number] = [0.45, 2.4];
+/**
  * The column is an elongated oval along its length: OVAL_END × its radius
  * where it leaves the egg and where it reaches the target, OVAL_MID × in the
  * middle (an ellipse between).
@@ -403,11 +418,41 @@ float inSet(float a, float t, float n, float speed, float seed) {
   }
   return 0.0;
 }
+// Where round its circle (t) a bolt's path sits along the beam (of the circumference): a closed zigzag — \`corners\`
+// corners round it (the last joined to the first), each its own jog, this strike's.
+float zig(float t, float corners, float strike) {
+  float x = t * corners, c0 = floor(x), f = fract(x), c1 = mod(c0 + 1.0, corners);
+  float j0 = h1(c0 * 7.31 + strike * 13.7) - 0.5, j1 = h1(c1 * 7.31 + strike * 13.7) - 0.5;
+  return mix(j0, j1, f) * 2.0;
+}
+// In a plain ring of one set (n of them, \`speed\` beam lengths a second) — a bolt of lightning looped round the
+// beam: 2.0 in its core, 1.0 in its rim, 0.0 off it.
+float inBand(float a, float t, float n, float speed, float seed) {
+  float C = 6.2831853 * rad * ${OVAL_MID.toFixed(2)};
+  float best = 0.0;
+  for (int k = 0; k < 6; k++) {
+    if (float(k) >= n) break;
+    float run = time * speed + float(k) / n + seed;
+    float at = fract(run) * (len + eggBack) - eggBack;
+    // (Re-struck every BOLT_RESTRIKE, each ring on its own beat: a new path each time.)
+    float strike = floor(time / ${BOLT_RESTRIKE.toFixed(3)} + h1(float(k) + seed * 9.0) * 7.0) + float(k) * 101.0 + seed * 57.0;
+    float off = ${BOLT_JAG.toFixed(3)} * (zig(t, ${BOLT_CORNERS.toFixed(1)}, strike) + ${BOLT_FINE.toFixed(2)} * zig(t, ${BOLT_CRACKLE.toFixed(1)}, strike + 3.3));
+    float d = abs(a - at - off * C) / C;
+    // (This ring's thickness, this time down the beam.)
+    float thick = mix(${BOLT_THICK[0].toFixed(2)}, ${BOLT_THICK[1].toFixed(2)}, h1(floor(run) * 3.7 + float(k) * 11.3 + seed * 5.0));
+    if (d < ${BOLT_CORE.toFixed(4)} * thick) return 2.0;
+    if (d < ${BOLT_RIM.toFixed(4)} * thick) best = 1.0;
+  }
+  return best;
+}
 void main(void) {
   float a = vAlong * rad, t = fract(vTh / 6.2831853);
   float hit = 0.0;
   ${RING_SETS.map(([n, v], i) => `hit = max(hit, inSet(a, t, ${n.toFixed(1)}, ${v.toFixed(3)}, ${(i * 0.37).toFixed(2)}));`).join(' ')}
-  if (hit < 0.5) discard;
+  float bolt = 0.0;
+  ${BANDS.map(([n, v], i) => `bolt = max(bolt, inBand(a, t, ${n.toFixed(1)}, ${v.toFixed(3)}, ${(0.13 + i * 0.29).toFixed(2)}));`).join(' ')}
+  if (hit < 0.5 && bolt < 0.5) discard;
+  // (A bolt all in the ring's colour: the aura outline's, through and through.)
   gl_FragColor = vec4(color, 1.0);
 }`;
 
