@@ -299,8 +299,19 @@ const BALL_MAX_BACK = BEAM_R[BEAM_R.length - 1] * BALL_OVER * 1.2 * (1 + BALL_PU
 export const CHARGE_TAU = 0.35; //           s, the ball's swell toward 120%
 const SNAP = 0.07, POP = 0.14; //     s, launch: ball to nothing, then back to full
 export const BLUR_LIFE = 0.35, SLASH_LIFE = 0.38, DUST_LIFE = 2.6;
-/** Beam 2 (the aura beam) letting go: the whole of it — column, egg, outline, rings — swells out to this × as it tears away (a gentle burst), where a beam 1 narrows. */
-const RELEASE_BURST = 1.8;
+/**
+ * Beam 2 (the aura beam) letting go: the whole of it — column, egg, end ball, clash ball, outline, rings — squeezed in
+ * onto the beam's axis, thinner and thinner till it is a line and gone (its length kept), where a beam 1 narrows. Its
+ * noise only starts to tear away past RELEASE_THIN_TEAR of the way, so the squeeze reads.
+ */
+const RELEASE_THIN_TEAR = 0.55;
+/**
+ * …and spiralling in as it goes: the whole of it turned round its axis RELEASE_SPIRAL turns by the time it is a line,
+ * the column twisted into a screw as it turns (its far end RELEASE_HELIX × as far round as its start).
+ */
+const RELEASE_SPIRAL = 1.25, RELEASE_HELIX = 1.6;
+/** …and drawn back off the target as it goes: its front pulled back toward its start, this share of its length by the end. */
+const RELEASE_SHORTEN = 0.8;
 /** A beam whose front strikes nothing (BeamShot.endBall): its end ball this much of its size (none: a beam 2's long starting egg instead); how quickly it eases between (per s). */
 const END_BALL_MISS = 0, END_BALL_EASE = 8;
 const RELEASE_SPAN = 0.6; //          share of the release clip spent dissolving
@@ -409,6 +420,8 @@ uniform float ovalMid;
 uniform float eggShape;
 // (A beam 2 striking nothing: 0..1, its column shrunk away to nothing — its long starting egg in its place.)
 uniform float gone;
+// (A beam 2 letting go: how far round its axis it has turned (radians) as it spirals in — more toward its far end.)
+uniform float twist;
 uniform vec3 eye;
 varying float vAlong, vTh;
 #ifdef OUTLINE_TWIN
@@ -429,7 +442,8 @@ ${NOISE}
 ${SPIKE_GLSL}
 void main(void) {
   float u = uv.x, th = uv.y * 6.2831853;
-  vec3 n = cos(th) * side + sin(th) * upv;
+  float tw = twist * (1.0 + ${(RELEASE_HELIX - 1).toFixed(2)} * u);
+  vec3 n = cos(th + tw) * side + sin(th + tw) * upv;
   float along = u * len;
   // An elongated oval along its length: narrower at both ends, fullest mid-way —
   // until it splits on the target: then its far end opens out to full width
@@ -1058,7 +1072,7 @@ export class BeamFx {
     warm.setEnabled(false);
     const warmMat = new ShaderMaterial('hemiWarmMat', scene, { vertex: 'beamClash', fragment: 'beamClash' }, {
       attributes: ['position', 'uv'],
-      uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
+      uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'twist', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
         'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
     });
     warmMat.backFaceCulling = false;
@@ -1097,7 +1111,7 @@ export class BeamFx {
       const mesh = MeshBuilder.CreateSphere(`hemiBurst${i}`, { diameter: 2, segments: 24 }, scene);
       const mat = new ShaderMaterial(`hemiBurstMat${i}`, scene, { vertex: 'beamClash', fragment: 'beamClash' }, {
         attributes: ['position', 'uv'],
-        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
+        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'twist', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
           'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
       });
       mat.backFaceCulling = false;
@@ -1212,6 +1226,10 @@ class Beam implements BeamHandle {
   private endBallK = -1;
   /** How far the release has dissolved it (0..1), this frame. */
   private dissolveNow = 0;
+  /** A beam 2 letting go: how much of its girth is left round its axis (1 … 0); else 1. */
+  private thin = 1;
+  /** …and how far round its axis it has turned as it spirals in (radians). */
+  private get spin(): number { return (1 - this.thin) * RELEASE_SPIRAL * Math.PI * 2; }
   private balls: { mesh: Mesh; layer: Layer }[] = [];
   /** The tip's egg (three layers), and its looping burst shells (TIP_SHELLS × three layers). */
   private tips: { mesh: Mesh; layer: Layer }[] = [];
@@ -1266,7 +1284,7 @@ class Beam implements BeamHandle {
     const masterMat = (name: string, shader: string, l: LayerDef): Layer => {
       const mat = new ShaderMaterial(name, scene, { vertex: shader, fragment: shader }, {
         attributes: ['position', 'uv'],
-        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
+        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'twist', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
           'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi', 'fwdNoise'],
       });
       // (Only its own skin: a clash's streaks of the other beam keep their one colour.)
@@ -1544,6 +1562,9 @@ class Beam implements BeamHandle {
       st.func = Constants.NOTEQUAL; st.funcRef = bit; st.funcMask = bit; st.mask = 0x00;
       st.opStencilFail = Constants.KEEP; st.opDepthFail = Constants.KEEP; st.opStencilDepthPass = Constants.KEEP;
     }
+    // (Its wind-up sparks in that group too, drawn after the outline: each one in front of the egg or behind it — core
+    // and outline alike — by how near the camera it is. Left in the first group, the outline drawn later covered them all.)
+    this.chargeSparks.mesh.renderingGroupId = BALL_OUTLINE_GROUP;
   }
 
   /**
@@ -1758,8 +1779,8 @@ class Beam implements BeamHandle {
     // Bursting, it no longer fades with the beam's release: it swells and disperses on its own clock.
     const g = clash && this.frontDone && !this.finished
       ? easeOutCubic((this.time - this.frontT) / CLASH_GROW) * (bursting ? 1
-        // (Letting go: a beam 2's swells out from where it is, as the rest of it does; a beam 1's shrinks away.)
-        : this.shot.style === 2 ? 1 + (RELEASE_BURST - 1) * easeOutCubic(dissolve) : 1 - smoothstep(0.3, 1, dissolve)) * (1 - ended) : 0;
+        // (Letting go: a beam 2's keeps its size, squeezed onto the beam's axis as the rest of it is; a beam 1's shrinks away.)
+        : this.shot.style === 2 ? 1 : 1 - smoothstep(0.3, 1, dissolve)) * (1 - ended) : 0;
     const at = (clash ? clash.at() : null) ?? origin.add(aim.scale(contactAt));
     const toAim = new Quaternion();
     Quaternion.FromUnitVectorsToRef(Y, aim, toAim);
@@ -1782,7 +1803,9 @@ class Beam implements BeamHandle {
         gone = smoothstep(0.1, 1, k);
         mesh.setEnabled(gone < 0.999);
       }
-      mesh.scaling.setAll(Math.max(1e-3, CLASH_R * r * clash.size * g * swell));
+      // (A tie's burst on its own clock, round; else squeezed with the beam as it lets go.)
+      if (bursting) mesh.scaling.setAll(Math.max(1e-3, CLASH_R * r * clash.size * g * swell));
+      else this.squeeze(mesh, CLASH_R * r * clash.size * g * swell);
       if (elsewhere) {
         mesh.setEnabled(false);
         if (i === BEAM_R.length - 1) { noiseR = CLASH_R * r * clash.size * g * swell; noiseShow = gone >= 0 ? 1 - gone : 1; }
@@ -1796,6 +1819,23 @@ class Beam implements BeamHandle {
       m.setFloat('cutoff', gone >= 0 ? base + (1 - base) * gone : cut(base));
     });
     this.clashNoise?.update(at, aim, noiseR, noiseR > 1e-3 ? noiseShow : 0);
+  }
+
+  /** A beam 2 letting go: its round pieces (egg, end ball, clash ball and their shells) turned round the axis as it spirals in. */
+  private spinPieces(): void {
+    const a = this.spin;
+    if (a === 0) return;
+    // (Each's local y lies along the beam: a turn about it is a turn about the axis.)
+    const turn = Quaternion.RotationAxis(Y, a);
+    for (const { mesh } of [...this.balls, ...this.rootShells, ...this.tips, ...this.shells, ...this.hemis]) {
+      if (mesh.isEnabled(false) && mesh.rotationQuaternion) mesh.rotationQuaternion.multiplyInPlace(turn);
+    }
+  }
+
+  /** A piece's size `s`, round — but a beam 2 letting go squeezes it onto the beam's axis (its local y, which lies along it). */
+  private squeeze(mesh: Mesh, s: number): void {
+    const k = Math.max(1e-3, s);
+    mesh.scaling.set(Math.max(1e-3, k * this.thin), k, Math.max(1e-3, k * this.thin));
   }
 
   /**
@@ -1817,7 +1857,8 @@ class Beam implements BeamHandle {
     if (on && this.splitT >= 0 && this.loopT < 0) this.loopT = this.time;
     // Grows in with the front; released, swells out as it disperses (as a ball attack's burst).
     const grownIn = clamp01(len / (SPHERE_R[BEAM_R.length - 1] * H * this.W * 2));
-    const out = 1 + (TIP_BURST - 1) * easeOutCubic(dissolve);
+    // (A beam 2's: no swell — squeezed onto the axis instead.)
+    const out = this.shot.style === 2 ? 1 : 1 + (TIP_BURST - 1) * easeOutCubic(dissolve);
     const front = origin.add(aim.scale(len));
     const back = new Quaternion();
     Quaternion.FromUnitVectorsToRef(Y, aim.scale(-1), back); // its narrow end back along the beam
@@ -1843,7 +1884,7 @@ class Beam implements BeamHandle {
       layer.mat.setFloat('egg', this.eggBeam ? 0 : 1);
       mesh.position.copyFrom(centre).addInPlace(forward(scale * out, scale));
       mesh.rotationQuaternion!.copyFrom(back);
-      mesh.scaling.setAll(Math.max(1e-3, scale * out));
+      this.squeeze(mesh, scale * out);
       const m = layer.mat;
       m.setVector3('origin', origin); m.setVector3('aim', aim); m.setVector3('side', side); m.setVector3('upv', up);
       m.setFloat('rad', BEAM_R[i] * H);
@@ -1866,7 +1907,7 @@ class Beam implements BeamHandle {
       const scale = SPHERE_R[i] * H * this.W * TIP * tipScale;
       mesh.position.copyFrom(centre).addInPlace(forward(scale * swell, scale));
       mesh.rotationQuaternion!.copyFrom(back);
-      mesh.scaling.setAll(Math.max(1e-3, scale * swell));
+      this.squeeze(mesh, scale * swell);
       const m = layer.mat;
       m.setVector3('origin', origin); m.setVector3('aim', aim); m.setVector3('side', side); m.setVector3('upv', up);
       m.setFloat('rad', BEAM_R[i] * H);
@@ -2006,8 +2047,10 @@ class Beam implements BeamHandle {
       if (dissolve >= 1 && !burstLeft) { this.finish(); return; }
       dissolve = Math.min(dissolve, 1);
     }
-    const cut = (base: number) => base + (1 - base) * smoothstep(0, 1, dissolve);
+    const aura2 = this.shot.style === 2;
+    const cut = (base: number) => base + (1 - base) * smoothstep(aura2 ? RELEASE_THIN_TEAR : 0, 1, dissolve);
     this.dissolveNow = dissolve;
+    this.thin = aura2 ? 1 - smoothstep(0, 1, dissolve) : 1;
 
     // The ball: charging, then the snap and the pop, then the egg the beam pours from.
     let ball: number;
@@ -2023,11 +2066,10 @@ class Beam implements BeamHandle {
     // pulse on it read as the beam surging back and forth).
     const pulse = 1 + BALL_PULSE * Math.sin(this.time * BALL_PULSE_RATE);
     if (!this.opened) ball *= pulse;
-    // (Letting go, a beam 1's ball shrinks away; a beam 2's swells out as it tears — eggBurst, its look only, so the
-    // beam's start, measured from the ball's back, stays where it is.)
+    // (Letting go, a beam 1's ball shrinks away; a beam 2's is squeezed onto the beam's axis — squeeze, its look only,
+    // so the beam's start, measured from the ball's back, stays where it is.)
     const aura = this.shot.style === 2;
     if (!aura) ball *= 1 - smoothstep(0.3, 1, dissolve);
-    const eggBurst = aura ? 1 + (RELEASE_BURST - 1) * easeOutCubic(dissolve) : 1;
     // The ball's poles lie along the beam, so its stripes run with the beam's.
     const poleToAim = new Quaternion();
     Quaternion.FromUnitVectorsToRef(Y, aim, poleToAim);
@@ -2053,7 +2095,7 @@ class Beam implements BeamHandle {
       layer.mat.setFloat('egg', shape);
       layer.mat.setFloat('eggFront', frontAt(SPHERE_R[i] * H * this.W * ball * swell));
       mesh.position.copyFrom(origin);
-      mesh.scaling.setAll(Math.max(1e-3, SPHERE_R[i] * H * this.W * ball * swell * eggBurst));
+      this.squeeze(mesh, SPHERE_R[i] * H * this.W * ball * swell);
       mesh.rotationQuaternion!.copyFrom(poleToAim);
       mesh.setEnabled(ball > 0.02 && !this.shot.eggless);
       const m = layer.mat;
@@ -2075,7 +2117,7 @@ class Beam implements BeamHandle {
       layer.mat.setFloat('eggFront', frontAt(base));
       // Forward by however much it has swelled, so its back stays where the egg's is.
       mesh.position.copyFrom(origin.add(aim.scale((r - base) * (1 + (EGG_BACK - 1) * egg))));
-      mesh.scaling.setAll(Math.max(1e-3, r));
+      this.squeeze(mesh, r);
       mesh.rotationQuaternion!.copyFrom(poleToAim);
       const m = layer.mat;
       m.setVector3('origin', origin); m.setVector3('aim', aim); m.setVector3('side', side); m.setVector3('upv', up);
@@ -2149,10 +2191,12 @@ class Beam implements BeamHandle {
     // The beam: the front races out; it holds a steady thickness (no throb).
     // The front races out to the target's near side; the hit lands as it gets there.
     const grow = this.shot.instant ? 1 : easeOutCubic((t - SNAP * 0.5) / GROW);
-    const len = clashing
+    const reached = clashing
       ? Math.max(0.01, met ? Math.min(contactAt, Math.max(this.raceTo, contactAt) * grow) : contactAt * grow)
       : Math.max(0.01, contactAt * grow);
-    const arrived = clashing ? met && len >= contactAt - 1e-3 : grow >= 0.999;
+    const arrived = clashing ? met && reached >= contactAt - 1e-3 : grow >= 0.999;
+    // (A beam 2 letting go: its front drawn back off the target toward its start as it spirals in.)
+    const len = this.shot.style === 2 ? Math.max(0.01, reached * (1 - RELEASE_SHORTEN * smoothstep(0, 1, dissolve))) : reached;
     if (!this.frontDone && arrived) {
       this.frontDone = true; this.resolveFront(); this.frontT = this.time;
       if (!this.shot.clash || this.clashEndT >= 0) this.splitT = this.time;
@@ -2163,8 +2207,8 @@ class Beam implements BeamHandle {
     // A bolt: no column (the caller's bolt runs from its egg to here).
     this.setBeamVisible(on && !this.shot.bolt);
     if (!on) return;
-    // (Letting go: a beam 1 narrows; a beam 2 swells gently out, bursting, as it tears away.)
-    const width = this.shot.style === 2 ? 1 + (RELEASE_BURST - 1) * easeOutCubic(dissolve) : 1 - 0.4 * smoothstep(0.4, 1, dissolve);
+    // (Letting go: a beam 1 narrows; a beam 2 is squeezed onto its axis, to a line.)
+    const width = this.shot.style === 2 ? Math.max(1e-3, this.thin) : 1 - 0.4 * smoothstep(0.4, 1, dissolve);
     // How far it has split on the target (the arcs grow out as its end opens).
     const split = SPLIT_ARCS && this.splitT >= 0 ? easeOutCubic((this.time - this.splitT - ARC_DELAY) / ARC_GROW) : 0;
     this.tubes.forEach(({ layer }, i) => {
@@ -2172,6 +2216,7 @@ class Beam implements BeamHandle {
       m.setVector3('origin', origin); m.setVector3('aim', aim); m.setVector3('side', side); m.setVector3('upv', up);
       m.setFloat('len', len); m.setFloat('rad', BEAM_R[i] * H * this.W * width * COLUMN * (this.shot.bolt ? BOLT_SKIN_R : 1));
       m.setFloat('ovalMid', this.shot.style === 2 ? OVAL_MID_AURA : OVAL_MID);
+      m.setFloat('twist', this.spin);
       m.setFloat('eggShape', this.eggBeam ? 1 : 0);
       // (Striking nothing: as its end ball shrinks away, its column with it — its long starting egg in its place.)
       m.setFloat('gone', this.shot.style === 2 && this.shot.endBall && this.endBallK >= 0 ? 1 - this.endBallK : 0);
@@ -2196,6 +2241,7 @@ class Beam implements BeamHandle {
     this.updateClash(origin, aim, side, up, contactAt, cut, dissolve);
     this.updateTip(origin, aim, side, up, len, dissolve, heavier);
     this.updatePuffs(origin, aim, side, up, len, dissolve, heavier);
+    this.spinPieces();
     if (!this.releasing && this.frontDone) {
       const hit = origin.add(aim.scale(contactAt)); // where it meets the target
       this.owed.stream += CONTACT_RATE * dt;
