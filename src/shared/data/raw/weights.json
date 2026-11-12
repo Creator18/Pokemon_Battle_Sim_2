@@ -1,0 +1,1767 @@
+{
+"_meta": {
+"description": "Main-series weight (kg) and height (m) per species, from Pokémon Showdown's public Pokédex (play.pokemonshowdown.com/data/pokedex.json, 2026-11-12)."
+},
+"species": {
+"Bulbasaur": {
+"kg": 6.9,
+"m": 0.7
+},
+"Ivysaur": {
+"kg": 13,
+"m": 1
+},
+"Venusaur": {
+"kg": 100,
+"m": 2
+},
+"Charmander": {
+"kg": 8.5,
+"m": 0.6
+},
+"Charmeleon": {
+"kg": 19,
+"m": 1.1
+},
+"Charizard": {
+"kg": 90.5,
+"m": 1.7
+},
+"Squirtle": {
+"kg": 9,
+"m": 0.5
+},
+"Wartortle": {
+"kg": 22.5,
+"m": 1
+},
+"Blastoise": {
+"kg": 85.5,
+"m": 1.6
+},
+"Weedle": {
+"kg": 3.2,
+"m": 0.3
+},
+"Kakuna": {
+"kg": 10,
+"m": 0.6
+},
+"Beedrill": {
+"kg": 29.5,
+"m": 1
+},
+"Pidgey": {
+"kg": 1.8,
+"m": 0.3
+},
+"Pidgeotto": {
+"kg": 30,
+"m": 1.1
+},
+"Pidgeot": {
+"kg": 39.5,
+"m": 1.5
+},
+"Ekans": {
+"kg": 6.9,
+"m": 2
+},
+"Arbok": {
+"kg": 65,
+"m": 3.5
+},
+"Pikachu": {
+"kg": 6,
+"m": 0.4
+},
+"Raichu": {
+"kg": 30,
+"m": 0.8
+},
+"Clefairy": {
+"kg": 7.5,
+"m": 0.6
+},
+"Clefable": {
+"kg": 40,
+"m": 1.3
+},
+"Jigglypuff": {
+"kg": 5.5,
+"m": 0.5
+},
+"Wigglytuff": {
+"kg": 12,
+"m": 1
+},
+"Zubat": {
+"kg": 7.5,
+"m": 0.8
+},
+"Golbat": {
+"kg": 55,
+"m": 1.6
+},
+"Meowth": {
+"kg": 4.2,
+"m": 0.4
+},
+"Persian": {
+"kg": 32,
+"m": 1
+},
+"Mankey": {
+"kg": 28,
+"m": 0.5
+},
+"Primeape": {
+"kg": 32,
+"m": 1
+},
+"Abra": {
+"kg": 19.5,
+"m": 0.9
+},
+"Kadabra": {
+"kg": 56.5,
+"m": 1.3
+},
+"Alakazam": {
+"kg": 48,
+"m": 1.5
+},
+"Machop": {
+"kg": 19.5,
+"m": 0.8
+},
+"Machoke": {
+"kg": 70.5,
+"m": 1.5
+},
+"Machamp": {
+"kg": 130,
+"m": 1.6
+},
+"Bellsprout": {
+"kg": 4,
+"m": 0.7
+},
+"Weepinbell": {
+"kg": 6.4,
+"m": 1
+},
+"Victreebel": {
+"kg": 15.5,
+"m": 1.7
+},
+"Slowpoke": {
+"kg": 36,
+"m": 1.2
+},
+"Slowbro": {
+"kg": 78.5,
+"m": 1.6
+},
+"Farfetch’d": {
+"kg": 15,
+"m": 0.8
+},
+"Gastly": {
+"kg": 0.1,
+"m": 1.3
+},
+"Haunter": {
+"kg": 0.1,
+"m": 1.6
+},
+"Gengar": {
+"kg": 40.5,
+"m": 1.5
+},
+"Onix": {
+"kg": 210,
+"m": 8.8
+},
+"Cubone": {
+"kg": 6.5,
+"m": 0.4
+},
+"Marowak": {
+"kg": 45,
+"m": 1
+},
+"Kangaskhan": {
+"kg": 80,
+"m": 2.2
+},
+"Staryu": {
+"kg": 34.5,
+"m": 0.8
+},
+"Starmie": {
+"kg": 80,
+"m": 1.1
+},
+"Mr. Mime": {
+"kg": 54.5,
+"m": 1.3
+},
+"Scyther": {
+"kg": 56,
+"m": 1.5
+},
+"Pinsir": {
+"kg": 55,
+"m": 1.5
+},
+"Magikarp": {
+"kg": 10,
+"m": 0.9
+},
+"Gyarados": {
+"kg": 235,
+"m": 6.5
+},
+"Eevee": {
+"kg": 6.5,
+"m": 0.3
+},
+"Vaporeon": {
+"kg": 29,
+"m": 1
+},
+"Jolteon": {
+"kg": 24.5,
+"m": 0.8
+},
+"Flareon": {
+"kg": 25,
+"m": 0.9
+},
+"Porygon": {
+"kg": 36.5,
+"m": 0.8
+},
+"Aerodactyl": {
+"kg": 59,
+"m": 1.8
+},
+"Dratini": {
+"kg": 3.3,
+"m": 1.8
+},
+"Dragonair": {
+"kg": 16.5,
+"m": 4
+},
+"Dragonite": {
+"kg": 210,
+"m": 2.2
+},
+"Mewtwo": {
+"kg": 122,
+"m": 2
+},
+"Chikorita": {
+"kg": 6.4,
+"m": 0.9
+},
+"Bayleef": {
+"kg": 15.8,
+"m": 1.2
+},
+"Meganium": {
+"kg": 100.5,
+"m": 1.8
+},
+"Totodile": {
+"kg": 9.5,
+"m": 0.6
+},
+"Croconaw": {
+"kg": 25,
+"m": 1.1
+},
+"Feraligatr": {
+"kg": 88.8,
+"m": 2.3
+},
+"Spinarak": {
+"kg": 8.5,
+"m": 0.5
+},
+"Ariados": {
+"kg": 33.5,
+"m": 1.1
+},
+"Crobat": {
+"kg": 75,
+"m": 1.8
+},
+"Pichu": {
+"kg": 2,
+"m": 0.3
+},
+"Cleffa": {
+"kg": 3,
+"m": 0.3
+},
+"Igglybuff": {
+"kg": 1,
+"m": 0.3
+},
+"Mareep": {
+"kg": 7.8,
+"m": 0.6
+},
+"Flaaffy": {
+"kg": 13.3,
+"m": 0.8
+},
+"Ampharos": {
+"kg": 61.5,
+"m": 1.4
+},
+"Espeon": {
+"kg": 26.5,
+"m": 0.9
+},
+"Umbreon": {
+"kg": 27,
+"m": 1
+},
+"Slowking": {
+"kg": 79.5,
+"m": 2
+},
+"Steelix": {
+"kg": 400,
+"m": 9.2
+},
+"Qwilfish": {
+"kg": 3.9,
+"m": 0.5
+},
+"Scizor": {
+"kg": 118,
+"m": 1.8
+},
+"Heracross": {
+"kg": 54,
+"m": 1.5
+},
+"Delibird": {
+"kg": 16,
+"m": 0.9
+},
+"Skarmory": {
+"kg": 50.5,
+"m": 1.7
+},
+"Houndour": {
+"kg": 10.8,
+"m": 0.6
+},
+"Houndoom": {
+"kg": 35,
+"m": 1.4
+},
+"Porygon2": {
+"kg": 32.5,
+"m": 0.6
+},
+"Larvitar": {
+"kg": 72,
+"m": 0.6
+},
+"Pupitar": {
+"kg": 152,
+"m": 1.2
+},
+"Tyranitar": {
+"kg": 202,
+"m": 2
+},
+"Treecko": {
+"kg": 5,
+"m": 0.5
+},
+"Grovyle": {
+"kg": 21.6,
+"m": 0.9
+},
+"Sceptile": {
+"kg": 52.2,
+"m": 1.7
+},
+"Torchic": {
+"kg": 2.5,
+"m": 0.4
+},
+"Combusken": {
+"kg": 19.5,
+"m": 0.9
+},
+"Blaziken": {
+"kg": 52,
+"m": 1.9
+},
+"Mudkip": {
+"kg": 7.6,
+"m": 0.4
+},
+"Marshtomp": {
+"kg": 28,
+"m": 0.7
+},
+"Swampert": {
+"kg": 81.9,
+"m": 1.5
+},
+"Ralts": {
+"kg": 6.6,
+"m": 0.4
+},
+"Kirlia": {
+"kg": 20.2,
+"m": 0.8
+},
+"Gardevoir": {
+"kg": 48.4,
+"m": 1.6
+},
+"Sableye": {
+"kg": 11,
+"m": 0.5
+},
+"Mawile": {
+"kg": 11.5,
+"m": 0.6
+},
+"Aron": {
+"kg": 60,
+"m": 0.4
+},
+"Lairon": {
+"kg": 120,
+"m": 0.9
+},
+"Aggron": {
+"kg": 360,
+"m": 2.1
+},
+"Meditite": {
+"kg": 11.2,
+"m": 0.6
+},
+"Medicham": {
+"kg": 31.5,
+"m": 1.3
+},
+"Electrike": {
+"kg": 15.2,
+"m": 0.6
+},
+"Manectric": {
+"kg": 40.2,
+"m": 1.5
+},
+"Roselia": {
+"kg": 2,
+"m": 0.3
+},
+"Gulpin": {
+"kg": 10.3,
+"m": 0.4
+},
+"Swalot": {
+"kg": 80,
+"m": 1.7
+},
+"Carvanha": {
+"kg": 20.8,
+"m": 0.8
+},
+"Sharpedo": {
+"kg": 88.8,
+"m": 1.8
+},
+"Numel": {
+"kg": 24,
+"m": 0.7
+},
+"Camerupt": {
+"kg": 220,
+"m": 1.9
+},
+"Spoink": {
+"kg": 30.6,
+"m": 0.7
+},
+"Grumpig": {
+"kg": 71.5,
+"m": 0.9
+},
+"Swablu": {
+"kg": 1.2,
+"m": 0.4
+},
+"Altaria": {
+"kg": 20.6,
+"m": 1.1
+},
+"Zangoose": {
+"kg": 40.3,
+"m": 1.3
+},
+"Seviper": {
+"kg": 52.5,
+"m": 2.7
+},
+"Feebas": {
+"kg": 7.4,
+"m": 0.6
+},
+"Milotic": {
+"kg": 162,
+"m": 6.2
+},
+"Kecleon": {
+"kg": 22,
+"m": 1
+},
+"Shuppet": {
+"kg": 2.3,
+"m": 0.6
+},
+"Banette": {
+"kg": 12.5,
+"m": 1.1
+},
+"Chimecho": {
+"kg": 1,
+"m": 0.6
+},
+"Absol": {
+"kg": 47,
+"m": 1.2
+},
+"Snorunt": {
+"kg": 16.8,
+"m": 0.7
+},
+"Glalie": {
+"kg": 256.5,
+"m": 1.5
+},
+"Bagon": {
+"kg": 42.1,
+"m": 0.6
+},
+"Shelgon": {
+"kg": 110.5,
+"m": 1.1
+},
+"Salamence": {
+"kg": 102.6,
+"m": 1.5
+},
+"Beldum": {
+"kg": 95.2,
+"m": 0.6
+},
+"Metang": {
+"kg": 202.5,
+"m": 1.2
+},
+"Metagross": {
+"kg": 550,
+"m": 1.6
+},
+"Latias": {
+"kg": 40,
+"m": 1.4
+},
+"Latios": {
+"kg": 60,
+"m": 2
+},
+"Kyogre": {
+"kg": 352,
+"m": 4.5
+},
+"Groudon": {
+"kg": 950,
+"m": 3.5
+},
+"Rayquaza": {
+"kg": 206.5,
+"m": 7
+},
+"Starly": {
+"kg": 2,
+"m": 0.3
+},
+"Staravia": {
+"kg": 15.5,
+"m": 0.6
+},
+"Staraptor": {
+"kg": 24.9,
+"m": 1.2
+},
+"Budew": {
+"kg": 1.2,
+"m": 0.2
+},
+"Roserade": {
+"kg": 14.5,
+"m": 0.9
+},
+"Buneary": {
+"kg": 5.5,
+"m": 0.4
+},
+"Lopunny": {
+"kg": 33.3,
+"m": 1.2
+},
+"Chingling": {
+"kg": 0.6,
+"m": 0.2
+},
+"Mime Jr.": {
+"kg": 13,
+"m": 0.6
+},
+"Gible": {
+"kg": 20.5,
+"m": 0.7
+},
+"Gabite": {
+"kg": 56,
+"m": 1.4
+},
+"Garchomp": {
+"kg": 95,
+"m": 1.9
+},
+"Riolu": {
+"kg": 20.2,
+"m": 0.7
+},
+"Lucario": {
+"kg": 54,
+"m": 1.2
+},
+"Hippopotas": {
+"kg": 49.5,
+"m": 0.8
+},
+"Hippowdon": {
+"kg": 300,
+"m": 2
+},
+"Snover": {
+"kg": 50.5,
+"m": 1
+},
+"Abomasnow": {
+"kg": 135.5,
+"m": 2.2
+},
+"Leafeon": {
+"kg": 25.5,
+"m": 1
+},
+"Glaceon": {
+"kg": 25.9,
+"m": 0.8
+},
+"Porygon-Z": {
+"kg": 34,
+"m": 0.9
+},
+"Gallade": {
+"kg": 52,
+"m": 1.6
+},
+"Froslass": {
+"kg": 26.6,
+"m": 1.3
+},
+"Rotom": {
+"kg": 0.3,
+"m": 0.3
+},
+"Heatran": {
+"kg": 430,
+"m": 1.7
+},
+"Darkrai": {
+"kg": 50.5,
+"m": 1.5
+},
+"Tepig": {
+"kg": 9.9,
+"m": 0.5
+},
+"Pignite": {
+"kg": 55.5,
+"m": 1
+},
+"Emboar": {
+"kg": 150,
+"m": 1.6
+},
+"Patrat": {
+"kg": 11.6,
+"m": 0.5
+},
+"Watchog": {
+"kg": 27,
+"m": 1.1
+},
+"Purrloin": {
+"kg": 10.1,
+"m": 0.4
+},
+"Liepard": {
+"kg": 37.5,
+"m": 1.1
+},
+"Pansage": {
+"kg": 10.5,
+"m": 0.6
+},
+"Simisage": {
+"kg": 30.5,
+"m": 1.1
+},
+"Pansear": {
+"kg": 11,
+"m": 0.6
+},
+"Simisear": {
+"kg": 28,
+"m": 1
+},
+"Panpour": {
+"kg": 13.5,
+"m": 0.6
+},
+"Simipour": {
+"kg": 29,
+"m": 1
+},
+"Munna": {
+"kg": 23.3,
+"m": 0.6
+},
+"Musharna": {
+"kg": 60.5,
+"m": 1.1
+},
+"Drilbur": {
+"kg": 8.5,
+"m": 0.3
+},
+"Excadrill": {
+"kg": 40.4,
+"m": 0.7
+},
+"Audino": {
+"kg": 31,
+"m": 1.1
+},
+"Throh": {
+"kg": 55.5,
+"m": 1.3
+},
+"Sawk": {
+"kg": 51,
+"m": 1.4
+},
+"Venipede": {
+"kg": 5.3,
+"m": 0.4
+},
+"Whirlipede": {
+"kg": 58.5,
+"m": 1.2
+},
+"Scolipede": {
+"kg": 200.5,
+"m": 2.5
+},
+"Sandile": {
+"kg": 15.2,
+"m": 0.7
+},
+"Krokorok": {
+"kg": 33.4,
+"m": 1
+},
+"Krookodile": {
+"kg": 96.3,
+"m": 1.5
+},
+"Scraggy": {
+"kg": 11.8,
+"m": 0.6
+},
+"Scrafty": {
+"kg": 30,
+"m": 1.1
+},
+"Yamask": {
+"kg": 1.5,
+"m": 0.5
+},
+"Cofagrigus": {
+"kg": 76.5,
+"m": 1.7
+},
+"Trubbish": {
+"kg": 31,
+"m": 0.6
+},
+"Garbodor": {
+"kg": 107.3,
+"m": 1.9
+},
+"Vanillite": {
+"kg": 5.7,
+"m": 0.4
+},
+"Vanillish": {
+"kg": 41,
+"m": 1.1
+},
+"Vanilluxe": {
+"kg": 57.5,
+"m": 1.3
+},
+"Emolga": {
+"kg": 5,
+"m": 0.4
+},
+"Foongus": {
+"kg": 1,
+"m": 0.2
+},
+"Amoonguss": {
+"kg": 10.5,
+"m": 0.6
+},
+"Tynamo": {
+"kg": 0.3,
+"m": 0.2
+},
+"Eelektrik": {
+"kg": 22,
+"m": 1.2
+},
+"Eelektross": {
+"kg": 80.5,
+"m": 2.1
+},
+"Litwick": {
+"kg": 3.1,
+"m": 0.3
+},
+"Lampent": {
+"kg": 13,
+"m": 0.6
+},
+"Chandelure": {
+"kg": 34.3,
+"m": 1
+},
+"Cryogonal": {
+"kg": 148,
+"m": 1.1
+},
+"Stunfisk": {
+"kg": 11,
+"m": 0.7
+},
+"Golett": {
+"kg": 92,
+"m": 1
+},
+"Golurk": {
+"kg": 330,
+"m": 2.8
+},
+"Cobalion": {
+"kg": 250,
+"m": 2.1
+},
+"Terrakion": {
+"kg": 260,
+"m": 1.9
+},
+"Virizion": {
+"kg": 200,
+"m": 2
+},
+"Keldeo": {
+"kg": 48.5,
+"m": 1.4
+},
+"Meloetta": {
+"kg": 6.5,
+"m": 0.6
+},
+"Genesect": {
+"kg": 82.5,
+"m": 1.5
+},
+"Furfrou": {
+"kg": 28,
+"m": 1.2
+},
+"Phantump": {
+"kg": 7,
+"m": 0.4
+},
+"Trevenant": {
+"kg": 71,
+"m": 1.5
+},
+"Litleo": {
+"kg": 13.5,
+"m": 0.6
+},
+"Pyroar": {
+"kg": 81.5,
+"m": 1.5
+},
+"Scatterbug": {
+"kg": 2.5,
+"m": 0.3
+},
+"Spewpa": {
+"kg": 8.4,
+"m": 0.3
+},
+"Vivillon": {
+"kg": 17,
+"m": 1.2
+},
+"Skrelp": {
+"kg": 7.3,
+"m": 0.5
+},
+"Dragalge": {
+"kg": 81.5,
+"m": 1.8
+},
+"Bunnelby": {
+"kg": 5,
+"m": 0.4
+},
+"Diggersby": {
+"kg": 42.4,
+"m": 1
+},
+"Flabébé": {
+"kg": 0.1,
+"m": 0.1
+},
+"Floette": {
+"kg": 0.9,
+"m": 0.2
+},
+"Florges": {
+"kg": 10,
+"m": 1.1
+},
+"Noibat": {
+"kg": 8,
+"m": 0.5
+},
+"Fennekin": {
+"kg": 9.4,
+"m": 0.4
+},
+"Braixen": {
+"kg": 14.5,
+"m": 1
+},
+"Delphox": {
+"kg": 39,
+"m": 1.5
+},
+"Chespin": {
+"kg": 9,
+"m": 0.4
+},
+"Quilladin": {
+"kg": 29,
+"m": 0.7
+},
+"Chesnaught": {
+"kg": 90,
+"m": 1.6
+},
+"Froakie": {
+"kg": 7,
+"m": 0.3
+},
+"Frogadier": {
+"kg": 10.9,
+"m": 0.6
+},
+"Greninja": {
+"kg": 40,
+"m": 1.5
+},
+"Inkay": {
+"kg": 3.5,
+"m": 0.4
+},
+"Malamar": {
+"kg": 47,
+"m": 1.5
+},
+"Skiddo": {
+"kg": 31,
+"m": 0.9
+},
+"Gogoat": {
+"kg": 91,
+"m": 1.7
+},
+"Pangoro": {
+"kg": 136,
+"m": 2.1
+},
+"Helioptile": {
+"kg": 6,
+"m": 0.5
+},
+"Heliolisk": {
+"kg": 21,
+"m": 1
+},
+"Espurr": {
+"kg": 3.5,
+"m": 0.3
+},
+"Meowstic": {
+"kg": 8.5,
+"m": 0.6
+},
+"Pumpkaboo": {
+"kg": 5,
+"m": 0.4
+},
+"Gourgeist": {
+"kg": 12.5,
+"m": 0.9
+},
+"Tyrunt": {
+"kg": 26,
+"m": 0.8
+},
+"Tyrantrum": {
+"kg": 270,
+"m": 2.5
+},
+"Amaura": {
+"kg": 25.2,
+"m": 1.3
+},
+"Aurorus": {
+"kg": 225,
+"m": 2.7
+},
+"Dedenne": {
+"kg": 2.2,
+"m": 0.2
+},
+"Swirlix": {
+"kg": 3.5,
+"m": 0.4
+},
+"Slurpuff": {
+"kg": 5,
+"m": 0.8
+},
+"Honedge": {
+"kg": 2,
+"m": 0.8
+},
+"Doublade": {
+"kg": 4.5,
+"m": 0.8
+},
+"Aegislash": {
+"kg": 53,
+"m": 1.7
+},
+"Binacle": {
+"kg": 31,
+"m": 0.5
+},
+"Barbaracle": {
+"kg": 96,
+"m": 1.3
+},
+"Bergmite": {
+"kg": 99.5,
+"m": 1
+},
+"Avalugg": {
+"kg": 505,
+"m": 2
+},
+"Pancham": {
+"kg": 8,
+"m": 0.6
+},
+"Fletchling": {
+"kg": 1.7,
+"m": 0.3
+},
+"Fletchinder": {
+"kg": 16,
+"m": 0.7
+},
+"Talonflame": {
+"kg": 24.5,
+"m": 1.2
+},
+"Clauncher": {
+"kg": 8.3,
+"m": 0.5
+},
+"Clawitzer": {
+"kg": 35.3,
+"m": 1.3
+},
+"Spritzee": {
+"kg": 0.5,
+"m": 0.2
+},
+"Aromatisse": {
+"kg": 15.5,
+"m": 0.8
+},
+"Klefki": {
+"kg": 3,
+"m": 0.2
+},
+"Hawlucha": {
+"kg": 21.5,
+"m": 0.8
+},
+"Noivern": {
+"kg": 85,
+"m": 1.5
+},
+"Goomy": {
+"kg": 2.8,
+"m": 0.3
+},
+"Sliggoo": {
+"kg": 17.5,
+"m": 0.8
+},
+"Goodra": {
+"kg": 150.5,
+"m": 2
+},
+"Carbink": {
+"kg": 5.7,
+"m": 0.3
+},
+"Sylveon": {
+"kg": 23.5,
+"m": 1
+},
+"Xerneas": {
+"kg": 215,
+"m": 3
+},
+"Yveltal": {
+"kg": 203,
+"m": 5.8
+},
+"Zygarde 10%": {
+"kg": 33.5,
+"m": 1.2
+},
+"Zygarde 50%": {
+"kg": 305,
+"m": 5
+},
+"Zygarde Complete": {
+"kg": 610,
+"m": 4.5
+},
+"Diancie": {
+"kg": 8.8,
+"m": 0.7
+},
+"Volcanion": {
+"kg": 195,
+"m": 1.7
+},
+"Hoopa Confined": {
+"kg": 9,
+"m": 0.5
+},
+"Hoopa Unbound": {
+"kg": 490,
+"m": 6.5
+},
+"Mimikyu": {
+"kg": 0.7,
+"m": 0.2
+},
+"Sandygast": {
+"kg": 70,
+"m": 0.5
+},
+"Palossand": {
+"kg": 250,
+"m": 1.3
+},
+"Drampa": {
+"kg": 185,
+"m": 3
+},
+"Crabrawler": {
+"kg": 7,
+"m": 0.6
+},
+"Crabominable": {
+"kg": 180,
+"m": 1.7
+},
+"Wimpod": {
+"kg": 12,
+"m": 0.5
+},
+"Golisopod": {
+"kg": 108,
+"m": 2
+},
+"Magearna": {
+"kg": 80.5,
+"m": 1
+},
+"Marshadow": {
+"kg": 22.2,
+"m": 0.7
+},
+"Zeraora": {
+"kg": 44.5,
+"m": 1.5
+},
+"Meltan": {
+"kg": 8,
+"m": 0.2
+},
+"Melmetal": {
+"kg": 800,
+"m": 2.5
+},
+"Nickit": {
+"kg": 8.9,
+"m": 0.6
+},
+"Thievul": {
+"kg": 19.9,
+"m": 1.2
+},
+"Rookidee": {
+"kg": 1.8,
+"m": 0.2
+},
+"Corvisquire": {
+"kg": 16,
+"m": 0.8
+},
+"Corviknight": {
+"kg": 75,
+"m": 2.2
+},
+"Toxel": {
+"kg": 11,
+"m": 0.4
+},
+"Toxtricity": {
+"kg": 40,
+"m": 1.6
+},
+"Falinks": {
+"kg": 62,
+"m": 3
+},
+"Morpeko": {
+"kg": 3,
+"m": 0.3
+},
+"Indeedee": {
+"kg": 28,
+"m": 0.9
+},
+"Perrserker": {
+"kg": 28,
+"m": 0.8
+},
+"Clobbopus": {
+"kg": 4,
+"m": 0.6
+},
+"Grapploct": {
+"kg": 39,
+"m": 1.6
+},
+"Runerigus": {
+"kg": 66.6,
+"m": 1.6
+},
+"Mr. Rime": {
+"kg": 58.2,
+"m": 1.5
+},
+"Sirfetch’d": {
+"kg": 117,
+"m": 0.8
+},
+"Charcadet": {
+"kg": 10.5,
+"m": 0.6
+},
+"Armarouge": {
+"kg": 85,
+"m": 1.5
+},
+"Ceruledge": {
+"kg": 62,
+"m": 1.6
+},
+"Mega Venusaur": {
+"kg": 155.5,
+"m": 2.4
+},
+"Mega Charizard X": {
+"kg": 110.5,
+"m": 1.7
+},
+"Mega Charizard Y": {
+"kg": 100.5,
+"m": 1.7
+},
+"Mega Blastoise": {
+"kg": 101.1,
+"m": 1.6
+},
+"Mega Beedrill": {
+"kg": 40.5,
+"m": 1.4
+},
+"Mega Pidgeot": {
+"kg": 50.5,
+"m": 2.2
+},
+"Mega Raichu X": {
+"kg": 38,
+"m": 1.2
+},
+"Mega Raichu Y": {
+"kg": 26,
+"m": 1
+},
+"Mega Clefable": {
+"kg": 42.3,
+"m": 1.7
+},
+"Galarian Meowth": {
+"kg": 7.5,
+"m": 0.4
+},
+"Mega Alakazam": {
+"kg": 48,
+"m": 1.2
+},
+"Mega Victreebel": {
+"kg": 125.5,
+"m": 4.5
+},
+"Galarian Slowpoke": {
+"kg": 36,
+"m": 1.2
+},
+"Galarian Slowbro": {
+"kg": 70.5,
+"m": 1.6
+},
+"Mega Slowbro": {
+"kg": 120,
+"m": 2
+},
+"Galarian Farfetch’d": {
+"kg": 42,
+"m": 0.8
+},
+"Mega Gengar": {
+"kg": 40.5,
+"m": 1.4
+},
+"Mega Kangaskhan": {
+"kg": 100,
+"m": 2.2
+},
+"Mega Starmie": {
+"kg": 80,
+"m": 2.3
+},
+"Galarian Mr. Mime": {
+"kg": 56.8,
+"m": 1.4
+},
+"Mega Pinsir": {
+"kg": 59,
+"m": 1.7
+},
+"Mega Gyarados": {
+"kg": 305,
+"m": 6.5
+},
+"Mega Aerodactyl": {
+"kg": 79,
+"m": 2.1
+},
+"Mega Dragonite": {
+"kg": 290,
+"m": 2.2
+},
+"Mega Mewtwo X": {
+"kg": 127,
+"m": 2.3
+},
+"Mega Mewtwo Y": {
+"kg": 33,
+"m": 1.5
+},
+"Mega Meganium": {
+"kg": 201,
+"m": 2.4
+},
+"Mega Feraligatr": {
+"kg": 108.8,
+"m": 2.3
+},
+"Mega Ampharos": {
+"kg": 61.5,
+"m": 1.4
+},
+"Galarian Slowking": {
+"kg": 79.5,
+"m": 1.8
+},
+"Mega Steelix": {
+"kg": 740,
+"m": 10.5
+},
+"Hisuian Qwilfish": {
+"kg": 3.9,
+"m": 0.5
+},
+"Mega Scizor": {
+"kg": 125,
+"m": 2
+},
+"Mega Heracross": {
+"kg": 62.5,
+"m": 1.7
+},
+"Mega Skarmory": {
+"kg": 40.4,
+"m": 1.7
+},
+"Mega Houndoom": {
+"kg": 49.5,
+"m": 1.9
+},
+"Mega Tyranitar": {
+"kg": 255,
+"m": 2.5
+},
+"Mega Sceptile": {
+"kg": 55.2,
+"m": 1.9
+},
+"Mega Blaziken": {
+"kg": 52,
+"m": 1.9
+},
+"Mega Swampert": {
+"kg": 102,
+"m": 1.9
+},
+"Mega Gardevoir": {
+"kg": 48.4,
+"m": 1.6
+},
+"Mega Sableye": {
+"kg": 161,
+"m": 0.5
+},
+"Mega Mawile": {
+"kg": 23.5,
+"m": 1
+},
+"Mega Aggron": {
+"kg": 395,
+"m": 2.2
+},
+"Mega Medicham": {
+"kg": 31.5,
+"m": 1.3
+},
+"Mega Manectric": {
+"kg": 44,
+"m": 1.8
+},
+"Mega Sharpedo": {
+"kg": 130.3,
+"m": 2.5
+},
+"Mega Camerupt": {
+"kg": 320.5,
+"m": 2.5
+},
+"Mega Altaria": {
+"kg": 20.6,
+"m": 1.5
+},
+"Mega Banette": {
+"kg": 13,
+"m": 1.2
+},
+"Mega Chimecho": {
+"kg": 8,
+"m": 1.2
+},
+"Mega Absol": {
+"kg": 49,
+"m": 1.2
+},
+"Mega Absol Z": {
+"kg": 49,
+"m": 1.2
+},
+"Mega Glalie": {
+"kg": 350.2,
+"m": 2.1
+},
+"Mega Salamence": {
+"kg": 112.6,
+"m": 1.8
+},
+"Mega Metagross": {
+"kg": 942.9,
+"m": 2.5
+},
+"Mega Latias": {
+"kg": 52,
+"m": 1.8
+},
+"Mega Latios": {
+"kg": 70,
+"m": 2.3
+},
+"Primal Kyogre": {
+"kg": 430,
+"m": 9.8
+},
+"Primal Groudon": {
+"kg": 999.7,
+"m": 5
+},
+"Mega Rayquaza": {
+"kg": 392,
+"m": 10.8
+},
+"Mega Staraptor": {
+"kg": 50,
+"m": 1.9
+},
+"Mega Lopunny": {
+"kg": 28.3,
+"m": 1.3
+},
+"Mega Garchomp": {
+"kg": 95,
+"m": 1.9
+},
+"Mega Garchomp Z": {
+"kg": 99,
+"m": 1.9
+},
+"Mega Lucario": {
+"kg": 57.5,
+"m": 1.3
+},
+"Mega Lucario Z": {
+"kg": 49.4,
+"m": 1.3
+},
+"Mega Abomasnow": {
+"kg": 185,
+"m": 2.7
+},
+"Mega Gallade": {
+"kg": 56.4,
+"m": 1.6
+},
+"Mega Froslass": {
+"kg": 29.6,
+"m": 2.6
+},
+"Mega Heatran": {
+"kg": 570,
+"m": 2.8
+},
+"Mega Darkrai": {
+"kg": 240,
+"m": 3
+},
+"Mega Emboar": {
+"kg": 180.3,
+"m": 1.8
+},
+"Mega Excadrill": {
+"kg": 60,
+"m": 0.9
+},
+"Mega Audino": {
+"kg": 32,
+"m": 1.5
+},
+"Mega Scolipede": {
+"kg": 230.5,
+"m": 3.2
+},
+"Mega Scrafty": {
+"kg": 31,
+"m": 1.1
+},
+"Galarian Yamask": {
+"kg": 1.5,
+"m": 0.5
+},
+"Mega Eelektross": {
+"kg": 180,
+"m": 3
+},
+"Mega Chandelure": {
+"kg": 69.6,
+"m": 2.5
+},
+"Galarian Stunfisk": {
+"kg": 20.5,
+"m": 0.7
+},
+"Mega Golurk": {
+"kg": 330,
+"m": 4
+},
+"Mega Pyroar": {
+"kg": 93.3,
+"m": 1.5
+},
+"Mega Dragalge": {
+"kg": 100.3,
+"m": 2.1
+},
+"Mega Floette": {
+"kg": 100.8,
+"m": 0.2
+},
+"Mega Delphox": {
+"kg": 39,
+"m": 1.5
+},
+"Mega Chesnaught": {
+"kg": 90,
+"m": 1.6
+},
+"Mega Greninja": {
+"kg": 40,
+"m": 1.5
+},
+"Mega Malamar": {
+"kg": 69.8,
+"m": 2.9
+},
+"Mega Meowstic": {
+"kg": 10.1,
+"m": 0.8
+},
+"Mega Barbaracle": {
+"kg": 100,
+"m": 2.2
+},
+"Hisuian Avalugg": {
+"kg": 262.4,
+"m": 1.4
+},
+"Mega Hawlucha": {
+"kg": 25,
+"m": 1
+},
+"Hisuian Sliggoo": {
+"kg": 68.5,
+"m": 0.7
+},
+"Hisuian Goodra": {
+"kg": 334.1,
+"m": 1.7
+},
+"Mega Zygarde": {
+"kg": 610,
+"m": 7.7
+},
+"Mega Diancie": {
+"kg": 27.8,
+"m": 1.1
+},
+"Mega Drampa": {
+"kg": 240.5,
+"m": 3
+},
+"Mega Crabominable": {
+"kg": 252.8,
+"m": 2.6
+},
+"Mega Golisopod": {
+"kg": 148,
+"m": 2.3
+},
+"Mega Magearna": {
+"kg": 248.1,
+"m": 1.3
+},
+"Mega Magearna (Original Color)": {
+"kg": 248.1,
+"m": 1.3
+},
+"Mega Zeraora": {
+"kg": 44.5,
+"m": 1.5
+},
+"Mega Falinks": {
+"kg": 99,
+"m": 1.6
+}
+}
+}

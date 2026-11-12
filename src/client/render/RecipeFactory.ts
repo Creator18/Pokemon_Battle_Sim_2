@@ -3388,6 +3388,12 @@ export class RecipeFactory implements UnitFactory {
 
   /** How tall it stands, as shown (world units). */
   /** Its clips' player (to play its idle, run, jump… directly: the platformer), or null for a stand-in model. */
+  /** Its model's rest-pose box (m³, real size: width × height × depth), or null for one not built from a model. */
+  restVolume(node: TransformNode): number | null {
+    const b = this.units.get(node)?.model.restBounds;
+    return b ? (b.max[0] - b.min[0]) * (b.max[1] - b.min[1]) * (b.max[2] - b.min[2]) : null;
+  }
+
   playerOf(node: TransformNode): { has(action: string): boolean; play(action: string, opts?: { loop?: boolean; fade?: number; speed?: number }): Promise<boolean> } | null {
     return this.units.get(node)?.model.player ?? null;
   }

@@ -9,6 +9,12 @@
  * faster than FALL_MAX. Its box against the level is BODY_W × its height wide; against other fighters it is its real
  * body (its skin's reach ahead and behind, wings and tail and all): two bodies never overlap.
  *
+ * A second jump in the air: a flier takes off into flight; else one light enough (canDoubleJump: its weight and its
+ * model's size) jumps again (AIR_JUMP), once till it lands; else nothing. Flying, it goes no higher than FLY_CAP above
+ * its nearest foe. Struck in flight, it may be knocked out of the sky — likelier the nearer the ground (FALL_LOW …
+ * FALL_HIGH). Down out of the sky, knocked or by choice, it can't take off again for FLY_RELOCK s after landing —
+ * unless a mobility move aimed up carries it there.
+ *
  * Its aim (Intent.aim: up +1, level 0, down −1 — W / S for the player): it looks that way (its neck and head turned
  * AIM_ANGLE up or down, RecipeFactory.setGaze), and its moves that need a way go that way.
  * In the air (jumping or flying) its clips are its air clips, its moves and flinches too (RecipeFactory.setAirborne) —
@@ -60,6 +66,7 @@ import { beamFor as beamSpecFor } from '../vfx/beam/beamMoves.ts';
 import { lightningFor } from '../vfx/lightningMoves.ts';
 import type { BeamSpec } from '../vfx/beam/beamMoves.ts';
 import { getMove, getTypeEffectiveness, MoveCategory } from '../../shared/index.ts';
+import { canDoubleJump } from '../../shared/data/weights.ts';
 
 /** A platform: its left edge, its top, its width, its depth below its top (world units); `hidden`: solid but not drawn. */
 export interface Platform { x: number; top: number; w: number; h: number; hidden?: boolean }
@@ -118,6 +125,14 @@ const JUMP_CUT = 0.45, COYOTE = 0.1, BUFFER = 0.12;
 export const BODY_W = 0.45;
 /** Flying: its speed across, how fast it rises and sinks, and how quickly it gets to them. */
 const FLY_SPEED = 9, FLY_RISE = 7, FLY_SINK = 8, FLY_GLIDE = 2.6, FLY_ACCEL = 30;
+/** A double jump (the light ones, canDoubleJump): its launch (× JUMP_SPEED). */
+const AIR_JUMP = 0.85;
+/** Flying: how far above its nearest foe's feet it can go (world units) — no flying off out of reach for good. */
+export const FLY_CAP = 6;
+/** Grounded (out of the sky — knocked down, or landed): how long before it can take off again (s), but for a mobility move aimed up. */
+export const FLY_RELOCK = 3;
+/** Struck in flight: its chance to be knocked out of the sky — FALL_LOW right by the ground, down to FALL_HIGH at FLY_CAP up and above. */
+const FALL_LOW = 0.9, FALL_HIGH = 0.2;
 /** Its aim up or down (radians from level, at full aim). */
 export const AIM_ANGLE = 0.6;
 /** A dash: how fast, how long (s), how long before the next; its afterimages — how often (s), how strong. */
@@ -304,7 +319,13 @@ export class Fighter {
   time = 0;
   private sinceGround = 0; private sinceJumpPress = Infinity; private jumpHeld = false;
   private clip = ''; private landing = 0;
-  private readonly canFly: boolean;
+  readonly canFly: boolean;
+  /** Light enough to double jump (a flier's second jump takes it into flight instead). */
+  readonly doubleJumps: boolean;
+  /** Its air jump used (till it lands). */
+  private airJumped = false;
+  /** Can take off again from this (its own clock): out of the sky, FLY_RELOCK s after it lands (Infinity till it has). */
+  flyReadyAt = 0;
   private dashT = 0; private dashCool = 0; private ghostT = 0; private airDash = true; private quickCool = 0;
   private reach: Reach | null = null; private measured = 0;
   /** Its beam out now (charging or pouring), if any. */
@@ -352,6 +373,8 @@ export class Fighter {
     this.H = factory.heightOf(node);
     this.W = this.H * BODY_W;
     this.canFly = !!factory.playerOf(node)?.has('airIdle');
+    // (Its species by its name — less its label: "Pikachu (you)", "Charizard (boss)".)
+    this.doubleJumps = canDoubleJump(name.replace(/ \((you|boss)\)$/, ''), factory.restVolume(node) ?? Infinity);
   }
 
   get x(): number { return this.node.position.x; }
@@ -379,7 +402,7 @@ export class Fighter {
   place(x: number, y: number, dir: number): void {
     this.node.position.set(x, y, 0);
     // (Set down aloft: not on the ground — its first frame there falls or flies, never stands.)
-    this.vx = 0; this.vy = 0; this.flying = false; this.dashT = 0; this.grounded = y <= 1e-3;
+    this.vx = 0; this.vy = 0; this.flying = false; this.dashT = 0; this.grounded = y <= 1e-3; this.airJumped = false;
     this.face(dir, true);
   }
 
@@ -389,7 +412,7 @@ export class Fighter {
     if (this.down) { this.down = false; this.factory.revive(this.node); }
     this.beam?.play.cancel?.(); this.beam = null;
     this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null;
-    this.counterUntil = -1; this.lagUntil = 0;
+    this.counterUntil = -1; this.lagUntil = 0; this.flyReadyAt = 0;
     this.readyAt.clear(); this.coolLen.clear(); this.heat.clear(); this.run = null; this.agilityUntil = -1;
   }
 
@@ -461,6 +484,31 @@ export class Fighter {
     return base * (this.types.includes(m.moveType) ? 1.5 : 1) * getTypeEffectiveness(m.moveType, on.types);
   }
 
+  /** Can take off now: a flier not out of the sky (or its FLY_RELOCK s since landing over). */
+  get mayFly(): boolean { return this.canFly && this.time >= this.flyReadyAt; }
+
+  /** How high it may fly: FLY_CAP above its nearest foe's feet (none: no cap). */
+  private flyCap(arena: Arena): number {
+    const foe = this.foes(arena).filter((f) => !f.down).sort((a, b) => Math.abs(a.x - this.x) - Math.abs(b.x - this.x))[0];
+    return foe ? foe.y + FLY_CAP : Infinity;
+  }
+
+  /** How far above the ground below it (the highest platform top under it; over a pit, FLY_CAP and more). */
+  private heightOverGround(arena: Arena): number {
+    const below = arena.level.filter((s) => this.x >= s.x && this.x <= s.x + s.w && s.top <= this.y + 1e-3);
+    return below.length ? this.y - Math.max(...below.map((s) => s.top)) : Infinity;
+  }
+
+  /**
+   * Struck in flight: knocked out of the sky by chance — FALL_LOW right by the ground, falling off to FALL_HIGH at
+   * FLY_CAP up and above. Knocked out, it falls, and can't take off again till FLY_RELOCK s after it lands.
+   */
+  private shaken(arena: Arena): void {
+    if (!this.flying || this.grounded) return;
+    const k = Math.min(1, this.heightOverGround(arena) / FLY_CAP);
+    if (Math.random() < FALL_LOW + (FALL_HIGH - FALL_LOW) * k) { this.flying = false; this.flyReadyAt = Infinity; }
+  }
+
   private foes(arena: Arena): Fighter[] { return arena.fighters.filter((f) => f !== this && f.team !== this.team); }
   private others(arena: Arena): Fighter[] { return arena.fighters.filter((f) => f !== this); }
 
@@ -528,14 +576,19 @@ export class Fighter {
       const ease = (v: number, to: number, a: number) => v + Math.max(-a * dt, Math.min(a * dt, to - v));
       this.vx = ease(this.vx, want * FLY_SPEED, AIR_ACCEL);
       this.vy = ease(this.vy, this.jumpHeld ? FLY_RISE : it.sink ? -FLY_SINK : -FLY_GLIDE, FLY_ACCEL);
+      // (No higher than FLY_CAP over its nearest foe: held there — above it, eased back down to it.)
+      const cap = this.flyCap(arena);
+      if (this.y >= cap) this.vy = Math.min(this.vy, (cap - this.y) * 4);
     } else {
       const accel = this.grounded ? RUN_ACCEL : AIR_ACCEL;
       this.vx += Math.max(-accel * dt, Math.min(accel * dt, want * RUN_SPEED - this.vx));
       // (Stepping away from one it can't yet turn its back on: at once at full pace, so it turns as soon as it can.)
       if (want && want !== this.facing) this.vx = want * Math.max(Math.abs(this.vx), RUN_SPEED);
-      // Taking off: jump pressed in the air (past its grace off a ledge), if it can fly.
-      if (this.canFly && !this.grounded && this.sinceGround > COYOTE && this.sinceJumpPress <= dt + 1e-6) {
-        this.flying = true; this.sinceJumpPress = Infinity; this.vy = Math.max(this.vy, 0);
+      // Its second jump, pressed in the air (past its grace off a ledge): a flier takes off — once it may again (out
+      // of the sky, not for FLY_RELOCK s after it lands); else a light one jumps again, once till it lands.
+      if (!this.grounded && this.sinceGround > COYOTE && this.sinceJumpPress <= dt + 1e-6) {
+        if (this.mayFly) { this.flying = true; this.sinceJumpPress = Infinity; this.vy = Math.max(this.vy, 0); }
+        else if (this.doubleJumps && !this.airJumped) { this.airJumped = true; this.vy = JUMP_SPEED * AIR_JUMP; this.sinceJumpPress = Infinity; }
       }
       if (this.sinceJumpPress <= BUFFER && this.sinceGround <= COYOTE) {
         this.vy = JUMP_SPEED; this.grounded = false; this.sinceGround = Infinity; this.sinceJumpPress = Infinity;
@@ -572,7 +625,11 @@ export class Fighter {
     }
     this.unblock(arena);
     if (this.grounded && !wasGrounded) this.landing = 0.14;
-    if (this.grounded) { this.flying = false; this.airDash = true; }
+    if (this.grounded) {
+      // (Down out of the sky — by choice or knocked out of it: not up again for FLY_RELOCK s.)
+      if (this.flying || this.flyReadyAt === Infinity) this.flyReadyAt = this.time + FLY_RELOCK;
+      this.flying = false; this.airDash = true; this.airJumped = false;
+    }
     this.landing = Math.max(0, this.landing - dt);
     p.z = 0;
     // (Aloft, every clip — its moves', its flinches' — its air one.)
@@ -730,6 +787,7 @@ export class Fighter {
     const k = Math.max(0, Math.min(1, (BURST_FAR - d) / (BURST_FAR - BURST_NEAR)));
     if (k <= 0) return false;
     const damage = hurt(BURST_CHIP * k * by.damageTo(move, this));
+    this.shaken(arena);
     this.hp = Math.max(0, this.hp - damage);
     arena.onHit?.(by, this, move, damage);
     if (this.hp <= 0) {
@@ -818,7 +876,7 @@ export class Fighter {
       onArrive: () => { this.face(-side, true); strike(); },
     }).then(() => {
       this.grounded = this.y <= 1e-3;
-      if (!this.grounded) this.flying = this.canFly || this.flying;
+      if (!this.grounded) this.flying = this.flying || this.mayFly;
       this.quick = false; this.quickCool = TELEPORT_COOL;
     });
   }
@@ -1050,6 +1108,7 @@ export class Fighter {
     const k = this.startRun('Quick Attack');
     void this.factory.playQuickStep(this.node, at, land, 'attack', 'Normal', !!struck).then(() => {
       if (struck && !struck.down) struck.takeHit(this, 'Quick Attack', () => this.factory.playHitReact(struck.node), arena);
+      if (this.canFly && this.aim > 0 && this.y > 1e-3) this.flying = true;
       this.quick = false; this.quickCool = QUICK_COOL; this.using = ''; this.finishRun(k);
       setTimeout(() => { if (!this.firing && !this.quick) this.clip = ''; }, 350);
     });
@@ -1123,7 +1182,7 @@ export class Fighter {
       this.face(at.dir, true);
       this.grounded = this.y <= 1e-3;
       // (Aloft by its foe's side: held there for the blow, as if flying.)
-      if (!this.grounded) this.flying = this.canFly || this.flying;
+      if (!this.grounded) this.flying = this.flying || this.mayFly;
       this.quick = false; this.quickCool = TELEPORT_COOL;
       if (!midStrike) { this.clip = ''; strike(); }
     });
@@ -1204,6 +1263,8 @@ export class Fighter {
     void this.factory.playTeleport(this.node, to, { look, element, face: faceThere > 0 ? Math.PI / 2 : -Math.PI / 2, backward: o.backward }).then(() => {
       this.face(faceThere, true);
       this.grounded = this.y <= 1e-3;
+      // (Aimed up, a flier is carried into the sky — even out of it for now: the way up past its wait.)
+      if (!this.grounded && this.canFly && this.aim > 0) this.flying = true;
       this.quick = false; this.quickCool = o.cool ?? TELEPORT_COOL; this.using = ''; this.finishRun(k);
       // (Its resting clip, as the teleport eased it in — named so, not played again over it with a snap.)
       this.clip = this.restingClip();
@@ -1234,6 +1295,7 @@ export class Fighter {
     const damage = damageOverride ?? hurt(by.damageTo(move, this));
     if (damage <= 0) { arena.onHit?.(by, this, move, 0); return false; }
     const over = typeof flinch === 'function' ? flinch() : flinch;
+    this.shaken(arena);
     // (Unhurtable till its flinch is over and HIT_GRACE after, blinking; pushed back from its striker.)
     this.graceUntil = Infinity;
     void over.then(() => { this.graceUntil = this.time + HIT_GRACE; if (!this.down) this.factory.blink(this.node, HIT_GRACE); });
