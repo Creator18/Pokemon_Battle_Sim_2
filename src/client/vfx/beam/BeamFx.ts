@@ -148,6 +148,10 @@ const BOLT_THICK: [number, number] = [0.45, 2.4];
 const OVAL_END = 0.7, OVAL_MID = 1.2;
 /** One long egg (eggBeam): its width where it leaves its starting egg and at its broad end (× its radius), and how it swells (1 straight; under 1, fuller sooner). */
 const EGG_BEAM_START = 0.55, EGG_BEAM_END = 2.4, EGG_BEAM_SWELL = 0.8;
+/**
+ * A beam 2 striking nothing (BeamShot.endBall off): no end ball and no column — its starting egg drawn out the whole
+ * length of the beam instead (its tip at the beam's front); its column shrunk away as its end ball is (eased).
+ */
 /** A long egg's end ball: its back reaches back along the beam no more than this much of its length. */
 const TIP_REACH = 0.75;
 /** Beam 2 (the aura beam): its column swells fuller mid-way, OVAL_MID_AURA × (in place of OVAL_MID). */
@@ -167,6 +171,8 @@ const EGG_BACK = 1.15, EGG_FRONT = 2.2, EGG_IN = 0.25;
  * stands apart from the narrower column.
  */
 const AURA_EGG = 1.6;
+/** Beam 2's starting egg drawn out further forward than EGG_FRONT (× its radius): longer. */
+const AURA_EGG_FRONT = 2.9;
 /**
  * Beam 2: its core always shows over its starting egg's outline, from any
  * angle — the egg's own, the column, its end (the tip and its bursts) and its
@@ -295,8 +301,8 @@ const SNAP = 0.07, POP = 0.14; //     s, launch: ball to nothing, then back to f
 export const BLUR_LIFE = 0.35, SLASH_LIFE = 0.38, DUST_LIFE = 2.6;
 /** Beam 2 (the aura beam) letting go: the whole of it — column, egg, outline, rings — swells out to this × as it tears away (a gentle burst), where a beam 1 narrows. */
 const RELEASE_BURST = 1.8;
-/** A beam whose front strikes nothing (BeamShot.endBall): its end ball this much of its size; how quickly it eases between (per s). */
-const END_BALL_MISS = 0.45, END_BALL_EASE = 8;
+/** A beam whose front strikes nothing (BeamShot.endBall): its end ball this much of its size (none: a beam 2's long starting egg instead); how quickly it eases between (per s). */
+const END_BALL_MISS = 0, END_BALL_EASE = 8;
 const RELEASE_SPAN = 0.6; //          share of the release clip spent dissolving
 
 /**
@@ -401,6 +407,8 @@ uniform float len, rad, time, disp, pan, split, grow, spike;
 uniform float ovalMid;
 // (One long egg, narrow at its start and broad and round at its end — eggBeam: 1. Unset: the oval.)
 uniform float eggShape;
+// (A beam 2 striking nothing: 0..1, its column shrunk away to nothing — its long starting egg in its place.)
+uniform float gone;
 uniform vec3 eye;
 varying float vAlong, vTh;
 #ifdef OUTLINE_TWIN
@@ -436,6 +444,7 @@ void main(void) {
     r = rad * mix(${EGG_BEAM_START.toFixed(2)}, ${EGG_BEAM_END.toFixed(2)}, pow(clamp(u, 0.0, 1.0), ${EGG_BEAM_SWELL.toFixed(2)}));
     cap = rad * ${EGG_BEAM_END.toFixed(2)};
   }
+  r *= 1.0 - gone;
   float d = clamp((len - along) / cap, 0.0, 1.0);
   r *= mix(sqrt(max(0.0, 1.0 - (1.0 - d) * (1.0 - d))), 1.0, split);
   r *= 1.0 + disp * (vn(vec3(along / rad * 0.9 - time * pan, cos(th) * 2.0, sin(th) * 2.0 + time * ${RIPPLE.toFixed(2)})) - 0.5);
@@ -595,6 +604,7 @@ attribute vec2 uv;
 uniform mat4 world, viewProjection;
 uniform vec3 origin, aim, side, upv;
 uniform float time, disp, pan, rad, egg, grow, spike;
+uniform float eggFront; // its front drawn out this far (× its radius), unset: EGG_FRONT
 uniform float windup; // winding up (1: its ball before it is let go): spikes straight out, all round, no lean
 uniform vec3 eye;
 // (Its noise bursting forward, toward the target — fwdNoise: where it would bulge back, toward the attacker, it bulges
@@ -621,13 +631,16 @@ void main(void) {
   float onCap = 0.0;
   float nz = disp * (vn(position * 3.0 + vec3(0.0, 0.0, time * pan)) - 0.5);
   vec3 p = position * (1.0 + nz);
+  // (Its shape before it is drawn out into the egg: an outline drawn out far — a beam 2's egg the beam's length — grows
+  // by this, not by its drawn-out self, so its rim stays as thick and its tip stays at the beam's front.)
+  vec3 p0 = p;
   // The egg (its poles lie along the aim, +y forward): the back half full,
   // the front drawn out and narrowing into the column.
   if (egg > 0.0) {
     if (p.y > 0.0) {
       float y = clamp(p.y, 0.0, 1.0);
       p.xz *= mix(1.0, mix(1.0, ${EGG_TIP.toFixed(3)}, pow(y, 1.2)), egg);
-      p.y *= mix(1.0, ${EGG_FRONT.toFixed(2)}, egg);
+      p.y *= mix(1.0, eggFront > 0.0 ? eggFront : ${EGG_FRONT.toFixed(2)}, egg);
     } else {
       p.y *= mix(1.0, ${EGG_BACK.toFixed(2)}, egg);
     }
@@ -642,7 +655,9 @@ void main(void) {
   float sk = spike > 0.0 ? spikeAt(dot(rel, aim), vTh, rad, time) : 0.0;
   // (Winding up: straight out from the ball's centre instead, all round it.)
   if (spike > 0.0 && windup > 0.0) sk = mix(sk, spikeRound(normalize(p), time), windup);
-  vec3 pg = p * (max(grow, 1.0) + spike * sk);
+  float gk = max(grow, 1.0) + spike * sk;
+  float st = clamp((eggFront - 3.2) / 2.0, 0.0, 1.0) * egg;
+  vec3 pg = mix(p * gk, p + p0 * (gk - 1.0), st);
   /*SEAM*/
   // (Its tip leaning forward, the way the beam travels: the higher, the further.)
   // (Not while winding up: straight out, then.)
@@ -1043,7 +1058,7 @@ export class BeamFx {
     warm.setEnabled(false);
     const warmMat = new ShaderMaterial('hemiWarmMat', scene, { vertex: 'beamClash', fragment: 'beamClash' }, {
       attributes: ['position', 'uv'],
-      uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'egg', 'split', 'time', 'disp', 'pan',
+      uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
         'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
     });
     warmMat.backFaceCulling = false;
@@ -1082,7 +1097,7 @@ export class BeamFx {
       const mesh = MeshBuilder.CreateSphere(`hemiBurst${i}`, { diameter: 2, segments: 24 }, scene);
       const mat = new ShaderMaterial(`hemiBurstMat${i}`, scene, { vertex: 'beamClash', fragment: 'beamClash' }, {
         attributes: ['position', 'uv'],
-        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'egg', 'split', 'time', 'disp', 'pan',
+        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
           'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi'],
       });
       mat.backFaceCulling = false;
@@ -1222,6 +1237,10 @@ class Beam implements BeamHandle {
   private tick: Observer<Scene>;
   private blurring = false;
 
+  /** How far its starting egg's front is drawn out (× its radius): beam 2's longer. */
+  private get eggFront(): number { return this.shot.style === 2 ? AURA_EGG_FRONT : EGG_FRONT; }
+  /** Its column's length last frame (from its egg's centre): a beam 2 striking nothing draws its egg out that far. */
+  private lenNow = 0;
   /** One long egg: its eggBeam, out of a clash. */
   private get eggBeam(): boolean { return !!this.shot.eggBeam && !this.shot.clash; }
   constructor(private readonly fx: BeamFx, private readonly shot: BeamShot) {
@@ -1247,7 +1266,7 @@ class Beam implements BeamHandle {
     const masterMat = (name: string, shader: string, l: LayerDef): Layer => {
       const mat = new ShaderMaterial(name, scene, { vertex: shader, fragment: shader }, {
         attributes: ['position', 'uv'],
-        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'egg', 'split', 'time', 'disp', 'pan',
+        uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
           'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi', 'fwdNoise'],
       });
       // (Only its own skin: a clash's streaks of the other beam keep their one colour.)
@@ -1818,7 +1837,7 @@ class Beam implements BeamHandle {
     // stays where it was — a long egg's only; the others' swell round their centre.)
     const forward = (scale: number, unswelled: number) => (this.eggBeam ? aim.scale(scale - unswelled) : Vector3.Zero());
     this.tips.forEach(({ mesh, layer }, i) => {
-      mesh.setEnabled(on && grownIn > 0.02);
+      mesh.setEnabled(on && grownIn > 0.02 && tipScale > 0.02);
       if (!mesh.isEnabled(false)) return;
       const scale = SPHERE_R[i] * H * this.W * TIP * grownIn * tipScale;
       layer.mat.setFloat('egg', this.eggBeam ? 0 : 1);
@@ -1865,7 +1884,7 @@ class Beam implements BeamHandle {
     if (!this.puffs.length) return;
     const H = this.H;
     // Clear of the starting egg: past its drawn-out front.
-    const from = this.backR * EGG_FRONT / Math.max(EGG_BACK, 1e-3) + BEAM_R[1] * H;
+    const from = this.backR * this.eggFront / Math.max(EGG_BACK, 1e-3) + BEAM_R[1] * H;
     const span = len - from;
     this.puffs.forEach(({ mesh, layer, i, phase }) => {
       if (span <= 0.05 * H || this.finished) { mesh.setEnabled(false); return; }
@@ -2022,10 +2041,17 @@ class Beam implements BeamHandle {
     const shape = egg;
     this.backR = SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell * (1 + (EGG_BACK - 1) * shape);
     // Its tip: the outermost layer's front, drawn out as the ball becomes the egg.
-    this.eggTipPt.copyFrom(origin).addInPlace(aim.scale(
-      SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell * (1 + (EGG_FRONT - 1) * shape)));
+    // (A beam 2 striking nothing: its egg drawn out the whole length of the beam, its tip at the beam's front — eased
+    // with its end ball, as its column shrinks away.)
+    const R = SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell;
+    const miss = this.shot.style === 2 && this.shot.endBall && this.endBallK >= 0 ? 1 - this.endBallK : 0;
+    // (Each layer to the beam's front: its own stretch, by its own radius r.)
+    const frontAt = (r: number) => (miss > 0 && r > 1e-4 ? this.eggFront + (Math.max(this.eggFront, this.lenNow / r) - this.eggFront) * miss : this.eggFront);
+    const front = frontAt(R);
+    this.eggTipPt.copyFrom(origin).addInPlace(aim.scale(R * (1 + (front - 1) * shape)));
     this.balls.forEach(({ mesh, layer }, i) => {
       layer.mat.setFloat('egg', shape);
+      layer.mat.setFloat('eggFront', frontAt(SPHERE_R[i] * H * this.W * ball * swell));
       mesh.position.copyFrom(origin);
       mesh.scaling.setAll(Math.max(1e-3, SPHERE_R[i] * H * this.W * ball * swell * eggBurst));
       mesh.rotationQuaternion!.copyFrom(poleToAim);
@@ -2046,6 +2072,7 @@ class Beam implements BeamHandle {
       const base = SPHERE_R[i] * H * this.W * ball * swell;
       const r = base * (1 + (ROOT_BURST - 1) * easeOutCubic(k));
       layer.mat.setFloat('egg', egg);
+      layer.mat.setFloat('eggFront', frontAt(base));
       // Forward by however much it has swelled, so its back stays where the egg's is.
       mesh.position.copyFrom(origin.add(aim.scale((r - base) * (1 + (EGG_BACK - 1) * egg))));
       mesh.scaling.setAll(Math.max(1e-3, r));
@@ -2132,6 +2159,7 @@ class Beam implements BeamHandle {
     }
     const on = grow > 0.001;
     this.endPt.copyFrom(origin).addInPlace(aim.scale(on ? len : 0));
+    this.lenNow = on ? len : 0;
     // A bolt: no column (the caller's bolt runs from its egg to here).
     this.setBeamVisible(on && !this.shot.bolt);
     if (!on) return;
@@ -2145,6 +2173,8 @@ class Beam implements BeamHandle {
       m.setFloat('len', len); m.setFloat('rad', BEAM_R[i] * H * this.W * width * COLUMN * (this.shot.bolt ? BOLT_SKIN_R : 1));
       m.setFloat('ovalMid', this.shot.style === 2 ? OVAL_MID_AURA : OVAL_MID);
       m.setFloat('eggShape', this.eggBeam ? 1 : 0);
+      // (Striking nothing: as its end ball shrinks away, its column with it — its long starting egg in its place.)
+      m.setFloat('gone', this.shot.style === 2 && this.shot.endBall && this.endBallK >= 0 ? 1 - this.endBallK : 0);
       m.setFloat('split', split);
       m.setFloat('time', this.time + i * 1.7);
       const billow = this.shot.burstAlong && i === BEAM_R.length - 1 ? BILLOW_SKIN : this.shot.bolt ? BOLT_SKIN : 1;

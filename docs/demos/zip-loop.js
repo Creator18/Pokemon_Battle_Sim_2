@@ -22,7 +22,8 @@
   const hop = async (dir, aim) => {
     for (let i = 0; i < 200 && Pl.quick; i++) await sleep(0.01);
     await sleep(0.3);
-    Pl.quickCool = 0; Pl.airDash = true; Pl.face(dir, true); Pl.aim = aim; Pl.teleport(pf.arena, 'lines'); zip.n++;
+    // (Its cooldowns waived for the demo: every hop on cue.)
+    Pl.quickCool = 0; Pl.readyAt.clear(); Pl.airDash = true; Pl.face(dir, true); Pl.aim = aim; Pl.teleport(pf.arena, 'lines'); zip.n++;
     for (let i = 0; i < 200 && Pl.quick; i++) await sleep(0.01);
   };
   const pick = (around) => (around ? (Math.sign(B.x - Pl.x) || 1) : Pl.x > 7 ? -1 : Pl.x < -7 ? 1 : Pl.facing);

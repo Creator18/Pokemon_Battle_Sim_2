@@ -580,10 +580,11 @@ export class Fighter {
     const at = new Vector3(from[0] + dir[0] * Math.max(1, reach), from[1] + dir[1] * Math.max(1, reach), 0);
     this.begin(name);
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
-    // (Its end ball full whether or not its front is on a foe. A bolt ends on the foe it connects with.)
+    // (A beam 2: its end ball while its front is on a foe; striking nothing, none — its starting egg drawn out the length of the beam instead.
+    // A bolt ends on the foe it connects with.)
     const conn = { on: false, onto: null as Fighter | null };
-    const play = this.factory.playBeam(this.node, null, at,
-      spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) } : spec);
+    const play = this.factory.playBeam(this.node, null, at, spec.style === 2 ? { ...spec, endBall: () => conn.on }
+      : spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) } : spec);
     const mine: Firing = { id: ++beamIds, play, move: name, spec, at: ahead, pressedAt: this.time, launched: false, from, dir,
       range: hit ? hit.d + 0.3 : range, launchedAt: Infinity, pouring: true, struck: new Set(), end: at, reach: Math.max(1, range),
       get connected() { return conn.on; }, set connected(v: boolean) { conn.on = v; },
