@@ -1,5 +1,5 @@
-// Beam-clash stopper tests in the boss zone: the boss fires on cue and stops its needle within `bossBand` of the
-// middle; you fire a moment later and stop within `youBand` (null: never press).
+// Beam-clash stopper tests in the boss zone: the boss fires on cue and stops its number within `bossBand` (a share
+// of the meter) of the top; you fire a moment later and stop within `youBand` of it (null: never press).
 //   (0, eval)(await (await fetch('/docs/demos/clash-stopper-test.js')).text())
 //   await __setupDuel({ species: 'Mega Charizard Y' });  // startBossZone options
 //   await __duel({ gap: 10, youBand: 0.1, bossBand: 0.4 }) // → { events, hp }
@@ -17,7 +17,7 @@
     ai.think = function () {
       const me = this.me, foe = this.foe, face = Math.sign(foe.x - me.x) || me.facing;
       const idle = { want: 0, jumpHeld: false, jumpPressed: false, sink: false, aim: 0, ranged: false, close: false, mobility: false, control: false, face };
-      if (me.clashing) { const n = me.clashing.needle(); return { ...idle, ranged: n !== null && me.clashing.stopped() === null && Math.abs(n) <= window.__bossBand }; }
+      if (me.clashing) { const n = me.clashing.needle(); return { ...idle, ranged: n !== null && me.clashing.stopped() === null && n >= 1 - window.__bossBand }; }
       if (window.__bossFire) { window.__bossFire = false; return { ...idle, ranged: true }; }
       return idle;
     };
@@ -33,7 +33,7 @@
     const t0 = performance.now(); let pressed = false;
     while (performance.now() - t0 < 10000) {
       const c = P.clashing;
-      if (c && !pressed && youBand != null) { const n = c.needle(); if (n !== null && Math.abs(n) <= youBand) { await tap('u'); pressed = true; } }
+      if (c && !pressed && youBand != null) { const n = c.needle(); if (n !== null && n >= 1 - youBand) { await tap('u'); pressed = true; } }
       if (!P.clashing && !B.clashing && !P.firing && !B.firing && performance.now() - t0 > 2500) break;
       await frame();
     }

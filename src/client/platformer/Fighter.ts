@@ -37,14 +37,14 @@
  * (blinking meanwhile): no blow lands on a fighter twice in a row — no stun-locks; out of HP it faints — and a practice target (`respawn`) stands again after RESPAWN s. A blow's damage: its move's
  * power × its type's effectiveness on the target's types × the same-type bonus (STAB), ÷ DAMAGE_SCALE.
  *
- * Beam duels: a beam takes BEAM_CHARGE s to launch, then its front FRONT_TIME s to cross. Too close to clash (their
- * mouths nearer than CLASH_MIN × their height), the two burst point-blank between them at once, and both are knocked
+ * Beam duels: a beam takes BEAM_CHARGE s to launch, then its front FRONT_TIME s to cross. Too close to clash (nearer
+ * than CLASH_MIN — the stadium's painted Pokéball across), the two burst point-blank between them at once, and both are knocked
  * back (KNOCK_SPEED, flinching till they come down), each hurt as near a burst (below). Else, firing at a foe whose
  * beam at it has not launched yet, the two CLASH — however far either would reach alone (a beam's range never
  * decides a clash) — where their fronts would meet, given the head start (the later one's front meets the earlier's
  * nearer its own mouth). Then the STOPPER: each has one press of its ranged key to stop a needle swinging across its
- * meter (METER_PERIOD s a swing; unstopped by METER_TIME s: nothing), its quality q (1 within METER_PERFECT of the
- * middle, down to 0 at the ends) its timing ×(TIMING_MIN … TIMING_MAX). Each beam's power P (base power × STAB) and
+ * meter — its number running up and down between 0 and METER_MAX (up and back in METER_PERIOD s) — the number N it
+ * stops on its multiplier ×(1 + N / METER_MAX); unstopped by METER_TIME s, N 0 (×1). Each beam's power P (base power × STAB) and
  * type effectiveness E on the other (P a special move's base power × STAB × its user's Special Attack ÷ STAT_REF): one ahead on both (neither behind) wins outright — else the higher
  * P × E × timing wins, within CLASH_TIE of each other a tie. The winner pushes through for its beam's damage × its
  * timing; a tie bursts the ball where they met — hurting only a body near it (BURST_NEAR … BURST_FAR × its height,
@@ -216,14 +216,19 @@ const DAMAGE_SCALE = 5, DAMAGE_UNKNOWN = 8;
 const STAT_REF = 100;
 /** A beam: its charge before it launches, its front's crossing (s — RecipeFactory's BEAM_CHARGE, BeamFx's GROW). */
 const BEAM_CHARGE = 1.1, FRONT_TIME = 0.6;
-/** Nearer than CLASH_MIN × their height (mouth to mouth): no clash — a burst in both their faces. */
-const CLASH_MIN = 2.4;
 /**
- * A clash's stopper: its needle swings −1 … 1 and back in METER_PERIOD s; stopped within METER_PERFECT of the middle,
- * perfect (q 1), else q falling to 0 at the ends; not stopped by METER_TIME s after they meet, q 0. Its timing
- * multiplier TIMING_MIN + (TIMING_MAX − TIMING_MIN) · q.
+ * Nearer than CLASH_MIN (world units, the two of them centre to centre): no clash — a burst in both their faces. As
+ * far apart as the Pokéball painted on the League stadium's pitch is across (its outer ring: 0.94 of its 11-unit
+ * square), each at its edge: from there, a clash.
  */
-const METER_PERIOD = 1.6, METER_PERFECT = 0.15, METER_TIME = 2.4, TIMING_MIN = 0.6, TIMING_MAX = 1.6;
+const CLASH_MIN = 11 * 0.94;
+/**
+ * A clash's stopper: its number runs up from 0 to METER_MAX and back down, steadily, in METER_PERIOD s (each side from
+ * its own point in the run); stopped on N, its multiplier is 1 + N / METER_MAX (×1 … ×2); not stopped by METER_TIME s
+ * after they meet, N 0 (×1).
+ */
+export const METER_MAX = 1000;
+const METER_PERIOD = 1.6, METER_TIME = 2.4;
 /** Scores (P × E × timing) within this ratio: a tie. How long the decided ball takes to swing to the loser before it pushes home (s). */
 const CLASH_TIE = 1.08, CLASH_DECIDE = 0.35;
 /** A burst (a tie, point-blank): a body within BURST_NEAR × its height of it takes BURST_CHIP of the other beam's damage, falling to none at BURST_FAR. */
@@ -231,10 +236,14 @@ const BURST_NEAR = 0.8, BURST_FAR = 1.8, BURST_CHIP = 0.5;
 
 /** A clash's stopper, as one side sees it. */
 export interface ClashMeter {
-  /** Its one press: stops its needle. */
+  /** Its one press: stops its number. */
   press(): void;
-  /** Its needle (−1 … 1; none till the beams meet); where it stopped it, and its quality, once it has. */
-  needle(): number | null; stopped(): number | null; quality(): number | null;
+  /** Its number (0 … METER_MAX, running; none till the beams meet), as a share of METER_MAX (0 … 1). */
+  needle(): number | null;
+  /** Its number itself, running or stopped (none till the beams meet). */
+  value(): number | null;
+  /** The number it stopped on (time up: 0), and that as a share of METER_MAX, once it has. */
+  stopped(): number | null; quality(): number | null;
   /** Its timing multiplier, once stopped (or time up). */
   timing(): number | null;
   /** The outcome for it: 1 won, −1 lost, 0 a tie, none yet; whether it was decided by power and type alone. */
@@ -601,8 +610,7 @@ export class Fighter {
       && Fighter.linesMeet(from, dir, span(f), f.beam.from, f.beam.dir, span(f), (this.H + f.H) * 0.25));
     if (rival) {
       // (Too close to hold a clash: both burst in their faces.)
-      const [rx, ry] = rival.mouth();
-      if (Math.hypot(rx - from[0], ry - from[1]) < CLASH_MIN * (this.H + rival.H) / 2) this.faceBurst(rival, name, spec, arena);
+      if (Math.hypot(rival.x - this.x, rival.y - this.y) < CLASH_MIN) this.faceBurst(rival, name, spec, arena);
       else this.clash(rival, name, spec, arena);
       return;
     }
@@ -640,8 +648,8 @@ export class Fighter {
   }
 
   /**
-   * Too close to clash: `rival`'s beam (still charging) and its own, let go point-blank, burst between them at once —
-   * and both are knocked back, away from each other.
+   * Too close to clash: `rival`'s beam (still charging) and its own, let go point-blank, burst between them at once — a
+   * body near enough to the burst hurt and knocked back, away from the other; one further off just loses its beam.
    */
   private faceBurst(rival: Fighter, name: string, spec: BeamSpec, arena: Arena): void {
     const theirs = rival.beam!;
@@ -651,11 +659,10 @@ export class Fighter {
     arena.onBurst?.(this, rival, name, theirs.move);
     const [ax, ay] = this.mouth(), [bx, by] = rival.mouth();
     const at: [number, number] = [(ax + bx) / 2, (ay + by) / 2];
+    // (As a tie's burst: only a body near enough to it is hurt — and thrown back; one further off just loses its beam.)
     const away = Math.sign(this.x - rival.x) || -this.facing;
-    this.knockBack(away);
-    rival.knockBack(-away);
-    this.burntBy(rival, theirs.move, at, arena);
-    rival.burntBy(this, name, at, arena);
+    if (this.burntBy(rival, theirs.move, at, arena)) this.knockBack(away);
+    if (rival.burntBy(this, name, at, arena)) rival.knockBack(-away);
   }
 
   /**
@@ -810,8 +817,11 @@ export class Fighter {
       f.takeHit(this, b.move, b.play.contactEnds, arena);
       if (this.beam !== b) return;
     }
-    let nearest = Infinity, onto: Fighter | null = null, inLine = false;
+    let nearest = Infinity, onto: Fighter | null = null, inLine = false, aimAt = Infinity;
     for (const f of this.foes(arena)) {
+      // (Its end — where its front is going — on the nearest foe in its line within its full reach, from the first: so
+      // its front runs to that one and stops on it, never on past it and back.)
+      if (!f.down) { const da = Fighter.lineMeets(b.from, b.dir, b.reach, f); if (da !== null && da < aimAt) aimAt = da; }
       // (Its look — contact or not — by whether a foe is in its line at all, within its full reach: so a beam on its
       // way to one already looks as it will on it, and one it struck still counts down. Its blows still wait for its front.)
       if ((!f.down || b.struck.has(f)) && Fighter.lineMeets(b.from, b.dir, b.reach, f, true) !== null) inLine = true;
@@ -829,7 +839,7 @@ export class Fighter {
     // Its end on that one (its end ball on it) — or, none in its line, out to its full reach again (a beam 2's end ball smaller).
     b.connected = inLine;
     b.onto = onto;
-    const to = Math.max(1, Math.min(b.reach, nearest));
+    const to = Math.max(1, Math.min(b.reach, nearest, aimAt));
     b.end.set(b.from[0] + b.dir[0] * to, b.from[1] + b.dir[1] * to, 0);
   }
 
@@ -863,15 +873,19 @@ export class Fighter {
     // Each beam's power, and its type's effectiveness on the other beam's type.
     const mineT = this.clashTerms(name, theirs.move), itsT = rival.clashTerms(theirs.move, name);
     const ahead = (p: { P: number; E: number }, q: { P: number; E: number }) => p.P >= q.P && p.E >= q.E && (p.P > q.P || p.E > q.E);
-    // The stopper: a needle each (its own phase), from when the beams meet; one stop each.
+    // The stopper: a number each, running up and down (from its own point in the run), from when the beams meet; one
+    // stop each — the number stopped on N, its multiplier 1 + N / METER_MAX.
     type Side = { phase: number; stop: number | null; q: number | null };
-    const rs: Side = { phase: Math.random() * Math.PI * 2, stop: null, q: null }, ms: Side = { phase: Math.random() * Math.PI * 2, stop: null, q: null };
+    const rs: Side = { phase: Math.random(), stop: null, q: null }, ms: Side = { phase: Math.random(), stop: null, q: null };
     let t0 = -1, decidedAt = -1, outcome: number | null = null, outright = false;
-    const swing = (s: Side, now: number) => Math.sin(s.phase + (2 * Math.PI * (now - t0)) / (1000 * METER_PERIOD));
-    const quality = (x: number) => (Math.abs(x) <= METER_PERFECT ? 1 : Math.max(0, 1 - (Math.abs(x) - METER_PERFECT) / (1 - METER_PERFECT)));
-    const timing = (q: number) => TIMING_MIN + (TIMING_MAX - TIMING_MIN) * q;
+    const run = (s: Side, now: number) => {
+      const x = (s.phase + (now - t0) / (1000 * METER_PERIOD)) % 1;
+      return Math.round(METER_MAX * (x < 0.5 ? 2 * x : 2 - 2 * x));
+    };
+    const timing = (q: number) => 1 + q;
     const decide = (now: number) => {
-      rs.q ??= 0; ms.q ??= 0;
+      // (Not stopped in time: 0.)
+      rs.stop ??= 0; ms.stop ??= 0; rs.q ??= 0; ms.q ??= 0;
       // (Ahead on both power and type: it wins whatever the timing. Else power × type × timing.)
       if (ahead(itsT, mineT)) { outcome = 1; outright = true; } else if (ahead(mineT, itsT)) { outcome = -1; outright = true; } else {
         const r = (itsT.P * itsT.E * timing(rs.q)) / (mineT.P * mineT.E * timing(ms.q));
@@ -889,8 +903,9 @@ export class Fighter {
       return { balance: outcome * k * k * (3 - 2 * k), done: k >= 1 };
     };
     const meter = (s: Side, sign: number): ClashMeter => ({
-      press: () => { if (t0 < 0 || s.stop !== null || outcome !== null) return; const now = performance.now(); s.stop = swing(s, now); s.q = quality(s.stop); },
-      needle: () => (t0 < 0 ? null : s.stop ?? (outcome !== null ? null : swing(s, performance.now()))),
+      press: () => { if (t0 < 0 || s.stop !== null || outcome !== null) return; s.stop = run(s, performance.now()); s.q = s.stop / METER_MAX; },
+      value: () => (t0 < 0 ? null : s.stop ?? (outcome !== null ? null : run(s, performance.now()))),
+      needle: () => { const v = t0 < 0 ? null : s.stop ?? (outcome !== null ? null : run(s, performance.now())); return v === null ? null : v / METER_MAX; },
       stopped: () => s.stop, quality: () => s.q,
       timing: () => (s.q === null ? null : timing(s.q)),
       outcome: () => (outcome === null ? null : outcome * sign), outright: () => outright,

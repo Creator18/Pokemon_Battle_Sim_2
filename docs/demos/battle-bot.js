@@ -31,11 +31,11 @@
       const t = pf.clock;
       const dx = foe.x - me.x, dir = Math.sign(dx) || me.facing, dist = Math.abs(dx), dy = foe.y - me.y;
       const base = { ...IDLE, face: dir, jumpHeld: me.flying && dy > -0.3 };
-      // In a clash: stop the needle near the middle (how near: its skill).
+      // In a clash: stop its number near the top (how near: its skill).
       if (me.clashing) {
         const n = me.clashing.needle();
         if (n === null || me.clashing.stopped() !== null) { pressedStop = false; return base; }
-        if (!pressedStop && Math.abs(n) <= 0.05 + (1 - skill) * 0.5) { pressedStop = true; tally('clash stop'); return { ...base, ranged: true }; }
+        if (!pressedStop && n >= 1 - (0.05 + (1 - skill) * 0.5)) { pressedStop = true; tally('clash stop'); return { ...base, ranged: true }; }
         return base;
       }
       pressedStop = false;

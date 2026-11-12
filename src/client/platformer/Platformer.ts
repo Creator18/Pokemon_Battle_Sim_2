@@ -102,8 +102,6 @@ export interface PlatformerOptions {
 /** Something that happened in a fight (s from its start). */
 export interface FightEvent { t: number; text: string }
 
-/** The stopper's perfect zone, as drawn (Fighter's METER_PERFECT). */
-const METER_PERFECT_HUD = 0.15;
 
 export class Platformer {
   readonly player: Fighter;
@@ -170,7 +168,7 @@ export class Platformer {
         this.note(`${brace.toLowerCase()}: ${by.name} on ${on.name}'s ${move} (${dmg})`);
         this.hud?.call(`${brace}!`, brace === 'Counter' ? typeColor('Fighting') : '#a78bfa');
       },
-      onClashEnd: (_a, _b, w, s) => this.note(`clash over → ${w ? `${w.name} wins` : 'tie'}${s ? ` (stops ${s.rival.toFixed(2)} / ${s.you.toFixed(2)}${s.outright ? ', outright' : ''})` : ''}`),
+      onClashEnd: (_a, _b, w, s) => this.note(`clash over → ${w ? `${w.name} wins` : 'tie'}${s ? ` (stops ${Math.round(s.rival * 1000)} / ${Math.round(s.you * 1000)}${s.outright ? ', outright' : ''})` : ''}`),
     };
     this.build(o.backdrop ?? true);
     this.placeAll();
@@ -269,7 +267,7 @@ export class Platformer {
 
   // ── the HUD ──────────────────────────────
   private buildHud(): void {
-    this.hud = new Hud(this.player, this.boss!, METER_PERFECT_HUD);
+    this.hud = new Hud(this.player, this.boss!);
   }
 
   private updateHud(dt: number): void {

@@ -40,7 +40,7 @@ const TELL: Record<string, { rgb: [number, number, number]; hold: number; recove
 };
 /** Its foe braced for Sucker Punch (glowing): how often it holds off attacking till the brace runs out (then it punishes the whiff). */
 const WARY = 0.75;
-/** In a clash: how near the middle (of −1 … 1) it waits for its needle to come before it stops it — rolled each clash. */
+/** In a clash: how near the top (of its number's run, as a share: 0 … 1) it waits for it to come before it stops it — rolled each clash. */
 const AI_STOP: [number, number] = [0.04, 0.6];
 
 export interface Thought { t: number; saw: string; chose: string }
@@ -67,13 +67,13 @@ export class BossAI {
     const faceFoe = Math.sign(foe.x - me.x) || me.facing;
     if (this.paused || me.down || foe.down) { this.pending = null; return { ...IDLE, face: faceFoe }; }
     // In a struggle: pressing away at it.
-    // In a clash: it stops its needle once it comes within its (rolled) band of the middle.
+    // In a clash: it stops its number once it comes within its (rolled) band of the top.
     if (!me.clashing) this.stopWithin = null;
     else {
       const n = me.clashing.needle();
       if (n === null || me.clashing.stopped() !== null) return { ...IDLE, face: faceFoe };
       this.stopWithin ??= this.rnd(AI_STOP);
-      return { ...IDLE, face: faceFoe, ranged: Math.abs(n) <= this.stopWithin };
+      return { ...IDLE, face: faceFoe, ranged: n >= 1 - this.stopWithin };
     }
     // Its move just over: it recovers (an opening).
     if (this.wasBusy && !me.busy && this.lastKind) { this.recovering = t + TELL[this.lastKind].recover; this.lastKind = ''; }

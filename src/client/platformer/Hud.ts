@@ -7,13 +7,15 @@
  *               a hit shakes it, low HP pulses. Between them the clock.
  *   bottom-left the move bar: U I J K L — each slot its key, its move, in its type's colour; cooling down, a radial
  *               sweep and the seconds left; ready again, a flash; its abuse (heat) in pips; a brace held, it glows.
- *   middle      a clash's stopper (STOP U!, the needle across its gauge, the perfect zone; then a grade stamped, and
+ *   middle      a clash's stopper (STOP U!, its number running 0 … 1000 and back up its gauge; then the number stopped on
+ *               stamped with its multiplier, and
  *               how it went); callouts (COUNTER!, SUPER EFFECTIVE!, CLASH!…); the result, across a band.
  *   bottom-right the controls, as key caps.
  */
 import { getMove, getTypeEffectiveness } from '../../shared/index.ts';
 import { typeColor } from '../theme.ts';
 import type { Fighter } from './Fighter.ts';
+import { METER_MAX } from './Fighter.ts';
 import type { ClashMeter } from './Fighter.ts';
 
 /** The fonts (Google Fonts, SIL OFL). */
@@ -90,11 +92,15 @@ const CSS = `
 .mvh-clash { position: absolute; left: 50%; top: 27%; transform: translate(-50%, -50%); display: none; flex-direction: column; align-items: center; gap: 8px; }
 .mvh-say { font: 700 58px/0.9 Teko, sans-serif; font-style: italic; letter-spacing: 1px; text-transform: uppercase;
   -webkit-text-stroke: 2px #0b1020; paint-order: stroke fill; text-shadow: 0 4px 0 #0b1020, 0 0 24px rgba(251,191,36,.75); }
-.mvh-gauge { position: relative; width: min(64vw, 480px); height: 24px; transform: skewX(-14deg); border: 3px solid #fff; border-radius: 4px;
-  background: linear-gradient(90deg, #450a0a, #dc2626 22%, #f59e0b 38%, #22c55e 50%, #f59e0b 62%, #dc2626 78%, #450a0a);
-  box-shadow: 0 0 0 3px #0b1020, 0 8px 24px rgba(0,0,0,.55); }
-.mvh-zone { position: absolute; top: -6px; bottom: -6px; border: 3px solid #fff; border-radius: 3px; box-shadow: 0 0 14px #86efac, inset 0 0 10px rgba(134,239,172,.6); }
-.mvh-needle { position: absolute; top: -12px; bottom: -12px; width: 8px; margin-left: -4px; background: #fff; border-radius: 3px; box-shadow: 0 0 0 2px #0b1020, 0 0 16px #fff; }
+.mvh-meter { display: flex; align-items: flex-end; gap: 16px; }
+.mvh-gauge { position: relative; width: 30px; height: 170px; transform: skewY(-8deg); border: 3px solid #fff; border-radius: 4px; overflow: hidden;
+  background: rgba(9,11,24,.82); box-shadow: 0 0 0 3px #0b1020, 0 8px 24px rgba(0,0,0,.55); }
+.mvh-fill2 { position: absolute; left: 0; right: 0; bottom: 0; height: 0%;
+  background: linear-gradient(0deg, #dc2626 0%, #f59e0b 45%, #facc15 75%, #fef08a 92%, #fff 100%); background-size: 100% 170px; background-position: bottom; }
+.mvh-ticks2 { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, transparent 0 calc(10% - 2px), rgba(0,0,0,.4) calc(10% - 2px) 10%); }
+.mvh-num { min-width: 3.2ch; text-align: right; font: 700 76px/0.8 Teko, sans-serif; font-variant-numeric: tabular-nums; -webkit-text-stroke: 2px #0b1020; paint-order: stroke fill;
+  text-shadow: 0 4px 0 #0b1020, 0 0 22px rgba(250,204,21,.6); }
+.mvh-num small { display: block; font: 700 22px/1 Rajdhani, sans-serif; -webkit-text-stroke: 0; letter-spacing: 1px; color: #fde68a; margin-top: 6px; }
 .mvh-note { font: 700 18px/1 Rajdhani, sans-serif; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 2px 3px #000; }
 .mvh-stamp { animation: mvh-stamp .35s cubic-bezier(.2, 1.6, .4, 1); }
 @keyframes mvh-stamp { from { transform: scale(1.8) rotate(-6deg); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -145,12 +151,12 @@ export class Hud {
   private sides: Side[] = [];
   private slots: Slot[] = [];
   private clock: HTMLDivElement;
-  private clash: HTMLDivElement; private say: HTMLDivElement; private needle: HTMLDivElement; private note: HTMLDivElement;
+  private clash: HTMLDivElement; private say: HTMLDivElement; private needle: HTMLDivElement; private note: HTMLDivElement; private num: HTMLDivElement;
   private calls: HTMLDivElement;
   private band: HTMLDivElement;
   private lastGrade = ''; private lastResult: string | null = null;
 
-  constructor(private readonly player: Fighter, private readonly boss: Fighter, meterPerfect: number) {
+  constructor(private readonly player: Fighter, private readonly boss: Fighter) {
     ensureHudStyle();
     const root = this.root = document.createElement('div');
     root.className = 'mvh';
@@ -170,9 +176,10 @@ export class Hud {
     }
     // The clash's stopper.
     this.clash = document.createElement('div'); this.clash.className = 'mvh-clash';
-    this.clash.innerHTML = `<div class="mvh-say">STOP U!</div><div class="mvh-gauge"><div class="mvh-zone" style="left:${50 - 50 * meterPerfect}%;width:${100 * meterPerfect}%"></div>`
-      + `<div class="mvh-needle"></div></div><div class="mvh-note"></div>`;
-    this.say = this.clash.querySelector('.mvh-say')!; this.needle = this.clash.querySelector('.mvh-needle')!; this.note = this.clash.querySelector('.mvh-note')!;
+    this.clash.innerHTML = `<div class="mvh-say">STOP U!</div><div class="mvh-meter"><div class="mvh-gauge"><div class="mvh-fill2"></div><div class="mvh-ticks2"></div></div>`
+      + `<div class="mvh-num">0<small>×1.00</small></div></div><div class="mvh-note"></div>`;
+    this.say = this.clash.querySelector('.mvh-say')!; this.needle = this.clash.querySelector('.mvh-fill2')!; this.note = this.clash.querySelector('.mvh-note')!;
+    this.num = this.clash.querySelector('.mvh-num')!;
     this.calls = document.createElement('div'); this.calls.className = 'mvh-calls';
     this.band = document.createElement('div'); this.band.className = 'mvh-band';
     root.append(top, moves, this.clash, this.calls, this.band);
@@ -282,22 +289,25 @@ export class Hud {
   }
 
   private updateClash(c: ClashMeter | null): void {
-    const n = c?.needle() ?? null;
-    const on = !!c && (n !== null || c.outcome() !== null);
+    const v = c?.value() ?? null;
+    const on = !!c && (v !== null || c.outcome() !== null);
     this.clash.style.display = on ? 'flex' : 'none';
     if (!c || !on) { this.lastGrade = ''; return; }
-    if (n !== null) this.needle.style.left = `${50 + 50 * n}%`;
-    const q = c.quality(), o = c.outcome();
-    const grade = q === null ? '' : q >= 1 ? 'PERFECT' : q >= 0.7 ? 'GREAT' : q >= 0.4 ? 'GOOD' : q > 0 ? 'WEAK' : 'MISSED';
-    const say = o === null ? (q === null ? 'STOP U!' : `${grade}!`)
+    // (Its number running up and down — the gauge filled as high — then held where it stopped.)
+    const stop = c.stopped(), shown = stop ?? v ?? 0;
+    this.needle.style.height = `${(shown / METER_MAX) * 100}%`;
+    this.num.innerHTML = `${shown}<small>×${(1 + shown / METER_MAX).toFixed(2)}</small>`;
+    const o = c.outcome();
+    const say = o === null ? (stop === null ? 'STOP U!' : `${stop}!`)
       : o > 0 ? (c.outright() ? 'Overpowered them!' : 'Clash won!') : o < 0 ? (c.outright() ? 'Overpowered!' : 'Clash lost') : 'Even — it bursts!';
     if (say !== this.lastGrade) {
       this.lastGrade = say;
       this.say.textContent = say;
       this.say.classList.remove('mvh-stamp'); void this.say.offsetWidth; this.say.classList.add('mvh-stamp');
-      this.say.style.color = o !== null ? (o > 0 ? '#fde047' : o < 0 ? '#fda4af' : '#fff') : grade === 'PERFECT' ? '#86efac' : '#fff';
+      this.say.style.color = o !== null ? (o > 0 ? '#fde047' : o < 0 ? '#fda4af' : '#fff') : stop !== null && stop >= 900 ? '#fde047' : '#fff';
+      if (stop !== null) { this.num.classList.remove('mvh-stamp'); void this.num.offsetWidth; this.num.classList.add('mvh-stamp'); }
     }
-    this.note.textContent = q === null ? 'Stop the needle in the middle' : `${grade} ×${c.timing()!.toFixed(2)}`;
+    this.note.textContent = stop === null ? 'Stop it high — your power ×(1 + the number / 1000)' : `Your power ×${(1 + stop / METER_MAX).toFixed(2)}`;
   }
 
   dispose(): void { this.root.remove(); }
