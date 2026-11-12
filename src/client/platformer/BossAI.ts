@@ -29,7 +29,7 @@ const BEAM_COOL: [number, number] = [2.2, 3.6];
 /** A foe this far above it (× its height) is "above": it flies up after it. */
 const ABOVE = 0.9;
 /**
- * Its tells — before each attack it flashes (orange: dodge it; blue: a blow at hand, counter it) and holds a beat
+ * Its tells — before each attack it flashes (orange: dodge it; blue: a blow at hand, Sucker Punch it) and holds a beat
  * (s): a beam, a slash, a Quick Attack, a beam fired back to meet yours. After each, it recovers (s): an opening.
  */
 const TELL: Record<string, { rgb: [number, number, number]; hold: number; recover: number }> = {
@@ -38,7 +38,7 @@ const TELL: Record<string, { rgb: [number, number, number]; hold: number; recove
   mobility: { rgb: [1, 0.5, 0.08], hold: 0.3, recover: 0.4 },
   contest: { rgb: [1, 0.5, 0.08], hold: 0.2, recover: 0.9 },
 };
-/** Its foe braced to counter (glowing): how often it holds off attacking till the brace runs out (then it punishes the whiff). */
+/** Its foe braced for Sucker Punch (glowing): how often it holds off attacking till the brace runs out (then it punishes the whiff). */
 const WARY = 0.75;
 /** In a clash: how near the middle (of −1 … 1) it waits for its needle to come before it stops it — rolled each clash. */
 const AI_STOP: [number, number] = [0.04, 0.6];
@@ -145,10 +145,10 @@ export class BossAI {
       i = { ...i, want: dir };
       chose = 'close in';
     }
-    // (Its foe braced to counter: mostly it waits the brace out rather than walk into it.)
+    // (Its foe braced for Sucker Punch: mostly it waits the brace out rather than walk into it.)
     if ((i.ranged || i.close || i.mobility) && foe.countering && Math.random() < WARY) {
       i = { ...IDLE, face: i.face, aim: i.aim };
-      chose = 'wait out the counter';
+      chose = 'wait out the sucker punch';
     }
     // (An attack: told first — it flashes and holds — then made.)
     const kind = i.ranged ? (chose.includes('contest') ? 'contest' : 'ranged') : i.close ? 'close' : i.mobility ? 'mobility' : '';

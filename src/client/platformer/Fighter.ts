@@ -22,11 +22,12 @@
  *   close     a slash where it stands, along its aim (Dragon Claw) — it lands on a foe within reach that way, else misses
  *   mobility  Quick Attack the way it faces — along its aim when aloft (or aimed up off the ground) — QUICK_DIST on,
  *             short of a wall, or up to a foe in the way (struck); or 'Dash', a plain dash with afterimages; or
+ *             'Agility', a movement move — zips in speed lines the way it is held, again and again while J is held; or
  *             a teleport (TELEPORTS: 'Teleport', magical, a ring) — gone and there TELEPORT_DIST along its aim
  *             (through a body, not into one or a wall), facing its nearest foe as it arrives; or a strike from
- *             behind (BEHIND_STRIKES: Feint, Sucker Punch, Shadow Sneak) — gone and back right behind the nearest foe
+ *             behind (BEHIND_STRIKES: Feint, Shadow Sneak) — gone and back right behind the nearest foe
  *             within FEINT_RANGE (at its height, facing it), and a blow at once (none in range: just the vanish)
- *   control   Counter: braced (COUNTER_WINDOW s, glowing) — a blow about to land on it sets it off instead: it takes
+ *   control   Sucker Punch (or Counter, BRACES: physical blows only, back in at the front): braced (COUNTER_WINDOW s, glowing) — a blow about to land on it sets it off instead: it takes
  *             none of it — it slips away in speed lines (the blow going on into where it was: a beam pours on into empty
  *             air) and is back behind the striker mid-strike (as Feint), for COUNTER_TURN × what that blow would have
  *             done, its landing cutting the striker's attack off as any blow does; nothing coming: left open COUNTER_WHIFF s. Then not
@@ -68,7 +69,12 @@ export interface Platform { x: number; top: number; w: number; h: number; hidden
  */
 export interface MoveKit { ranged?: string; close?: string; mobility?: string; control?: string }
 /** Charizard's, for now. */
-export const DEFAULT_KIT: MoveKit = { ranged: 'Flamethrower', close: 'Dragon Claw', mobility: 'Quick Attack', control: 'Counter' };
+/**
+ * The braces (control): Sucker Punch — any blow sets it off, and it is back behind its striker; Counter — a physical
+ * blow only (a special one lands, breaking it), gone backwards as a back dash and back in at its striker's front.
+ */
+export const BRACES = new Set(['Sucker Punch', 'Counter']);
+export const DEFAULT_KIT: MoveKit = { ranged: 'Flamethrower', close: 'Dragon Claw', mobility: 'Quick Attack', control: 'Sucker Punch' };
 
 /**
  * What it wants this frame: which way (−1, 0, 1), its jump (held; pressed this frame — flying: held, it rises; let go, it
@@ -78,6 +84,10 @@ export const DEFAULT_KIT: MoveKit = { ranged: 'Flamethrower', close: 'Dragon Cla
 export interface Intent {
   want: number; jumpHeld: boolean; jumpPressed: boolean; sink: boolean; aim: number;
   ranged: boolean; close: boolean; mobility: boolean; control: boolean;
+  /** Its mobility key held down (Agility: held, it zips on and on). */
+  mobilityHeld?: boolean;
+  /** A back dash (anyone's, whatever its moves): gone backwards in speed lines, still facing forwards. */
+  backDash?: boolean;
   face?: number;
 }
 export const IDLE: Intent = { want: 0, jumpHeld: false, jumpPressed: false, sink: false, aim: 0, ranged: false, close: false, mobility: false, control: false };
@@ -91,7 +101,7 @@ export interface Arena {
   /** Two beams met: the earlier one's, the later one's, who wins (none: a tie), where (the earlier's share of the way). */
   onClash?(first: Fighter, second: Fighter, winner: Fighter | null, meet: number): void;
   /** A counter going off: who countered whom, on what attack, for how much. */
-  onCounter?(by: Fighter, on: Fighter, move: string, damage: number): void;
+  onCounter?(by: Fighter, on: Fighter, move: string, damage: number, brace?: string): void;
   /** A clash's struggle over: who won (none: a tie). */
   onClashEnd?(first: Fighter, second: Fighter, winner: Fighter | null, stops?: { you: number; rival: number; outright: boolean }): void;
   /** Two beams let go too close to clash: both burst point-blank (who, with what). */
@@ -115,30 +125,37 @@ export const QUICK_DIST = 3.2;
 const QUICK_COOL = 0.4, QUICK_GAP = 0.08;
 /** A teleport: how far (× its height), how long before the next (s). */
 const TELEPORT_DIST = 3.6, TELEPORT_COOL = 0.5;
+/** Agility, a movement move — zips in speed lines the way it is held, one after another: how soon the next (s). */
+const AGILITY_COOL = 0.08;
+/** A back dash: how far (× TELEPORT_DIST), how soon the next (s). */
+const BACK_DASH_DIST = 0.7, BACK_DASH_COOL = 0.35;
 /**
  * The moves that play as a teleport, and their look: magical — a ring and a flare ('ring': Teleport) — or physical —
  * a vanish into flickering speed lines along the way it goes, back in along the way it will face ('lines').
  */
-export const TELEPORTS: Record<string, 'lines' | 'ring'> = { 'Teleport': 'ring' };
+export const TELEPORTS: Record<string, 'lines' | 'ring'> = { 'Teleport': 'ring', 'Agility': 'lines' };
 /**
  * The moves that vanish and strike from behind: their teleport's look (its ring in their type's colours), and their
- * blow's type. Feint and Sucker Punch physical (speed lines), Shadow Sneak a Ghost's ring. Every one catches its foe
+ * blow's type. Feint physical (speed lines), Shadow Sneak a Ghost's ring; Sucker Punch's the blow of its brace going off. Every one catches its foe
  * unawares: it can't turn round to face its striker till the blow has landed (turnLocks).
  */
 export const BEHIND_STRIKES: Record<string, { look: 'lines' | 'ring'; type: string; midStrike?: boolean; plain?: boolean }> = {
-  // (Counter's blow, as Feint's: arriving already striking, plain.)
-  'Counter': { look: 'lines', type: 'Fighting', midStrike: true, plain: true },
+  // (Sucker Punch's blow — its brace gone off — as Feint's: arriving already striking, plain, in speed lines.)
+  'Sucker Punch': { look: 'lines', type: 'Dark', midStrike: true, plain: true },
   // (Feint arrives already striking: its blow under way as it appears — a plain blow, its attack clip and a burst on
   // contact, no slash drawn, as Quick Attack's.)
   'Feint': { look: 'lines', type: 'Normal', midStrike: true, plain: true },
-  'Sucker Punch': { look: 'lines', type: 'Dark' },
   'Shadow Sneak': { look: 'ring', type: 'Ghost' },
 };
 /**
- * Counter: how long it stays braced (s), how near a foe's attack must start to set it off (× its height), what share
+ * Sucker Punch (its brace): how long it stays braced (s), how near a foe's attack must start to set it off (× its height), what share
  * of that attack's damage it turns back, how long it is left open when nothing comes (s), its glow while braced.
  */
 const COUNTER_WINDOW = 1.0, COUNTER_TURN = 1.5, COUNTER_WHIFF = 0.5;
+/** Counter (its own brace, physical blows only): what share of the blow it turns back — twice it, as the move's own. */
+const COUNTER_DOUBLE = 2;
+/** Counter's blow coming in mid-swing: its clip begun this far (s) short of the blow as it opens out of its teleport. */
+const COUNTER_LEAD = 0.14;
 /** How long after it goes off (or runs out) before it can be braced again (s). */
 const COUNTER_COOL = 2.5;
 /** A beam on one braced to counter: it goes off this far ahead of the front reaching it (s) — before it lands. */
@@ -250,7 +267,7 @@ export class Fighter {
   turnLocks = 0;
   /** Unhurtable till this (its own clock; Infinity while it flinches — then HIT_GRACE more). */
   private graceUntil = 0;
-  /** Counter braced: till when (its own clock). Left open after a whiff: till when. The arena it is in (for its tells). */
+  /** Sucker Punch braced: till when (its own clock). Left open after a whiff: till when. The arena it is in (for its tells). */
   private counterUntil = -1; private lagUntil = 0; private arenaRef: Arena | null = null; private counterReady = 0;
   /** The move it is telling (about to make), and how many times its attack has been cut off by a counter. */
   telling = ''; interrupted = 0;
@@ -355,9 +372,11 @@ export class Fighter {
       if (it.ranged) this.fire(arena);
       else if (it.close) this.slash(arena);
       else if (it.mobility && this.moves.mobility === 'Quick Attack') this.quickAttack(arena);
-      else if (it.control && this.moves.control === 'Counter' && this.time >= this.counterReady) this.brace();
+      else if (it.control && BRACES.has(this.moves.control ?? '') && this.time >= this.counterReady) this.brace();
       else if (it.mobility && this.moves.mobility === 'Dash') this.dash();
       else if (it.mobility && this.moves.mobility && BEHIND_STRIKES[this.moves.mobility]) this.strikeFromBehind(arena, this.moves.mobility);
+      else if (it.backDash) this.backDash(arena);
+      else if ((it.mobility || it.mobilityHeld) && this.moves.mobility === 'Agility') this.agility(arena, it.want);
       else if (it.mobility && this.moves.mobility && TELEPORTS[this.moves.mobility]) this.teleport(arena, TELEPORTS[this.moves.mobility]);
     }
     const want = it.want;
@@ -411,7 +430,9 @@ export class Fighter {
     p.x += this.vx * dt;
     for (const s of arena.level) {
       if (!this.overlaps(p.x, p.y, s)) continue;
-      p.x = this.vx > 0 ? s.x - this.W / 2 - 1e-4 : s.x + s.w + this.W / 2 + 1e-4;
+      // (Out the side it came in by — still, nudged in by a body: the nearer side, never through to the far one.)
+      const back = this.vx > 0 || (this.vx === 0 && p.x < s.x + s.w / 2);
+      p.x = back ? s.x - this.W / 2 - 1e-4 : s.x + s.w + this.W / 2 + 1e-4;
       this.vx = 0;
     }
     const wasGrounded = this.grounded;
@@ -592,9 +613,9 @@ export class Fighter {
     if (this.grounded) this.vy = Math.max(this.vy, 2.5);
   }
 
-  /** Counter: braced where it stands, glowing, COUNTER_WINDOW s — held still, waiting for a foe to move. */
+  /** Sucker Punch: braced where it stands, glowing, COUNTER_WINDOW s — held still, waiting for a foe to move. */
   private brace(): void {
-    this.begin('Counter');
+    this.begin(this.moves.control ?? 'Sucker Punch');
     this.vx = 0;
     this.counterUntil = this.time + COUNTER_WINDOW;
     this.factory.tell(this.node, COUNTER_GLOW, COUNTER_WINDOW);
@@ -607,18 +628,60 @@ export class Fighter {
   private dropAttack(): void { this.firing = false; this.quick = false; this.using = ''; this.telling = ''; this.clip = ''; }
 
   /**
-   * Counter going off: `attacker`'s blow (`move`) about to land on it. It slips away — the blow goes on into where it
+   * Sucker Punch going off: `attacker`'s blow (`move`) about to land on it. It slips away — the blow goes on into where it
    * was (a beam pouring on into empty air) — and strikes the attacker from behind, for COUNTER_TURN × what that blow
    * would have done; that blow, landing, cuts the attacker's attack off (a beam's pour) as any does.
    */
   private counter(attacker: Fighter, arena: Arena, move: string): void {
     this.counterUntil = -1; this.counterReady = this.time + COUNTER_COOL;
     this.firing = false; this.using = '';
-    const damage = Math.max(1, Math.round(COUNTER_TURN * attacker.strength(move, this) / DAMAGE_SCALE));
+    const counter = this.moves.control === 'Counter';
+    const damage = Math.max(1, Math.round((counter ? COUNTER_DOUBLE : COUNTER_TURN) * attacker.strength(move, this) / DAMAGE_SCALE));
     // (Its attack goes on — its beam pouring on into where this one was — till the counter's blow lands and cuts it off,
     // as any blow does.)
-    arena.onCounter?.(this, attacker, move, damage);
-    this.strikeFromBehind(arena, 'Counter', { foe: attacker, damage });
+    arena.onCounter?.(this, attacker, move, damage, counter ? 'Counter' : 'Sucker Punch');
+    if (counter) this.strikeFromFront(arena, attacker, damage);
+    else this.strikeFromBehind(arena, 'Sucker Punch', { foe: attacker, damage });
+  }
+
+  /** Whether `move` sets its brace off: any blow, Sucker Punch's; a physical one only, Counter's. */
+  setsOff(move: string): boolean {
+    return this.moves.control !== 'Counter' || getMove(move)?.category === MoveCategory.PHYSICAL;
+  }
+
+  /**
+   * Counter's blow: gone backwards (a back dash's vanish — facing `foe`, dropping back in its jump-down pose, its lines
+   * streaking away from it) and back in at its front — on its own side, facing it, opening out mid-swing (its clip
+   * COUNTER_LEAD s short of the blow), the blow landing as it is whole (Fighting, plain).
+   */
+  private strikeFromFront(arena: Arena, foe: Fighter, damage: number): void {
+    const side = Math.sign(this.x - foe.x) || -foe.facing;
+    const [flo, fhi] = foe.span();
+    const front = this.reachOf().front + FEINT_GAP;
+    let x = side > 0 ? fhi + front : flo - front;
+    if (!this.fitsAt(arena, x, foe.y, -side)) x = this.x;
+    const to = new Vector3(x, foe.y, 0);
+    this.quick = true; this.vx = 0; this.vy = 0;
+    this.using = 'Counter'; this.usingSince = this.time;
+    this.face(-side, true);
+    const strike = () => {
+      this.begin('Counter');
+      void this.factory.playStrike(this.node, foe.node.position.clone(), 'Fighting', () => {
+        const [l, r, b, t] = foe.box(), [ml, mr] = this.span();
+        const close = Math.min(Math.abs(l - mr), Math.abs(ml - r)) < this.H * 0.6 && this.y < t && this.y + this.H > b;
+        if (foe.down || foe.invulnerable || !close) return false;
+        return foe.takeHit(this, 'Counter', () => this.factory.playHitReact(foe.node), arena, damage);
+      }, { lead: COUNTER_LEAD }).then(() => this.end());
+    };
+    void this.factory.playTeleport(this.node, to, {
+      look: 'lines', element: 'Fighting', face: side < 0 ? Math.PI / 2 : -Math.PI / 2,
+      backward: true, arriveForward: true, going: new Vector3(side, 0, 0),
+      onArrive: () => { this.face(-side, true); strike(); },
+    }).then(() => {
+      this.grounded = this.y <= 1e-3;
+      if (!this.grounded) this.flying = this.canFly || this.flying;
+      this.quick = false; this.quickCool = TELEPORT_COOL;
+    });
   }
 
   /** Thrown back `dir` (−1, 1): carried off fast and up a little, out of its own control and flinching till it is down again. */
@@ -649,7 +712,7 @@ export class Fighter {
     const ka = Math.min(1, Math.max(0, (this.time + COUNTER_SENSE - b.launchedAt) / FRONT_TIME));
     const reachSoon = b.range * (1 - (1 - ka) * (1 - ka) * (1 - ka));
     for (const f of this.foes(arena)) {
-      if (!f.countering || f.down || f.invulnerable || b.struck.has(f)) continue;
+      if (!f.countering || f.down || f.invulnerable || b.struck.has(f) || !f.setsOff(b.move)) continue;
       const d = Fighter.lineMeets(b.from, b.dir, Math.min(reachSoon, b.reach + 0.3), f);
       if (d === null) continue;
       b.struck.add(f);
@@ -907,9 +970,33 @@ export class Fighter {
     });
   }
 
-  private teleport(arena: Arena, look: 'lines' | 'ring', element?: string): void {
+  /**
+   * Agility: a movement move — a zip in speed lines (the teleport's, TELEPORT_DIST on) the way it is held (`want`;
+   * none: the way it faces), along its aim, coming in still facing the way it went; held, the next AGILITY_COOL s on.
+   */
+  private agility(arena: Arena, want: number): void {
+    if (this.quickCool > 0) return;
+    if (want && want !== this.facing) this.face(want, true);
+    this.teleport(arena, 'lines', undefined, { cool: AGILITY_COOL, face: this.facing });
+  }
+
+  /**
+   * A back dash (anyone's: L): gone backwards in speed lines, BACK_DASH_DIST × a teleport's way, level (along its aim
+   * aloft), still facing forwards — dropping back in its jump-down pose as it goes.
+   */
+  private backDash(arena: Arena): void {
+    if (this.quickCool > 0) return;
+    this.teleport(arena, 'lines', undefined, { cool: BACK_DASH_COOL, dir: -this.facing, face: this.facing, backward: true, dist: BACK_DASH_DIST, name: 'Back Dash' });
+  }
+
+  /**
+   * `o`: how soon the next (s; TELEPORT_COOL), the way it goes (its facing), the way it arrives facing (its nearest
+   * foe), backwards (a back dash's look), how far (× TELEPORT_DIST).
+   */
+  private teleport(arena: Arena, look: 'lines' | 'ring', element?: string,
+    o: { cool?: number; dir?: number; face?: number; backward?: boolean; dist?: number; name?: string } = {}): void {
     if (this.quickCool > 0 || (!this.grounded && !this.flying && !this.airDash)) return;
-    const p = this.node.position, dir = this.facing;
+    const p = this.node.position, dir = o.dir ?? this.facing;
     const tilt = !this.grounded || this.aim > 0 ? this.aim * AIM_ANGLE : 0;
     const ux = dir * Math.cos(tilt), uy = Math.sin(tilt);
     const fits = (x: number, y: number) => y >= 0 && !arena.level.some((s) => this.overlaps(x, y + 1e-3, s))
@@ -917,27 +1004,33 @@ export class Fighter {
         const [lo, hi] = this.span(x), [flo, fhi] = f.span();
         return y < f.y + f.H && y + this.H > f.y && hi > flo && lo < fhi;
       });
+    // (Through bodies, never through a wall: no further than the level lets it go along the way — the ground below
+    // aside, as an aim down along it would graze it.)
+    const wallAt = (d: number) => arena.level.some((s) => this.overlaps(p.x + ux * d, Math.max(0, p.y + uy * d) + 1e-3, s));
+    let open = 0;
+    const reach = TELEPORT_DIST * (o.dist ?? 1) * this.H;
+    while (open < reach * TELEPORT_PAST && !wallAt(open + 0.1)) open += 0.1;
     // (Landing in a body: on past it first — behind it — up to TELEPORT_PAST further; else drawn back till it fits.)
-    const full = TELEPORT_DIST * this.H;
+    const full = Math.min(reach, open);
     let d = full;
     if (!fits(p.x + ux * d, p.y + uy * d)) {
       let on = d;
-      while (on < full * TELEPORT_PAST && !fits(p.x + ux * on, p.y + uy * on)) on += 0.1;
-      if (on < full * TELEPORT_PAST) d = on;
+      while (on < Math.min(full * TELEPORT_PAST, open) && !fits(p.x + ux * on, p.y + uy * on)) on += 0.1;
+      if (on < Math.min(full * TELEPORT_PAST, open) || fits(p.x + ux * on, p.y + uy * on)) d = on;
       else { while (d > 0.2 && !fits(p.x + ux * d, p.y + uy * d)) d -= 0.1; }
     }
     if (d <= 0.2) return;
     const to = new Vector3(p.x + ux * d, p.y + uy * d, 0);
     if (!this.grounded && !this.flying) this.airDash = false;
     this.quick = true; this.vx = 0; this.vy = 0;
-    this.using = this.moves.mobility ?? 'Teleport'; this.usingSince = this.time;
+    this.using = o.name ?? this.moves.mobility ?? 'Teleport'; this.usingSince = this.time;
     // (There, it will face its nearest foe — behind it, it turns round; it comes in already facing so.)
     const foe = this.foes(arena).sort((a, b) => Math.abs(a.x - to.x) - Math.abs(b.x - to.x))[0];
-    const faceThere = foe ? Math.sign(foe.x - to.x) || dir : dir;
-    void this.factory.playTeleport(this.node, to, { look, element, face: faceThere > 0 ? Math.PI / 2 : -Math.PI / 2 }).then(() => {
+    const faceThere = o.face ?? (foe ? Math.sign(foe.x - to.x) || dir : dir);
+    void this.factory.playTeleport(this.node, to, { look, element, face: faceThere > 0 ? Math.PI / 2 : -Math.PI / 2, backward: o.backward }).then(() => {
       this.face(faceThere, true);
       this.grounded = this.y <= 1e-3;
-      this.quick = false; this.quickCool = TELEPORT_COOL; this.using = '';
+      this.quick = false; this.quickCool = o.cool ?? TELEPORT_COOL; this.using = '';
       // (Its resting clip, as the teleport eased it in — named so, not played again over it with a snap.)
       this.clip = this.restingClip();
     });
@@ -960,7 +1053,7 @@ export class Fighter {
   takeHit(by: Fighter, move: string, flinch: Promise<unknown> | (() => Promise<unknown>), arena: Arena, damageOverride?: number): boolean {
     if (this.down || this.invulnerable) return false;
     // (Braced to counter: the blow sets it off — none of it taken.)
-    if (this.countering && by !== this) { this.counter(by, arena, move); return false; }
+    if (this.countering && by !== this && this.setsOff(move)) { this.counter(by, arena, move); return false; }
     const over = typeof flinch === 'function' ? flinch() : flinch;
     // (Unhurtable till its flinch is over and HIT_GRACE after, blinking; pushed back from its striker.)
     this.graceUntil = Infinity;

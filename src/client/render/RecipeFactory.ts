@@ -417,6 +417,8 @@ const TP_LINES = 0.26;
 /** Its forward pose: the first clip of these it has; how far it leans in (radians, nose down); how long it takes to settle upright after (s). */
 /** Its pose as it goes: springing off — its jump up, else its fast flight. */
 const TP_VANISH_POSES = ['jumpUpLoop', 'jumpUpStart', 'airRun', 'airWalk', 'run'];
+/** Its pose as it goes backwards (a back dash): dropping back — its jump down, else as forwards. */
+const TP_BACK_POSES = ['jumpDownLoop', 'jumpDownStart', ...TP_VANISH_POSES];
 /** How much of its snout's miss it makes up each frame as it lines up (a frame behind: under 1, so it settles, not overshoots). */
 const TP_ALIGN = 0.6;
 /** The most its body tilts to line its snout up (radians). */
@@ -1415,11 +1417,17 @@ export class RecipeFactory implements UnitFactory {
    * and coming (`look`): speed lines flickering ('lines': going, along the way it goes; coming, the way it will face —
    * `face`, its yaw there) or a ring with a flare of short lines ('ring'). It goes springing off (TP_VANISH_POSES), its
    * snout lined up on the way it goes, and arrives upright in its resting pose (its idle; aloft, its air idle). Resolves
-   * once it is whole again.
+   * once it is whole again. Backwards (`backward`: a back dash): it goes facing the way it faced — away from the way it
+   * goes — dropping back in its jump-down pose (TP_BACK_POSES), upright, and its lines come in trailing from where it
+   * came (ahead of it), not behind it.
    */
   async playTeleport(node: TransformNode, to: Vector3, opts: { look?: 'lines' | 'ring'; face?: number; element?: string;
     /** Arriving mid-attack (Feint): called as it is put there, before it opens out — its strike begun, the copy that opens out caught in it; no forward pose there, no settling after. */
-    onArrive?: () => void } = {}): Promise<void> {
+    onArrive?: () => void; backward?: boolean;
+    /** Backwards, but coming in forwards (Counter): its lines trailing behind it as it arrives, as any teleport's. */
+    arriveForward?: boolean;
+    /** The way it goes, when not toward `to` (Counter: gone backwards, back in near where it stood). */
+    going?: Vector3 } = {}): Promise<void> {
     const u = this.units.get(node);
     if (!u) { node.position.copyFrom(to); return; }
     const fx = (this.quickStep ??= new QuickStepFx(this.scene));
@@ -1432,7 +1440,8 @@ export class RecipeFactory implements UnitFactory {
     // Going: its springing pose (TP_VANISH_POSES: its jump up, else its fast flight), its whole body tilted so its snout
     // points straight along the way it goes — level, up or down (nose down: +x tilt).
     const player = u.model.player;
-    const vanishPose = TP_VANISH_POSES.find((c) => player.has(c));
+    const back = !!opts.backward;
+    const vanishPose = (back ? TP_BACK_POSES : TP_VANISH_POSES).find((c) => player.has(c));
     // (Its tilt turns it about its body's middle, not its feet — the body stays where it is as it lines up — and at most
     // TP_TILT_MAX: a pose whose snout points far off, a bird's beak held high, never flips the body over.)
     let base = node.position.clone();
@@ -1450,13 +1459,14 @@ export class RecipeFactory implements UnitFactory {
     const climb = Math.atan2(way0.y, Math.hypot(way0.x, way0.z) || 1e-6);
     // (Its snout kept on the way it goes, every frame till it is gone — the pose blending in, its gaze, its clip's own
     // movement all made up for: tilted by however far its snout, head to mouth, still points off that way.)
-    const align = this.scene.onAfterRenderObservable.add(() => {
+    // (Backwards: upright — its snout points away from the way it goes, nothing to line up.)
+    const align = back ? null : this.scene.onAfterRenderObservable.add(() => {
       lean(node.rotation.x + TP_ALIGN * (this.snoutPitch(node, u) - climb));
     });
     // A flicker as it lines up, then gone.
     for (let i = 0; i < TP_FLICKERS; i++) { show(false); await sleep(beat); show(true); await sleep(beat); }
     await frame();
-    this.scene.onAfterRenderObservable.remove(align);
+    if (align) this.scene.onAfterRenderObservable.remove(align);
     const look = opts.look ?? 'lines';
     // (The ring and flare in a type's aura fill — bright, as they glow additively: Shadow Sneak's Ghost purple, not its
     // black outline — else white.)
@@ -1464,7 +1474,7 @@ export class RecipeFactory implements UnitFactory {
     const from = middle();
     const g0 = this.frozenCopy(u);
     show(false);
-    const going = to.subtract(base);
+    const going = opts.going?.clone() ?? to.subtract(base);
     // (Squeezed into a line along the way it goes.)
     fx.squash(g0.meshes, g0.dispose, from, false, TP_SQUASH, undefined, going);
     if (look === 'lines') fx.speedFlicker(from, going, H, TP_LINES);
@@ -1486,7 +1496,8 @@ export class RecipeFactory implements UnitFactory {
     const at = middle();
     const g1 = this.frozenCopy(u);
     // (Coming in: its lines trailing behind it, the way it now faces — not ahead of it.)
-    if (look === 'lines') fx.speedFlicker(at, new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y)), H, TP_LINES, true);
+    // (Backwards: trailing from where it came — ahead of it — along the way it went.)
+    if (look === 'lines') fx.speedFlicker(at, back && !opts.arriveForward ? going.normalizeToNew() : new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y)), H, TP_LINES, true);
     else { fx.ring(at, H * 1.3, tint); fx.flare(at, H, undefined, tint); }
     // (Opened out of a line along the way it now faces.)
     const facing = new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y));
@@ -1500,15 +1511,22 @@ export class RecipeFactory implements UnitFactory {
    * moment of contact `onBlow` is asked whether it landed; if so, a burst at the contact point (the hemisphere burst,
    * in the move's colours, its dome on into the target), as a quick step's blow. Resolves as its clip plays out.
    */
-  async playStrike(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: () => boolean | void): Promise<void> {
+  async playStrike(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: () => boolean | void,
+    /** Already under way (Counter, opening out of its teleport mid-swing): its clip begun this many s short of its blow, no blend in. */
+    o: { lead?: number } = {}): Promise<void> {
     const u = this.units.get(node);
     if (!u) { onBlow?.(); return; }
     const H = this.heightOf(node);
     const d = targetPos.subtract(node.position);
     if (Math.abs(d.x) + Math.abs(d.z) > 1e-3) this.setFacing(node, Math.atan2(d.x, d.z));
     const clip = this.act(u, 'attack');
-    const hitAt = this.oneShot(u, clip, HIT_AT, HIT_CAP);
+    let hitAt = this.oneShot(u, clip, HIT_AT, HIT_CAP);
     const rest = Math.max(0, (u.model.player.clips.get(clip)?.duration ?? hitAt) - hitAt);
+    if (o.lead !== undefined && hitAt > o.lead) {
+      const p = u.model.player as unknown as { time: number; fade: number };
+      p.time = hitAt - o.lead; p.fade = 1;
+      hitAt = o.lead;
+    }
     await sleep(hitAt);
     if (onBlow?.() === false) { await sleep(rest); return; }
     const way = targetPos.subtract(node.position); way.y = 0;

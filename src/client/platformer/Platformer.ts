@@ -160,7 +160,7 @@ export class Platformer {
       },
       onBurst: (a, b, ma, mb) => this.note(`point-blank: ${a.name} ${ma} × ${b.name} ${mb} — both burst, both knocked back`),
       onClash: (a, b, _w, meet) => this.note(`clash: ${a.name} ${a.using} × ${b.name} ${b.using} at ${meet}`),
-      onCounter: (by, on, move, dmg) => this.note(`counter: ${by.name} on ${on.name}'s ${move} (${dmg})`),
+      onCounter: (by, on, move, dmg, brace = 'Sucker Punch') => this.note(`${brace.toLowerCase()}: ${by.name} on ${on.name}'s ${move} (${dmg})`),
       onClashEnd: (_a, _b, w, s) => this.note(`clash over → ${w ? `${w.name} wins` : 'tie'}${s ? ` (stops ${s.rival.toFixed(2)} / ${s.you.toFixed(2)}${s.outright ? ', outright' : ''})` : ''}`),
     };
     this.build(o.backdrop ?? true);
@@ -194,8 +194,8 @@ export class Platformer {
     for (const m of this.meshes) m.dispose();
     this.painted?.dispose();
     for (const [m, f] of this.faded) this.unfade(m, f);
-    // (Its fighters gone with it: a new level brings its own.)
-    for (const f of this.fighters) this.factory.remove(f.node);
+    // (Its fighters gone with it: a new level brings its own — a beam one was charging or pouring, gone too.)
+    for (const f of this.fighters) { f.beam?.play.cancel?.(true); f.beam = null; this.factory.remove(f.node); }
     this.hud?.remove();
   }
 
@@ -322,7 +322,7 @@ export class Platformer {
   private key(e: KeyboardEvent): void {
     const k = e.key.toLowerCase();
     const down = e.type === 'keydown';
-    if (['a', 'd', 'w', 's', ' ', 'u', 'i', 'j', 'k', 'r', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault();
+    if (['a', 'd', 'w', 's', ' ', 'u', 'i', 'j', 'k', 'l', 'r', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault();
     if (down && !this.keys.has(k)) {
       this.pressed.add(k);
       if (k === 'r' && this.result) this.restart();
@@ -339,7 +339,7 @@ export class Platformer {
       want: (has('d', 'arrowright') ? 1 : 0) - (has('a', 'arrowleft') ? 1 : 0),
       jumpHeld: has(' '), jumpPressed: hit(' '), sink: false,
       aim: (has('w', 'arrowup') ? 1 : 0) - (has('s', 'arrowdown') ? 1 : 0),
-      ranged: hit('u'), close: hit('i'), mobility: hit('j'), control: hit('k'),
+      ranged: hit('u'), close: hit('i'), mobility: hit('j'), control: hit('k'), mobilityHeld: has('j'), backDash: hit('l'),
     };
     this.pressed.clear();
     return i;

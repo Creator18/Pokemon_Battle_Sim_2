@@ -51,7 +51,7 @@ function helpLine(moves: MoveKit): HTMLDivElement {
   help.dataset.pfHelp = '';
   Object.assign(help.style, { position: 'fixed', left: '50%', top: '14px', transform: 'translateX(-50%)', padding: '8px 14px', background: 'rgba(20,24,40,0.85)',
     color: '#fff', font: '600 14px system-ui', borderRadius: '8px', zIndex: '60', whiteSpace: 'nowrap', pointerEvents: 'none' });
-  help.textContent = `A / D run · Space jump / fly · W / S aim · U ${moves.ranged ?? '—'} · I ${moves.close ?? '—'} · J ${moves.mobility ?? '—'} · K ${moves.control ?? '—'}`;
+  help.textContent = `A / D run · Space jump / fly · W / S aim · U ${moves.ranged ?? '—'} · I ${moves.close ?? '—'} · J ${moves.mobility ?? '—'} · K ${moves.control ?? '—'} · L back dash`;
   document.body.append(help);
   return help;
 }
