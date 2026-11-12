@@ -35,7 +35,8 @@
  * Struck, it is held (no moving, no moves) for as long as its flinch lasts — and a beam it was charging or pouring is cut
  * off — pushed back from its striker (PUSH_SPEED), and can't be struck again till HIT_GRACE s after its flinch ends
  * (blinking meanwhile): no blow lands on a fighter twice in a row — no stun-locks; out of HP it faints — and a practice target (`respawn`) stands again after RESPAWN s. A blow's damage: its move's
- * power × its type's effectiveness on the target's types × the same-type bonus (STAB), ÷ DAMAGE_SCALE.
+ * the main series' (damageTo): its user's and its target's real stats at LEVEL (from their base stats — perfect IVs,
+ * their EVs, a neutral nature), ⌊⌊22 × power × A / D⌋ / 50⌋ + 2, × the same-type bonus (STAB) × its type's effectiveness.
  *
  * Beam duels: a beam takes BEAM_CHARGE s to launch, then its front FRONT_TIME s to cross. Too close to clash (nearer
  * than CLASH_MIN — the stadium's painted Pokéball across), the two burst point-blank between them at once, and both are knocked
@@ -215,6 +216,20 @@ const FOE_NEAR = 0.3;
 const BEAM_TYPES: Record<string, string> = {};
 /** A blow's damage: power × effectiveness × STAB, ÷ this (HP; a move it doesn't know: DAMAGE_UNKNOWN). */
 const DAMAGE_SCALE = 5, DAMAGE_UNKNOWN = 8;
+/**
+ * Every fighter at LEVEL 100, perfect IVs (IV), its EVs maxed out (EV_TOTAL in all, no stat over EV_MAX) — players
+ * will reallot them (how: later); till then spread evenly (EV_EVEN in each). A Pokémon grows stronger by evolving and
+ * learning moves, not by levelling. Its real stats from its base stats by the main series' formulas (a neutral nature).
+ */
+/** Damage as dealt: rounded, at least 1 — but none (0) where the move does none (an immunity). */
+const hurt = (x: number) => (x <= 0 ? 0 : Math.max(1, Math.round(x)));
+export const LEVEL = 100, IV = 31, EV_TOTAL = 510, EV_MAX = 252, EV_EVEN = 85;
+/** An EV spread: HP, Attack, Defense, Special Attack, Special Defense, Speed. */
+export interface Evs { hp: number; atk: number; def: number; spa: number; spd: number; spe: number }
+export const EVEN_EVS: Evs = { hp: EV_EVEN, atk: EV_EVEN, def: EV_EVEN, spa: EV_EVEN, spd: EV_EVEN, spe: EV_EVEN };
+/** A real stat from its base and its EVs at LEVEL: HP's, and the others'. */
+export const hpStat = (base: number, ev = EV_EVEN, level = LEVEL) => Math.floor(((2 * base + IV + Math.floor(ev / 4)) * level) / 100) + level + 10;
+export const realStat = (base: number, ev = EV_EVEN, level = LEVEL) => Math.floor(((2 * base + IV + Math.floor(ev / 4)) * level) / 100) + 5;
 /** A move's power scales with its user's Attack (physical) or Special Attack (special), against this (a stat of 100: × 1). */
 const STAT_REF = 100;
 /** A beam: its charge before it launches, its front's crossing (s — RecipeFactory's BEAM_CHARGE, BeamFx's GROW). */
@@ -305,7 +320,10 @@ export class Fighter {
   /** The move it is telling (about to make), and how many times its attack has been cut off by a counter. */
   telling = ''; interrupted = 0;
   /** Its Attack and Special Attack (its species'): a physical move's power × attack ÷ STAT_REF, a special move's × spAtk ÷ STAT_REF. */
-  attack = STAT_REF; spAtk = STAT_REF; speed = STAT_REF;
+  /** Its base stats (the species'): Attack, Special Attack, Speed, Defense, Special Defense. */
+  attack = STAT_REF; spAtk = STAT_REF; speed = STAT_REF; defense = STAT_REF; spDef = STAT_REF;
+  /** Its EV spread (EVEN_EVS till players reallot it). */
+  evs: Evs = { ...EVEN_EVS };
   /** Its moves' cooldowns: when each is ready again, and how hot each is (its abuse: heat, as of when). */
   readonly readyAt = new Map<string, number>();
   /** How long each move's last cooldown was (s): the HUD's sweep. */
@@ -428,11 +446,19 @@ export class Fighter {
     return category === MoveCategory.SPECIAL ? this.spAtk / STAT_REF : category === MoveCategory.PHYSICAL ? this.attack / STAT_REF : 1;
   }
 
-  /** How strong `move` is from it against `on`: power × effectiveness × STAB. */
-  strength(move: string, on: Fighter): number {
+  /**
+   * The damage `move` from it does `on` (HP, before any share of it — a burst's, a counter's): the main series'
+   * formula at LEVEL — its Attack on the target's Defense (a special move: Special Attack on Special Defense), real
+   * stats from base — × STAB × type effectiveness. No random roll, no critical hits.
+   */
+  damageTo(move: string, on: Fighter): number {
     const m = getMove(move);
-    if (!m) return DAMAGE_UNKNOWN * DAMAGE_SCALE;
-    return m.basePower * getTypeEffectiveness(m.moveType, on.types) * (this.types.includes(m.moveType) ? 1.5 : 1) * this.statFor(m.category);
+    if (!m) return DAMAGE_UNKNOWN;
+    const special = m.category === MoveCategory.SPECIAL;
+    const A = special ? realStat(this.spAtk, this.evs.spa) : realStat(this.attack, this.evs.atk);
+    const D = special ? realStat(on.spDef, on.evs.spd) : realStat(on.defense, on.evs.def);
+    const base = Math.floor(Math.floor((Math.floor((2 * LEVEL) / 5) + 2) * m.basePower * A / D) / 50) + 2;
+    return base * (this.types.includes(m.moveType) ? 1.5 : 1) * getTypeEffectiveness(m.moveType, on.types);
   }
 
   private foes(arena: Arena): Fighter[] { return arena.fighters.filter((f) => f !== this && f.team !== this.team); }
@@ -703,7 +729,7 @@ export class Fighter {
     const d = Math.hypot(Math.max(l, Math.min(r, at[0])) - at[0], Math.max(b, Math.min(t, at[1])) - at[1]) / this.H;
     const k = Math.max(0, Math.min(1, (BURST_FAR - d) / (BURST_FAR - BURST_NEAR)));
     if (k <= 0) return false;
-    const damage = Math.max(1, Math.round(BURST_CHIP * k * by.strength(move, this) / DAMAGE_SCALE));
+    const damage = hurt(BURST_CHIP * k * by.damageTo(move, this));
     this.hp = Math.max(0, this.hp - damage);
     arena.onHit?.(by, this, move, damage);
     if (this.hp <= 0) {
@@ -749,7 +775,7 @@ export class Fighter {
     this.braceAgainst = move; this.finishRun(this.braceK); this.braceAgainst = null;
     this.firing = false; this.using = '';
     const counter = this.moves.control === 'Counter';
-    const damage = Math.max(1, Math.round((counter ? COUNTER_DOUBLE : COUNTER_TURN) * attacker.strength(move, this) / DAMAGE_SCALE));
+    const damage = hurt((counter ? COUNTER_DOUBLE : COUNTER_TURN) * attacker.damageTo(move, this));
     // (Its attack goes on — its beam pouring on into where this one was — till the counter's blow lands and cuts it off,
     // as any blow does.)
     arena.onCounter?.(this, attacker, move, damage, counter ? 'Counter' : 'Sucker Punch');
@@ -954,7 +980,7 @@ export class Fighter {
       const loser = winner === this ? rival : this;
       // (Its beam's damage × its timing.)
       const move = winner === this ? name : theirs.move, q = (winner === this ? ms.q : rs.q) ?? 0;
-      const damage = Math.max(1, Math.round(timing(q) * winner.strength(move, loser) / DAMAGE_SCALE));
+      const damage = hurt(timing(q) * winner.damageTo(move, loser));
       if (loser.takeHit(winner, move, () => this.factory.playHitReact(loser.node), arena, damage)) winner.zap(loser, move, play.done);
     });
     void play.done.then(() => { this.clashing = null; rival.clashing = null; if (won?.run) won.finishRun(won.run.k); this.end(); rival.end(); });
@@ -1204,12 +1230,14 @@ export class Fighter {
     if (this.down || this.invulnerable || (by !== this && by.down)) return false;
     // (Braced to counter: the blow sets it off — none of it taken.)
     if (this.countering && by !== this && this.setsOff(move)) { this.counter(by, arena, move); return false; }
+    // (Immune — its type unaffected by the move's: no damage, no flinch, no push; only told so.)
+    const damage = damageOverride ?? hurt(by.damageTo(move, this));
+    if (damage <= 0) { arena.onHit?.(by, this, move, 0); return false; }
     const over = typeof flinch === 'function' ? flinch() : flinch;
     // (Unhurtable till its flinch is over and HIT_GRACE after, blinking; pushed back from its striker.)
     this.graceUntil = Infinity;
     void over.then(() => { this.graceUntil = this.time + HIT_GRACE; if (!this.down) this.factory.blink(this.node, HIT_GRACE); });
     this.pushFrom(by);
-    const damage = damageOverride ?? Math.max(1, Math.round(by.strength(move, this) / DAMAGE_SCALE));
     // (Struck while braced: the brace is broken — out of it, as if it had run out.)
     // (Its move under way cut off by the blow: no cooldown for it — nor for a brace broken so.)
     this.interruptRun();

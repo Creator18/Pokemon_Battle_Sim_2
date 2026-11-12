@@ -25,7 +25,7 @@ import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
 import type { Camera } from '@babylonjs/core/Cameras/camera';
 import type { RecipeFactory } from '../render/RecipeFactory.ts';
 import type { SpeciesDefinition } from '../../shared/index.ts';
-import { Fighter, DEFAULT_KIT, IDLE } from './Fighter.ts';
+import { Fighter, DEFAULT_KIT, IDLE, hpStat } from './Fighter.ts';
 import { Hud } from './Hud.ts';
 import { typeColor } from '../theme.ts';
 import type { Arena, Intent, MoveKit, Platform } from './Fighter.ts';
@@ -51,8 +51,6 @@ const LIT_SELF = 0.55;
  * height) fades to OCCLUDED, easing there and back at OCCLUDE_EASE (per s).
  */
 const OCCLUDE_AT = [0.25, 0.6, 0.95], OCCLUDED = 0.2, OCCLUDE_EASE = 8;
-/** HP: the player's and a boss's; a practice target's (three Flamethrowers). */
-const PLAYER_HP = 100, BOSS_HP = 100, TARGET_HP = 40;
 
 /** The first room: a floor with a pit, steps up to a high ledge, floating platforms, a wall to jump. */
 export const FIRST_ROOM: Platform[] = [
@@ -181,15 +179,18 @@ export class Platformer {
   /** A side-on level with `o.species` in it, under the player's control. */
   static async start(scene: Scene, factory: RecipeFactory, camera: Camera, o: PlatformerOptions): Promise<Platformer> {
     const node = await factory.createPokemon(o.species, 1);
-    const player = new Fighter(node, factory, 1, PLAYER_HP, o.moves ?? DEFAULT_KIT, `${o.species.name} (you)`, o.species.types);
+    // (Its HP its species' real HP stat at LEVEL.)
+    const player = new Fighter(node, factory, 1, hpStat(o.species.hp), o.moves ?? DEFAULT_KIT, `${o.species.name} (you)`, o.species.types);
     player.attack = o.species.attack; player.spAtk = o.species.spAtk; player.speed = o.species.speed;
+    player.defense = o.species.defense; player.spDef = o.species.spDef;
     const foes: Fighter[] = [];
     for (const e of o.enemies ?? []) {
       const n = await factory.createPokemon(e.species, 2);
       foes.push(e.boss
-        ? new Fighter(n, factory, 2, BOSS_HP, e.moves ?? DEFAULT_KIT, `${e.species.name} (boss)`, e.species.types)
-        : new Fighter(n, factory, 2, TARGET_HP, {}, e.species.name, e.species.types, { x: e.x, y: e.y }));
+        ? new Fighter(n, factory, 2, hpStat(e.species.hp), e.moves ?? DEFAULT_KIT, `${e.species.name} (boss)`, e.species.types)
+        : new Fighter(n, factory, 2, hpStat(e.species.hp), {}, e.species.name, e.species.types, { x: e.x, y: e.y }));
       foes[foes.length - 1].attack = e.species.attack; foes[foes.length - 1].spAtk = e.species.spAtk; foes[foes.length - 1].speed = e.species.speed;
+      foes[foes.length - 1].defense = e.species.defense; foes[foes.length - 1].spDef = e.species.spDef;
     }
     return new Platformer(scene, factory, camera, player, foes, o);
   }
