@@ -360,7 +360,8 @@ export class Fighter {
   /** Put somewhere, still, facing `dir`. */
   place(x: number, y: number, dir: number): void {
     this.node.position.set(x, y, 0);
-    this.vx = 0; this.vy = 0; this.flying = false; this.dashT = 0;
+    // (Set down aloft: not on the ground — its first frame there falls or flies, never stands.)
+    this.vx = 0; this.vy = 0; this.flying = false; this.dashT = 0; this.grounded = y <= 1e-3;
     this.face(dir, true);
   }
 
