@@ -54,7 +54,7 @@
         if (Math.random() < skill) {
           if (me.moves.control === 'Sucker Punch' || (me.moves.control === 'Counter' && physical)) { r = { ...base, control: true }; tally('brace on tell'); }
           else if (!physical) {
-            if (Math.random() < 0.5) { r = { ...base, backDash: true }; tally('back dash a beam'); }
+            if (Math.random() < 0.5) { r = { ...base, dash: true, want: 0 }; tally('back dash a beam'); }
             else if (Math.random() < 0.5) { r = { ...base, ranged: true }; tally('meet the beam'); }
             else { r = { ...base, jumpPressed: true, jumpHeld: true }; tally('jump a beam'); }
           }
@@ -70,7 +70,9 @@
       const reach = (me.H + foe.H * 0.5) * 1.1;
       if (dist <= reach && Math.abs(dy) < me.H * 0.8) { tally('slash'); return { ...base, close: true }; }
       if (Math.abs(dy) < me.H * 0.6 && dist < 10 && Math.random() < 0.35) { tally('beam'); return { ...base, ranged: true }; }
-      if (me.moves.mobility === 'Agility' && dist > 5 && Math.random() < 0.5) { tally('agility in'); return { ...base, want: dir, mobility: true }; }
+      // (Far off: Agility's boost first, if it has it; then in with a dash — zippy, boosted.)
+      if (me.moves.mobility === 'Agility' && dist > 5 && me.ready('Agility') && Math.random() < 0.5) { tally('agility boost'); return { ...base, mobility: true }; }
+      if (dist > 4.5 && me.ready('Dash') && Math.random() < 0.5) { tally(me.zippy ? 'zippy dash in' : 'dash in'); return { ...base, want: dir, dash: true }; }
       if (me.moves.mobility === 'Quick Attack' && dist > 2 && dist < 6 && Math.random() < 0.4) { tally('quick attack'); return { ...base, mobility: true }; }
       if (dy > me.H) return { ...base, jumpPressed: true, jumpHeld: true };
       return { ...base, want: dir };

@@ -49,7 +49,7 @@ function readyCamera(camera: Camera): void {
 function helpLine(moves: MoveKit, withBar = true): HTMLDivElement {
   document.querySelector('[data-pf-help]')?.remove();
   const items: [string[], string][] = [[['A', 'D'], 'run'], [['Space'], 'jump / fly'], [['W', 'S'], 'aim']];
-  if (!withBar) items.push([['U'], moves.ranged ?? '—'], [['I'], moves.close ?? '—'], [['J'], moves.mobility ?? '—'], [['K'], moves.control ?? '—'], [['L'], 'back dash']);
+  if (!withBar) items.push([['U'], moves.ranged ?? '—'], [['I'], moves.close ?? '—'], [['J'], moves.mobility ?? '—'], [['K'], moves.control ?? '—'], [['L'], 'dash (no direction: back dash)']);
   items.push([['R'], 'restart']);
   const box = document.createElement('div');
   box.className = 'mvh'; box.dataset.pfHelp = '';

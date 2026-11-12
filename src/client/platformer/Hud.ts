@@ -78,6 +78,8 @@ const CSS = `
 .mvh-slot.cool { border-color: rgba(255,255,255,.14); }
 .mvh-slot.using { border-color: #fff; transform: translateY(-4px); }
 .mvh-slot.ready { animation: mvh-ready .45s ease-out; }
+.mvh-slot.buff { border-color: #f9a8d4; box-shadow: 0 0 0 2px #ec4899, 0 0 22px #ec4899, inset 0 3px 0 var(--c); }
+.mvh-slot.buff .mvh-secs { color: #fbcfe8; }
 .mvh-slot.braced { border-color: #93c5fd; box-shadow: 0 0 0 2px #60a5fa, 0 0 22px #3b82f6, inset 0 3px 0 var(--c); }
 @keyframes mvh-ready { 0% { box-shadow: 0 0 0 0 #fff, inset 0 3px 0 var(--c); } 40% { box-shadow: 0 0 0 4px rgba(255,255,255,.9), 0 0 24px #fff, inset 0 3px 0 var(--c); } 100% { box-shadow: 0 6px 16px rgba(0,0,0,.45), inset 0 3px 0 var(--c); } }
 .mvh-legend { position: absolute; right: 22px; bottom: 22px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px 14px; max-width: 46vw;
@@ -163,7 +165,7 @@ export class Hud {
     const moves = document.createElement('div');
     moves.className = 'mvh-moves';
     const kit = player.moves;
-    for (const [key, move, small] of [['U', kit.ranged], ['I', kit.close], ['J', kit.mobility], ['K', kit.control], ['L', 'Back Dash', true]] as [string, string | undefined, boolean?][]) {
+    for (const [key, move, small] of [['U', kit.ranged], ['I', kit.close], ['J', kit.mobility], ['K', kit.control], ['L', 'Dash', true]] as [string, string | undefined, boolean?][]) {
       const s = this.slot(key, move, !!small); moves.append(s.el); this.slots.push(s);
     }
     // The clash's stopper.
@@ -247,10 +249,17 @@ export class Hud {
     const p = this.player;
     for (const s of this.slots) {
       if (!s.move) continue;
-      const left = Math.max(0, (p.readyAt.get(s.move) ?? 0) - p.time), len = p.coolLen.get(s.move) ?? 0;
+      // (The dash button's: its dash's or its back dash's cooldown, whichever is longer to run.)
+      const moves = s.move === 'Dash' ? ['Dash', 'Back Dash'] : [s.move];
+      const leftOf = (m: string) => Math.max(0, (p.readyAt.get(m) ?? 0) - p.time);
+      const m = moves.reduce((a, b) => (leftOf(b) > leftOf(a) ? b : a));
+      const left = leftOf(m), len = p.coolLen.get(m) ?? 0;
       const cooling = left > 0.02 && len > 0;
-      s.sweep.style.setProperty('--p', cooling ? `${(left / len) * 360}deg` : '0deg');
-      s.secs.textContent = cooling && left >= 0.25 ? left.toFixed(left < 1 ? 1 : 0) : '';
+      // (Agility's boost on: its slot lit, the boost's seconds left in it, not its cooldown.)
+      const buff = s.move === 'Agility' && p.zippy;
+      s.el.classList.toggle('buff', buff);
+      s.sweep.style.setProperty('--p', cooling && !buff ? `${(left / len) * 360}deg` : '0deg');
+      s.secs.textContent = buff ? p.zippyLeft.toFixed(1) : cooling && left >= 0.25 ? left.toFixed(left < 1 ? 1 : 0) : '';
       s.el.classList.toggle('cool', cooling);
       if (!cooling && !s.wasReady) { s.el.classList.remove('ready'); void s.el.offsetWidth; s.el.classList.add('ready'); }
       s.wasReady = !cooling;

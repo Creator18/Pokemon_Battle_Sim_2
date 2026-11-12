@@ -84,10 +84,11 @@ export const DEFAULT_KIT: MoveKit = { ranged: 'Flamethrower', close: 'Dragon Cla
 export interface Intent {
   want: number; jumpHeld: boolean; jumpPressed: boolean; sink: boolean; aim: number;
   ranged: boolean; close: boolean; mobility: boolean; control: boolean;
-  /** Its mobility key held down (Agility: held, it zips on and on). */
-  mobilityHeld?: boolean;
-  /** A back dash (anyone's, whatever its moves): gone backwards in speed lines, still facing forwards. */
-  backDash?: boolean;
+  /**
+   * Its dash (anyone's, whatever its moves): the way it is held (`want`) — a dash; held neither way, a back dash (gone
+   * backwards in speed lines, still facing forwards). Under Agility, both zippy dashes, further.
+   */
+  dash?: boolean;
   face?: number;
 }
 export const IDLE: Intent = { want: 0, jumpHeld: false, jumpPressed: false, sink: false, aim: 0, ranged: false, close: false, mobility: false, control: false };
@@ -127,6 +128,13 @@ const QUICK_COOL = 0.4, QUICK_GAP = 0.08;
 const TELEPORT_DIST = 3.6, TELEPORT_COOL = 0.5;
 /** Agility, a movement move — zips in speed lines the way it is held, one after another: how soon the next (s). */
 const AGILITY_COOL = 0.08;
+/**
+ * Agility: not a move of its own now but a boost — for AGILITY_TIME s its dash and back dash are zippy dashes (gone in
+ * speed lines and back, ZIP_GAIN × as far as a plain one goes). Its own cooldown counts from when it is used.
+ */
+const AGILITY_TIME = 4, ZIP_GAIN = 1.35;
+/** Agility's boost: the flash it gives as it takes hold. */
+const AGILITY_GLOW: [number, number, number] = [1, 0.45, 0.75];
 /** A back dash: how far (× TELEPORT_DIST), how soon the next (s). */
 const BACK_DASH_DIST = 0.7, BACK_DASH_COOL = 0.35;
 /**
@@ -162,7 +170,7 @@ const COUNTER_DOUBLE = 2;
  *   its abuse:  1 + ABUSE_STEP × its heat — each use of it adds 1 heat, halving every ABUSE_HALF s.
  */
 const SLOT_COOL = { ranged: 1.2, close: 0.45, mobility: 0.5, control: 2.5 } as const;
-const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 0.08, 'Back Dash': 0.35, 'Teleport': 0.5 };
+const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 9, 'Dash': 0.5, 'Back Dash': 0.5, 'Teleport': 0.5 };
 const SPEED_K: [number, number] = [0.6, 1.5], POWER_REF = 80, POWER_K: [number, number] = [0.5, 1.6];
 const ABUSE_HALF = 3, ABUSE_STEP = 0.6;
 /** Counter's blow coming in mid-swing: its clip begun this far (s) short of the blow as it opens out of its teleport. */
@@ -200,6 +208,8 @@ export function beamFor(move: string | null | undefined): BeamSpec | null {
 }
 export function beamReach(spec: BeamSpec): number { return spec.range ?? (spec.style === 2 ? BEAM2_REACH : BEAM_REACH); }
 const FOE_NEAR = 0.3;
+/** A beam move not in the move table: its type (for a clash's type effectiveness), from its look. */
+const BEAM_TYPES: Record<string, string> = {};
 /** A blow's damage: power × effectiveness × STAB, ÷ this (HP; a move it doesn't know: DAMAGE_UNKNOWN). */
 const DAMAGE_SCALE = 5, DAMAGE_UNKNOWN = 8;
 /** A move's power scales with its user's Attack (physical) or Special Attack (special), against this (a stat of 100: × 1). */
@@ -291,6 +301,14 @@ export class Fighter {
   private heat = new Map<string, { h: number; at: number }>();
   /** The move under way that will cool down once it has gone as it should (cut off: cleared, no cooldown). */
   private run: { move: string; k: number } | null = null; private runSeq = 0; private braceK = -1;
+  /** Agility's boost: till when (its own clock). A plain dash under way: its cooldown's key. */
+  private agilityUntil = -1; private dashK = -1;
+  /** Its beam's line, as a gaze (radians above level), while it pours: its head held on it. */
+  private lineGaze: number | null = null;
+  /** Agility's boost on: its dashes zippy. */
+  get zippy(): boolean { return this.time < this.agilityUntil; }
+  /** Agility's boost: how long it has left (s). */
+  get zippyLeft(): number { return Math.max(0, this.agilityUntil - this.time); }
   /** In a clash: its stopper (its ranged key stops its needle). */
   clashing: ClashMeter | null = null;
 
@@ -339,7 +357,7 @@ export class Fighter {
     this.beam?.play.cancel?.(); this.beam = null;
     this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null;
     this.counterUntil = -1; this.lagUntil = 0;
-    this.readyAt.clear(); this.coolLen.clear(); this.heat.clear(); this.run = null;
+    this.readyAt.clear(); this.coolLen.clear(); this.heat.clear(); this.run = null; this.agilityUntil = -1;
   }
 
   /** `move` ready (its cooldown over). */
@@ -375,11 +393,16 @@ export class Fighter {
   /** Its move under way cut off: no cooldown for it. */
   private interruptRun(): void { this.run = null; }
 
-  /** `move` from it against `on`, for a clash: its power P (base power × STAB) and its type effectiveness E. */
-  clashTerms(move: string, on: Fighter): { P: number; E: number } {
+  /**
+   * `move` from it against `against` (the move it clashes with), for a clash: its power P (base power × STAB × its
+   * stat) and its type effectiveness E — its type's on the other move's type, the two moves weighed against each other
+   * (not on the Pokémon behind it).
+   */
+  clashTerms(move: string, against: string): { P: number; E: number } {
     const m = getMove(move);
     if (!m) return { P: DAMAGE_UNKNOWN * DAMAGE_SCALE, E: 1 };
-    return { P: m.basePower * (this.types.includes(m.moveType) ? 1.5 : 1) * this.statFor(m.category), E: getTypeEffectiveness(m.moveType, on.types) };
+    const theirs = getMove(against)?.moveType ?? BEAM_TYPES[against];
+    return { P: m.basePower * (this.types.includes(m.moveType) ? 1.5 : 1) * this.statFor(m.category), E: theirs ? getTypeEffectiveness(m.moveType, [theirs]) : 1 };
   }
 
   /** A move's stat factor: a special move's, its Special Attack ÷ STAT_REF; a physical move's, its Attack ÷ STAT_REF; else 1. */
@@ -414,7 +437,8 @@ export class Fighter {
     const held = this.stunned || this.down;
     const it = held ? IDLE : intent;
     // Its aim: where it looks, and where its moves go (held through a move: it set its line as it began).
-    if (!this.down) { this.aim = it.aim; this.factory.setGaze(this.node, this.aim * AIM_ANGLE); }
+    // (Its beam pouring, or held in a clash: its gaze kept on the beam's line, wherever the aim key goes since.)
+    if (!this.down) { this.aim = it.aim; this.factory.setGaze(this.node, this.firing && this.lineGaze !== null ? this.lineGaze : this.aim * AIM_ANGLE); }
     // Its beam's line, while it pours, a hit zone: a foe moving into it is struck there and then.
     this.sweepBeam(arena);
     // In a clash: its ranged key stops its needle.
@@ -427,8 +451,8 @@ export class Fighter {
       else if (it.control && BRACES.has(this.moves.control ?? '') && this.ready(this.moves.control)) this.brace();
       else if (it.mobility && this.moves.mobility === 'Dash') this.dash();
       else if (it.mobility && this.moves.mobility && BEHIND_STRIKES[this.moves.mobility]) this.strikeFromBehind(arena, this.moves.mobility);
-      else if (it.backDash) this.backDash(arena);
-      else if ((it.mobility || it.mobilityHeld) && this.moves.mobility === 'Agility') this.agility(arena, it.want);
+      else if (it.dash) this.dashButton(arena, it.want);
+      else if (it.mobility && this.moves.mobility === 'Agility') this.agility();
       else if (it.mobility && this.moves.mobility && TELEPORTS[this.moves.mobility]) this.teleport(arena, TELEPORTS[this.moves.mobility]);
     }
     const want = it.want;
@@ -455,7 +479,7 @@ export class Fighter {
       this.vx = this.facing * DASH_SPEED; this.vy = 0;
       this.ghostT -= dt;
       if (this.ghostT <= 0) { this.factory.afterimage(this.node, DASH_GHOST); this.ghostT = DASH_GHOST_EVERY; }
-      if (this.dashT <= 0) this.vx = this.facing * (this.flying ? FLY_SPEED : RUN_SPEED) * (want ? 1 : 0.3);
+      if (this.dashT <= 0) { this.vx = this.facing * (this.flying ? FLY_SPEED : RUN_SPEED) * (want ? 1 : 0.3); this.finishRun(this.dashK); }
     } else if (this.flying) {
       const ease = (v: number, to: number, a: number) => v + Math.max(-a * dt, Math.min(a * dt, to - v));
       this.vx = ease(this.vx, want * FLY_SPEED, AIR_ACCEL);
@@ -479,12 +503,18 @@ export class Fighter {
     }
     // Moved, sideways then up and down, each against the platforms; then out of every other body.
     const p = this.node.position;
+    const wasX = p.x;
     p.x += this.vx * dt;
     for (const s of arena.level) {
       if (!this.overlaps(p.x, p.y, s)) continue;
-      // (Out the side it came in by — still, nudged in by a body: the nearer side, never through to the far one.)
-      const back = this.vx > 0 || (this.vx === 0 && p.x < s.x + s.w / 2);
-      p.x = back ? s.x - this.W / 2 - 1e-4 : s.x + s.w + this.W / 2 + 1e-4;
+      // (Only just under its top — its feet sunk into a floor: for the fall's pass to stand it on it, not to be thrown
+      // out sideways off its end.)
+      if (p.y > s.top - 0.25) continue;
+      // (Out the side it was on before it moved; already in it — nudged in by something — out its nearer face. Never
+      // out through the far side: a body a little in a wall, moving away from it, would come out beyond it.)
+      const hw = this.W / 2;
+      const left = wasX + hw <= s.x + 1e-3 ? true : wasX - hw >= s.x + s.w - 1e-3 ? false : p.x - s.x < s.x + s.w - p.x;
+      p.x = left ? s.x - hw - 1e-4 : s.x + s.w + hw + 1e-4;
       this.vx = 0;
     }
     const wasGrounded = this.grounded;
@@ -524,8 +554,8 @@ export class Fighter {
    * How far along a line (from `from`, the way `dir`, at most `range`) it first meets `f`'s body — its box drawn in by
    * FOE_NEAR of its height across (where a beam stops on it) — or null if it misses.
    */
-  static lineMeets(from: [number, number], dir: [number, number], range: number, f: Fighter): number | null {
-    if (f.down) return null;
+  static lineMeets(from: [number, number], dir: [number, number], range: number, f: Fighter, evenDown = false): number | null {
+    if (f.down && !evenDown) return null;
     const [l0, r0, b, t] = f.box(), inset = Math.min((r0 - l0) * 0.3, f.H * FOE_NEAR * 0.5);
     const l = l0 + inset, r = r0 - inset;
     let t0 = 0, t1 = range;
@@ -562,6 +592,8 @@ export class Fighter {
     this.face(this.facing, true);
     const range = beamReach(spec);
     const from = this.mouth(), dir = this.aimDir();
+    // (Its head on its beam's line — a clash's too, which begins nothing new.)
+    this.lineGaze = Math.atan2(dir[1], Math.abs(dir[0]));
     // A foe's beam toward it, not yet launched, whose line meets its own: a clash — however far either would reach
     // alone (each line taken out past the other's mouth).
     const span = (f: Fighter) => { const [fx, fy] = f.mouth(); return Math.hypot(fx - from[0], fy - from[1]) + f.H; };
@@ -579,10 +611,13 @@ export class Fighter {
     const reach = hit ? hit.d : range;
     const at = new Vector3(from[0] + dir[0] * Math.max(1, reach), from[1] + dir[1] * Math.max(1, reach), 0);
     this.begin(name);
+    // (Its head held on its beam's line while it pours.)
+    this.lineGaze = Math.atan2(dir[1], Math.abs(dir[0]));
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
     // (A beam 2: its end ball while its front is on a foe; striking nothing, none — its starting egg drawn out the length of the beam instead.
     // A bolt ends on the foe it connects with.)
-    const conn = { on: false, onto: null as Fighter | null };
+    // (In contact from the first frame if a foe is in its line as it fires.)
+    const conn = { on: !!ahead, onto: null as Fighter | null };
     const play = this.factory.playBeam(this.node, null, at, spec.style === 2 ? { ...spec, endBall: () => conn.on }
       : spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) } : spec);
     const mine: Firing = { id: ++beamIds, play, move: name, spec, at: ahead, pressedAt: this.time, launched: false, from, dir,
@@ -775,8 +810,11 @@ export class Fighter {
       f.takeHit(this, b.move, b.play.contactEnds, arena);
       if (this.beam !== b) return;
     }
-    let nearest = Infinity, onto: Fighter | null = null;
+    let nearest = Infinity, onto: Fighter | null = null, inLine = false;
     for (const f of this.foes(arena)) {
+      // (Its look — contact or not — by whether a foe is in its line at all, within its full reach: so a beam on its
+      // way to one already looks as it will on it, and one it struck still counts down. Its blows still wait for its front.)
+      if ((!f.down || b.struck.has(f)) && Fighter.lineMeets(b.from, b.dir, b.reach, f, true) !== null) inLine = true;
       if (f.down) continue;
       // (Its front out — or this one already struck by it — its line runs to its full reach: pushed back, it is still in it.)
       const held = k >= 1 || b.struck.has(f);
@@ -789,8 +827,8 @@ export class Fighter {
       if (f.takeHit(this, b.move, b.play.contactEnds, arena)) { this.factory.holdHitReact(f.node, b.play.contactEnds); this.zap(f, b.move, b.play.contactEnds); }
     }
     // Its end on that one (its end ball on it) — or, none in its line, out to its full reach again (a beam 2's end ball smaller).
-    b.connected = onto !== null;
-    b.onto = b.connected ? onto : null;
+    b.connected = inLine;
+    b.onto = onto;
     const to = Math.max(1, Math.min(b.reach, nearest));
     b.end.set(b.from[0] + b.dir[0] * to, b.from[1] + b.dir[1] * to, 0);
   }
@@ -822,8 +860,8 @@ export class Fighter {
     // as the time allows — the rival's share of the way (from its mouth) 1/2 + head / (2 · FRONT_TIME).
     const head = Math.max(0, Math.min(FRONT_TIME, rival.time - theirs.pressedAt));
     const fromRival = Math.min(0.85, 0.5 + head / (2 * FRONT_TIME));
-    // Each beam's power and type effectiveness on the other.
-    const mineT = this.clashTerms(name, rival), itsT = rival.clashTerms(theirs.move, this);
+    // Each beam's power, and its type's effectiveness on the other beam's type.
+    const mineT = this.clashTerms(name, theirs.move), itsT = rival.clashTerms(theirs.move, name);
     const ahead = (p: { P: number; E: number }, q: { P: number; E: number }) => p.P >= q.P && p.E >= q.E && (p.P > q.P || p.E > q.E);
     // The stopper: a needle each (its own phase), from when the beams meet; one stop each.
     type Side = { phase: number; stop: number | null; q: number | null };
@@ -1033,23 +1071,36 @@ export class Fighter {
     });
   }
 
-  /**
-   * Agility: a movement move — a zip in speed lines (the teleport's, TELEPORT_DIST on) the way it is held (`want`;
-   * none: the way it faces), along its aim, coming in still facing the way it went; held, the next AGILITY_COOL s on.
-   */
-  private agility(arena: Arena, want: number): void {
+  /** Agility: its boost — AGILITY_TIME s of zippy dashes — a flash as it takes hold; its cooldown from now. */
+  private agility(): void {
     if (!this.ready('Agility')) return;
-    if (want && want !== this.facing) this.face(want, true);
-    this.teleport(arena, 'lines', undefined, { cool: AGILITY_COOL, face: this.facing, name: 'Agility' });
+    const k = this.startRun('Agility');
+    this.agilityUntil = this.time + AGILITY_TIME;
+    this.factory.tell(this.node, AGILITY_GLOW, 0.35);
+    this.finishRun(k);
   }
 
   /**
-   * A back dash (anyone's: L): gone backwards in speed lines, BACK_DASH_DIST × a teleport's way, level (along its aim
-   * aloft), still facing forwards — dropping back in its jump-down pose as it goes.
+   * Its dash button (L): held a way (`want`), a dash that way — a plain one (fast, its zippy dash's springing pose,
+   * afterimages), or under Agility a zippy dash, gone in speed lines and back ZIP_GAIN × as far; held neither way, a
+   * back dash (under Agility ZIP_GAIN × as far).
+   */
+  private dashButton(arena: Arena, want: number): void {
+    if (!want) { this.backDash(arena); return; }
+    if (!this.ready('Dash')) return;
+    if (want !== this.facing) this.face(want, true);
+    if (this.zippy) this.teleport(arena, 'lines', undefined, { cool: AGILITY_COOL, face: want, name: 'Dash', dist: ZIP_GAIN * DASH_SPEED * DASH_TIME / (TELEPORT_DIST * this.H) });
+    else this.dash();
+  }
+
+  /**
+   * A back dash: gone backwards in speed lines, BACK_DASH_DIST × a teleport's way (under Agility ZIP_GAIN × that), level
+   * (along its aim aloft), still facing forwards — dropping back in its jump-down pose as it goes.
    */
   private backDash(arena: Arena): void {
     if (!this.ready('Back Dash')) return;
-    this.teleport(arena, 'lines', undefined, { cool: BACK_DASH_COOL, dir: -this.facing, face: this.facing, backward: true, dist: BACK_DASH_DIST, name: 'Back Dash' });
+    this.teleport(arena, 'lines', undefined, { cool: BACK_DASH_COOL, dir: -this.facing, face: this.facing, backward: true,
+      dist: BACK_DASH_DIST * (this.zippy ? ZIP_GAIN : 1), name: 'Back Dash' });
   }
 
   /**
@@ -1102,13 +1153,14 @@ export class Fighter {
   }
 
   private dash(): void {
-    if (this.dashCool > 0 || !(this.grounded || this.flying || this.airDash)) return;
+    if (this.dashCool > 0 || !this.ready('Dash') || !(this.grounded || this.flying || this.airDash)) return;
     this.dashT = DASH_TIME; this.dashCool = DASH_COOL; this.ghostT = 0;
+    this.dashK = this.startRun('Dash');
     if (!this.grounded && !this.flying) this.airDash = false;
   }
 
-  private begin(name: string): void { this.firing = true; this.using = name; this.usingSince = this.time; this.telling = ''; }
-  private end(): void { this.firing = false; this.using = ''; this.clip = ''; this.face(this.facing, true); }
+  private begin(name: string): void { this.firing = true; this.using = name; this.usingSince = this.time; this.telling = ''; this.lineGaze = null; }
+  private end(): void { this.firing = false; this.using = ''; this.clip = ''; this.lineGaze = null; this.face(this.facing, true); }
 
   /**
    * A blow on it: its HP down, held till `over` (its flinch — or what makes it, called only once the blow lands); out of
@@ -1185,9 +1237,26 @@ export class Fighter {
       if (!this.levelWith(f)) continue;
       const [lo, hi] = this.span(), [flo, fhi] = f.span();
       if (hi <= flo || lo >= fhi) continue;
-      p.x += p.x < f.x ? flo - hi - 1e-4 : fhi - lo + 1e-4;
+      // (Out of its body — but never into a wall: stopped at the wall's face, and what is left of the way out the other
+      // one takes instead, stopped at its own walls.)
+      const shift = p.x < f.x ? flo - hi - 1e-4 : fhi - lo + 1e-4;
+      const from = p.x;
+      p.x = this.wallStop(arena, from, from + shift);
+      const left = shift - (p.x - from);
+      if (Math.abs(left) > 1e-4) f.node.position.x = f.wallStop(arena, f.x, f.x - left);
       this.vx = 0; this.dashT = 0;
     }
+  }
+
+  /** Moving sideways from `from` to `to` where it stands: as far as it gets before a wall's face (its body against the level). */
+  private wallStop(arena: Arena, from: number, to: number): number {
+    const y = this.y + 1e-3, hw = this.W / 2;
+    for (const s of arena.level) {
+      if (!(y + this.H > s.top - s.h && y < s.top)) continue;
+      if (to > from && from + hw <= s.x + 1e-3 && to + hw > s.x) to = s.x - hw - 1e-4;
+      else if (to < from && from - hw >= s.x + s.w - 1e-3 && to - hw < s.x + s.w) to = s.x + s.w + hw + 1e-4;
+    }
+    return to;
   }
 
   private overlaps(x: number, y: number, s: Platform): boolean {
@@ -1207,14 +1276,16 @@ export class Fighter {
 
   private animate(): void {
     const want = this.flying ? (Math.abs(this.vx) > 0.6 ? 'airRun' : 'airIdle')
-      : this.dashT > 0 ? (this.grounded ? 'run' : 'jumpDownLoop')
+      : this.dashT > 0 ? 'zipPose'
         : !this.grounded ? (this.vy > 0 ? 'jumpUpLoop' : 'jumpDownLoop')
           : this.landing > 0 ? 'land' : Math.abs(this.vx) > 0.6 ? 'run' : 'idle';
     if (want === this.clip) return;
     const player = this.factory.playerOf(this.node);
     if (!player) return;
-    const name = player.has(want) ? want : want === 'airRun' && player.has('airWalk') ? 'airWalk' : want.startsWith('air') && player.has('airIdle') ? 'airIdle'
-      : want === 'land' ? 'idle' : player.has('idle') ? 'idle' : want;
+    // (A dash: its zippy dash's springing pose — its jump up, else its fast flight, else its run.)
+    const zip = want === 'zipPose' ? ['jumpUpLoop', 'jumpUpStart', 'airRun', 'airWalk', 'run'].find((c) => player.has(c)) : undefined;
+    const name = zip ?? (player.has(want) ? want : want === 'airRun' && player.has('airWalk') ? 'airWalk' : want.startsWith('air') && player.has('airIdle') ? 'airIdle'
+      : want === 'land' ? 'idle' : player.has('idle') ? 'idle' : want);
     this.clip = want;
     void player.play(name, { fade: want === 'land' ? 0.06 : 0.12, loop: want !== 'land' });
   }

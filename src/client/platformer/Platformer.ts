@@ -297,7 +297,7 @@ export class Platformer {
       want: (has('d', 'arrowright') ? 1 : 0) - (has('a', 'arrowleft') ? 1 : 0),
       jumpHeld: has(' '), jumpPressed: hit(' '), sink: false,
       aim: (has('w', 'arrowup') ? 1 : 0) - (has('s', 'arrowdown') ? 1 : 0),
-      ranged: hit('u'), close: hit('i'), mobility: hit('j'), control: hit('k'), mobilityHeld: has('j'), backDash: hit('l'),
+      ranged: hit('u'), close: hit('i'), mobility: hit('j'), control: hit('k'), dash: hit('l'),
     };
     this.pressed.clear();
     return i;
