@@ -407,6 +407,8 @@ export class Fighter {
   }
   /** Its move under way cut off: no cooldown for it. */
   private interruptRun(): void { this.run = null; }
+  /** Its move under way gone as it should, here and now: its cooldown begun. */
+  private completeRun(): void { if (this.run) this.finishRun(this.run.k); }
 
   /**
    * `move` from it against `against` (the move it clashes with), for a clash: its power P (base power × STAB × its
@@ -615,6 +617,8 @@ export class Fighter {
     const rival = this.foes(arena).find((f) => f.beam && !f.beam.launched && !f.down && f.facing === -this.facing
       && Fighter.linesMeet(from, dir, span(f), f.beam.from, f.beam.dir, span(f), (this.H + f.H) * 0.25));
     if (rival) {
+      // (Its beam begun — the clash, or the burst, is how it goes: its cooldown counts from its end.)
+      this.startRun(name);
       // (Too close to hold a clash: both burst in their faces.)
       if (Math.hypot(rival.x - this.x, rival.y - this.y) < CLASH_MIN) this.faceBurst(rival, name, spec, arena);
       else this.clash(rival, name, spec, arena);
@@ -659,6 +663,10 @@ export class Fighter {
    */
   private faceBurst(rival: Fighter, name: string, spec: BeamSpec, arena: Arena): void {
     const theirs = rival.beam!;
+    // (A burst is no interruption: both beams cool down — its own, let go just now, and the rival's — before any
+    // knock back.)
+    this.completeRun();
+    rival.completeRun();
     theirs.play.cancel?.();
     rival.beam = null; rival.firing = false; rival.using = '';
     this.factory.playFaceBurst(this.node, rival.node, spec.element, theirs.spec.element);
@@ -928,9 +936,10 @@ export class Fighter {
       this.clashing = null; rival.clashing = null;
       const w = play.winner?.();
       const winner = w === this.node ? this : w === rival.node ? rival : null;
-      // (Its beam's cooldown: the winner's, once its beam is done; a tie — both burst — none.)
+      // (Its beam's cooldown: the winner's, once its beam is done; a tie — both burst — both now: a burst is no
+      // interruption, each beam went as it should.)
       won = winner;
-      if (!winner) { this.interruptRun(); rival.interruptRun(); }
+      if (!winner) { this.completeRun(); rival.completeRun(); }
       arena.onClashEnd?.(rival, this, winner, { you: ms.q ?? 0, rival: rs.q ?? 0, outright });
       if (!winner) {
         // A tie: the ball bursts where they met — hurting (and throwing back) only a body near it.
