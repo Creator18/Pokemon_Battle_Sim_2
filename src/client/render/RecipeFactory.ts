@@ -361,8 +361,8 @@ const TURN_SPEED = 7;
 /** Ground clamp: allowed sink before lifting (world units), and how fast it follows. */
 const CLAMP_EPS = 0.01;
 const CLAMP_DOWN = 6; //  per second, relaxing back
-/** How fast feet settle onto the ground (per second, of the gap). */
-const FEET_RATE = 20;
+/** How fast feet settle onto the ground (per second, of the gap): at once — its feet kept on it every frame, however brisk its run's bounce (Garchomp's, Pikachu's). */
+const FEET_RATE = Infinity;
 /**
  * Its feet stand it only while they are the lowest of it: when some other
  * part hangs this far below them (× its height) — Mega Greninja upside down

@@ -170,7 +170,10 @@ const COUNTER_DOUBLE = 2;
  *   its abuse:  1 + ABUSE_STEP × its heat — each use of it adds 1 heat, halving every ABUSE_HALF s.
  */
 const SLOT_COOL = { ranged: 1.2, close: 0.45, mobility: 0.5, control: 2.5 } as const;
-const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 9, 'Dash': 0.5, 'Back Dash': 0.5, 'Teleport': 0.5 };
+const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 9, 'Dash': 0.5, 'Back Dash': 0.5, 'Teleport': 0.5,
+  // (The braces turn back the blow that comes — their strength the incoming move's — so they cool longer, and gone off,
+  // by the power of the move they turned back: cooldownFor.)
+  'Sucker Punch': 5, 'Counter': 5 };
 const SPEED_K: [number, number] = [0.6, 1.5], POWER_REF = 80, POWER_K: [number, number] = [0.5, 1.6];
 const ABUSE_HALF = 3, ABUSE_STEP = 0.6;
 /** Counter's blow coming in mid-swing: its clip begun this far (s) short of the blow as it opens out of its teleport. */
@@ -312,6 +315,8 @@ export class Fighter {
   private run: { move: string; k: number } | null = null; private runSeq = 0; private braceK = -1;
   /** Agility's boost: till when (its own clock). A plain dash under way: its cooldown's key. */
   private agilityUntil = -1; private dashK = -1;
+  /** A brace gone off: the move it turned back — its cooldown's power, not its own. */
+  private braceAgainst: string | null = null;
   /** Its beam's line, as a gaze (radians above level), while it pours: its head held on it. */
   private lineGaze: number | null = null;
   /** Agility's boost on: its dashes zippy. */
@@ -385,7 +390,8 @@ export class Fighter {
     const base = BASE_COOL[move] ?? (slot ? SLOT_COOL[slot] : SLOT_COOL.mobility);
     const clamp = (v: number, [lo, hi]: [number, number]) => Math.max(lo, Math.min(hi, v));
     const speedK = clamp(Math.sqrt(STAT_REF / Math.max(1, this.speed)), SPEED_K);
-    const bp = getMove(move)?.basePower ?? 0;
+    // (A brace gone off: by the power of the move it turned back.)
+    const bp = getMove(BRACES.has(move) && this.braceAgainst ? this.braceAgainst : move)?.basePower ?? 0;
     const powerK = bp > 0 ? clamp(Math.sqrt(bp / POWER_REF), POWER_K) : 1;
     return base * speedK * powerK * (1 + ABUSE_STEP * this.heatOf(move));
   }
@@ -730,7 +736,8 @@ export class Fighter {
    * would have done; that blow, landing, cuts the attacker's attack off (a beam's pour) as any does.
    */
   private counter(attacker: Fighter, arena: Arena, move: string): void {
-    this.counterUntil = -1; this.finishRun(this.braceK);
+    this.counterUntil = -1;
+    this.braceAgainst = move; this.finishRun(this.braceK); this.braceAgainst = null;
     this.firing = false; this.using = '';
     const counter = this.moves.control === 'Counter';
     const damage = Math.max(1, Math.round((counter ? COUNTER_DOUBLE : COUNTER_TURN) * attacker.strength(move, this) / DAMAGE_SCALE));
