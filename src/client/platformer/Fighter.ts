@@ -154,6 +154,17 @@ export const BEHIND_STRIKES: Record<string, { look: 'lines' | 'ring'; type: stri
 const COUNTER_WINDOW = 1.0, COUNTER_TURN = 1.5, COUNTER_WHIFF = 0.5;
 /** Counter (its own brace, physical blows only): what share of the blow it turns back — twice it, as the move's own. */
 const COUNTER_DOUBLE = 2;
+/**
+ * Cooldowns — every move's, started only once it has gone as it should (one cut off — struck, countered, its beam
+ * cancelled, its clash lost or burst — starts none): its base (BASE_COOL by move, else SLOT_COOL by its slot) ×
+ *   its Speed:  √(STAT_REF / Speed), within SPEED_K — faster, sooner;
+ *   its power:  √(base power / POWER_REF), within POWER_K — weaker, sooner (no power of its own: 1);
+ *   its abuse:  1 + ABUSE_STEP × its heat — each use of it adds 1 heat, halving every ABUSE_HALF s.
+ */
+const SLOT_COOL = { ranged: 1.2, close: 0.45, mobility: 0.5, control: 2.5 } as const;
+const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 0.08, 'Back Dash': 0.35, 'Teleport': 0.5 };
+const SPEED_K: [number, number] = [0.6, 1.5], POWER_REF = 80, POWER_K: [number, number] = [0.5, 1.6];
+const ABUSE_HALF = 3, ABUSE_STEP = 0.6;
 /** Counter's blow coming in mid-swing: its clip begun this far (s) short of the blow as it opens out of its teleport. */
 const COUNTER_LEAD = 0.14;
 /** How long after it goes off (or runs out) before it can be braced again (s). */
@@ -268,11 +279,16 @@ export class Fighter {
   /** Unhurtable till this (its own clock; Infinity while it flinches — then HIT_GRACE more). */
   private graceUntil = 0;
   /** Sucker Punch braced: till when (its own clock). Left open after a whiff: till when. The arena it is in (for its tells). */
-  private counterUntil = -1; private lagUntil = 0; private arenaRef: Arena | null = null; private counterReady = 0;
+  private counterUntil = -1; private lagUntil = 0; private arenaRef: Arena | null = null;
   /** The move it is telling (about to make), and how many times its attack has been cut off by a counter. */
   telling = ''; interrupted = 0;
   /** Its Attack and Special Attack (its species'): a physical move's power × attack ÷ STAT_REF, a special move's × spAtk ÷ STAT_REF. */
-  attack = STAT_REF; spAtk = STAT_REF;
+  attack = STAT_REF; spAtk = STAT_REF; speed = STAT_REF;
+  /** Its moves' cooldowns: when each is ready again, and how hot each is (its abuse: heat, as of when). */
+  readonly readyAt = new Map<string, number>();
+  private heat = new Map<string, { h: number; at: number }>();
+  /** The move under way that will cool down once it has gone as it should (cut off: cleared, no cooldown). */
+  private run: { move: string; k: number } | null = null; private runSeq = 0; private braceK = -1;
   /** In a clash: its stopper (its ranged key stops its needle). */
   clashing: ClashMeter | null = null;
 
@@ -321,7 +337,40 @@ export class Fighter {
     this.beam?.play.cancel?.(); this.beam = null;
     this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null;
     this.counterUntil = -1; this.lagUntil = 0;
+    this.readyAt.clear(); this.heat.clear(); this.run = null;
   }
+
+  /** `move` ready (its cooldown over). */
+  ready(move?: string): boolean { return !move || this.time >= (this.readyAt.get(move) ?? -Infinity); }
+  /** The ready time of its brace (its control move's cooldown). */
+  private get counterReady(): number { return this.readyAt.get(this.moves.control ?? '') ?? 0; }
+  private set counterReady(v: number) { if (this.moves.control) this.readyAt.set(this.moves.control, v); }
+  /** `move`'s heat now (its abuse, halving every ABUSE_HALF s). */
+  private heatOf(move: string): number {
+    const e = this.heat.get(move);
+    return e ? e.h * Math.pow(0.5, (this.time - e.at) / ABUSE_HALF) : 0;
+  }
+  /** `move`'s cooldown were it done now: its base × its Speed × its power × its abuse. */
+  cooldownFor(move: string): number {
+    const slot = (Object.keys(SLOT_COOL) as (keyof typeof SLOT_COOL)[]).find((k) => this.moves[k] === move);
+    const base = BASE_COOL[move] ?? (slot ? SLOT_COOL[slot] : SLOT_COOL.mobility);
+    const clamp = (v: number, [lo, hi]: [number, number]) => Math.max(lo, Math.min(hi, v));
+    const speedK = clamp(Math.sqrt(STAT_REF / Math.max(1, this.speed)), SPEED_K);
+    const bp = getMove(move)?.basePower ?? 0;
+    const powerK = bp > 0 ? clamp(Math.sqrt(bp / POWER_REF), POWER_K) : 1;
+    return base * speedK * powerK * (1 + ABUSE_STEP * this.heatOf(move));
+  }
+  /** A move begun that will cool down once it has gone as it should. */
+  private startRun(move: string): number { const k = ++this.runSeq; this.run = { move, k }; return k; }
+  /** That move gone as it should: its cooldown begun, its heat up one (cut off since: nothing). */
+  private finishRun(k: number): void {
+    if (this.run?.k !== k) return;
+    const m = this.run.move; this.run = null;
+    this.readyAt.set(m, this.time + this.cooldownFor(m));
+    this.heat.set(m, { h: this.heatOf(m) + 1, at: this.time });
+  }
+  /** Its move under way cut off: no cooldown for it. */
+  private interruptRun(): void { this.run = null; }
 
   /** `move` from it against `on`, for a clash: its power P (base power × STAB) and its type effectiveness E. */
   clashTerms(move: string, on: Fighter): { P: number; E: number } {
@@ -352,7 +401,7 @@ export class Fighter {
     this.arenaRef = arena;
     // Braced, and nothing came: open a moment.
     if (this.countering && this.time > this.counterUntil) {
-      this.counterUntil = -1; this.end(); this.lagUntil = this.time + COUNTER_WHIFF; this.counterReady = this.time + COUNTER_COOL;
+      this.counterUntil = -1; this.end(); this.lagUntil = this.time + COUNTER_WHIFF; this.finishRun(this.braceK);
     }
     this.measure();
     this.quickCool = Math.max(0, this.quickCool - dt);
@@ -369,10 +418,10 @@ export class Fighter {
     if (this.clashing && intent.ranged && !this.down) this.clashing.press();
     // Its moves, pressed this frame.
     if (!this.busy) {
-      if (it.ranged) this.fire(arena);
-      else if (it.close) this.slash(arena);
+      if (it.ranged && this.ready(this.moves.ranged)) this.fire(arena);
+      else if (it.close && this.ready(this.moves.close)) this.slash(arena);
       else if (it.mobility && this.moves.mobility === 'Quick Attack') this.quickAttack(arena);
-      else if (it.control && BRACES.has(this.moves.control ?? '') && this.time >= this.counterReady) this.brace();
+      else if (it.control && BRACES.has(this.moves.control ?? '') && this.ready(this.moves.control)) this.brace();
       else if (it.mobility && this.moves.mobility === 'Dash') this.dash();
       else if (it.mobility && this.moves.mobility && BEHIND_STRIKES[this.moves.mobility]) this.strikeFromBehind(arena, this.moves.mobility);
       else if (it.backDash) this.backDash(arena);
@@ -528,10 +577,10 @@ export class Fighter {
     const at = new Vector3(from[0] + dir[0] * Math.max(1, reach), from[1] + dir[1] * Math.max(1, reach), 0);
     this.begin(name);
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
-    // (A beam 2: its end ball full while its front is on a foe, smaller while it strikes nothing.)
+    // (Its end ball full whether or not its front is on a foe. A bolt ends on the foe it connects with.)
     const conn = { on: false, onto: null as Fighter | null };
-    const play = this.factory.playBeam(this.node, null, at, spec.style === 2 ? { ...spec, endBall: () => conn.on }
-      : spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) } : spec);
+    const play = this.factory.playBeam(this.node, null, at,
+      spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) } : spec);
     const mine: Firing = { id: ++beamIds, play, move: name, spec, at: ahead, pressedAt: this.time, launched: false, from, dir,
       range: hit ? hit.d + 0.3 : range, launchedAt: Infinity, pouring: true, struck: new Set(), end: at, reach: Math.max(1, range),
       get connected() { return conn.on; }, set connected(v: boolean) { conn.on = v; },
@@ -547,7 +596,8 @@ export class Fighter {
         if (ahead.takeHit(this, name, play.contactEnds, arena)) { this.factory.holdHitReact(ahead.node, play.contactEnds); this.zap(ahead, name, play.contactEnds); }
       });
     }
-    void play.done.then(() => { if (this.beam === mine) { this.beam = null; this.end(); } });
+    const k = this.startRun(name);
+    void play.done.then(() => { if (this.beam === mine) { this.beam = null; this.finishRun(k); this.end(); } });
   }
 
   /**
@@ -616,6 +666,7 @@ export class Fighter {
   /** Sucker Punch: braced where it stands, glowing, COUNTER_WINDOW s — held still, waiting for a foe to move. */
   private brace(): void {
     this.begin(this.moves.control ?? 'Sucker Punch');
+    this.braceK = this.startRun(this.moves.control ?? 'Sucker Punch');
     this.vx = 0;
     this.counterUntil = this.time + COUNTER_WINDOW;
     this.factory.tell(this.node, COUNTER_GLOW, COUNTER_WINDOW);
@@ -625,7 +676,7 @@ export class Fighter {
   announceAttack(_arena: Arena): boolean { return false; }
 
   /** Its attack, just begun, cut off: dropped where it stands. */
-  private dropAttack(): void { this.firing = false; this.quick = false; this.using = ''; this.telling = ''; this.clip = ''; }
+  private dropAttack(): void { this.interruptRun(); this.firing = false; this.quick = false; this.using = ''; this.telling = ''; this.clip = ''; }
 
   /**
    * Sucker Punch going off: `attacker`'s blow (`move`) about to land on it. It slips away — the blow goes on into where it
@@ -633,7 +684,7 @@ export class Fighter {
    * would have done; that blow, landing, cuts the attacker's attack off (a beam's pour) as any does.
    */
   private counter(attacker: Fighter, arena: Arena, move: string): void {
-    this.counterUntil = -1; this.counterReady = this.time + COUNTER_COOL;
+    this.counterUntil = -1; this.finishRun(this.braceK);
     this.firing = false; this.using = '';
     const counter = this.moves.control === 'Counter';
     const damage = Math.max(1, Math.round((counter ? COUNTER_DOUBLE : COUNTER_TURN) * attacker.strength(move, this) / DAMAGE_SCALE));
@@ -687,6 +738,7 @@ export class Fighter {
   /** Thrown back `dir` (−1, 1): carried off fast and up a little, out of its own control and flinching till it is down again. */
   knockBack(dir: number): void {
     if (this.down) return;
+    this.interruptRun();
     this.beam?.play.cancel?.(); this.beam = null;
     this.firing = false; this.using = '';
     this.knockT = KNOCK_TIME;
@@ -807,10 +859,14 @@ export class Fighter {
     for (const f of [this, rival]) { f.firing = true; f.using = f === this ? name : theirs.move; f.usingSince = f.time; }
     this.beam = null; rival.beam = null;
     arena.onClash?.(rival, this, null, +fromRival.toFixed(2));
+    let won: Fighter | null = null;
     void play.hit.then(() => {
       this.clashing = null; rival.clashing = null;
       const w = play.winner?.();
       const winner = w === this.node ? this : w === rival.node ? rival : null;
+      // (Its beam's cooldown: the winner's, once its beam is done; a tie — both burst — none.)
+      won = winner;
+      if (!winner) { this.interruptRun(); rival.interruptRun(); }
       arena.onClashEnd?.(rival, this, winner, { you: ms.q ?? 0, rival: rs.q ?? 0, outright });
       if (!winner) {
         // A tie: the ball bursts where they met — hurting (and throwing back) only a body near it.
@@ -827,7 +883,7 @@ export class Fighter {
       const damage = Math.max(1, Math.round(timing(q) * winner.strength(move, loser) / DAMAGE_SCALE));
       if (loser.takeHit(winner, move, () => this.factory.playHitReact(loser.node), arena, damage)) winner.zap(loser, move, play.done);
     });
-    void play.done.then(() => { this.clashing = null; rival.clashing = null; this.end(); rival.end(); });
+    void play.done.then(() => { this.clashing = null; rival.clashing = null; if (won?.run) won.finishRun(won.run.k); this.end(); rival.end(); });
   }
 
   /** Its close move (a slash), where it stands: on the nearest foe within CLOSE_REACH ahead, level with it — else a miss (no burst). */
@@ -850,16 +906,17 @@ export class Fighter {
     this.face(this.facing, true);
     this.begin(name);
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
+    const k = this.startRun(name);
     void this.factory.playCrossSlash(this.node, at, type, () => {
       // (Asked as the blow falls: still there?)
       if (!near || !inReach(near)) return false;
       return near.takeHit(this, name, () => this.factory.playHitReact(near.node), arena);
-    }, true).then(() => this.end());
+    }, true).then(() => { this.finishRun(k); this.end(); });
   }
 
   /** Quick Attack, the way it faces: QUICK_DIST × its height on, short of a wall, or up to the nearest body in its way (a foe there struck). */
   private quickAttack(arena: Arena): void {
-    if (this.quickCool > 0 || (!this.grounded && !this.flying && !this.airDash)) return;
+    if (!this.ready('Quick Attack') || (!this.grounded && !this.flying && !this.airDash)) return;
     const p = this.node.position, dir = this.facing;
     // (Along its aim when aloft, or aimed up off the ground — level otherwise: it can't go down into the ground.)
     const tilt = !this.grounded || this.aim > 0 ? this.aim * AIM_ANGLE : 0;
@@ -890,9 +947,10 @@ export class Fighter {
     this.quick = true; this.vx = 0; this.vy = 0;
     this.using = 'Quick Attack'; this.usingSince = this.time;
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
+    const k = this.startRun('Quick Attack');
     void this.factory.playQuickStep(this.node, at, land, 'attack', 'Normal', !!struck).then(() => {
       if (struck && !struck.down) struck.takeHit(this, 'Quick Attack', () => this.factory.playHitReact(struck.node), arena);
-      this.quick = false; this.quickCool = QUICK_COOL; this.using = '';
+      this.quick = false; this.quickCool = QUICK_COOL; this.using = ''; this.finishRun(k);
       setTimeout(() => { if (!this.firing && !this.quick) this.clip = ''; }, 350);
     });
   }
@@ -916,7 +974,7 @@ export class Fighter {
    * it), and a blow at once in the move's type. None in range: just the vanish, along its aim.
    */
   private strikeFromBehind(arena: Arena, move: string, opts: { foe?: Fighter; damage?: number; onBlow?: () => void } = {}): void {
-    if (!opts.foe && (this.quickCool > 0 || (!this.grounded && !this.flying && !this.airDash))) return;
+    if (!opts.foe && (!this.ready(move) || (!this.grounded && !this.flying && !this.airDash))) return;
     const { look, type, midStrike, plain } = BEHIND_STRIKES[move];
     const foe = opts.foe ?? this.foes(arena).filter((f) => !f.down && Math.hypot(f.x - this.x, f.y - this.y) <= FEINT_RANGE * this.H)
       .sort((a, b) => Math.hypot(a.x - this.x, a.y - this.y) - Math.hypot(b.x - this.x, b.y - this.y))[0];
@@ -937,6 +995,7 @@ export class Fighter {
     this.quick = true; this.vx = 0; this.vy = 0;
     this.using = move; this.usingSince = this.time;
     if (!opts.foe && this.announceAttack(arena)) { this.dropAttack(); return; }
+    const k = opts.foe ? -1 : this.startRun(move);
     // (Caught unawares: it can't turn round till the blow has landed — struck from behind.)
     foe.turnLocks++;
     let unlocked = false;
@@ -955,7 +1014,7 @@ export class Fighter {
         const landed = foe.takeHit(this, move, () => this.factory.playHitReact(foe.node), arena, opts.damage);
         unlock();
         return landed;
-      }).then(() => { unlock(); opts.onBlow?.(); this.end(); });
+      }).then(() => { unlock(); opts.onBlow?.(); this.finishRun(k); this.end(); });
     };
     void this.factory.playTeleport(this.node, to, {
       look, element: type, face: at.dir > 0 ? Math.PI / 2 : -Math.PI / 2,
@@ -975,9 +1034,9 @@ export class Fighter {
    * none: the way it faces), along its aim, coming in still facing the way it went; held, the next AGILITY_COOL s on.
    */
   private agility(arena: Arena, want: number): void {
-    if (this.quickCool > 0) return;
+    if (!this.ready('Agility')) return;
     if (want && want !== this.facing) this.face(want, true);
-    this.teleport(arena, 'lines', undefined, { cool: AGILITY_COOL, face: this.facing });
+    this.teleport(arena, 'lines', undefined, { cool: AGILITY_COOL, face: this.facing, name: 'Agility' });
   }
 
   /**
@@ -985,7 +1044,7 @@ export class Fighter {
    * aloft), still facing forwards — dropping back in its jump-down pose as it goes.
    */
   private backDash(arena: Arena): void {
-    if (this.quickCool > 0) return;
+    if (!this.ready('Back Dash')) return;
     this.teleport(arena, 'lines', undefined, { cool: BACK_DASH_COOL, dir: -this.facing, face: this.facing, backward: true, dist: BACK_DASH_DIST, name: 'Back Dash' });
   }
 
@@ -995,7 +1054,8 @@ export class Fighter {
    */
   private teleport(arena: Arena, look: 'lines' | 'ring', element?: string,
     o: { cool?: number; dir?: number; face?: number; backward?: boolean; dist?: number; name?: string } = {}): void {
-    if (this.quickCool > 0 || (!this.grounded && !this.flying && !this.airDash)) return;
+    const name = o.name ?? this.moves.mobility ?? 'Teleport';
+    if (!this.ready(name) || (!this.grounded && !this.flying && !this.airDash)) return;
     const p = this.node.position, dir = o.dir ?? this.facing;
     const tilt = !this.grounded || this.aim > 0 ? this.aim * AIM_ANGLE : 0;
     const ux = dir * Math.cos(tilt), uy = Math.sin(tilt);
@@ -1023,14 +1083,15 @@ export class Fighter {
     const to = new Vector3(p.x + ux * d, p.y + uy * d, 0);
     if (!this.grounded && !this.flying) this.airDash = false;
     this.quick = true; this.vx = 0; this.vy = 0;
-    this.using = o.name ?? this.moves.mobility ?? 'Teleport'; this.usingSince = this.time;
+    this.using = name; this.usingSince = this.time;
+    const k = this.startRun(name);
     // (There, it will face its nearest foe — behind it, it turns round; it comes in already facing so.)
     const foe = this.foes(arena).sort((a, b) => Math.abs(a.x - to.x) - Math.abs(b.x - to.x))[0];
     const faceThere = o.face ?? (foe ? Math.sign(foe.x - to.x) || dir : dir);
     void this.factory.playTeleport(this.node, to, { look, element, face: faceThere > 0 ? Math.PI / 2 : -Math.PI / 2, backward: o.backward }).then(() => {
       this.face(faceThere, true);
       this.grounded = this.y <= 1e-3;
-      this.quick = false; this.quickCool = o.cool ?? TELEPORT_COOL; this.using = '';
+      this.quick = false; this.quickCool = o.cool ?? TELEPORT_COOL; this.using = ''; this.finishRun(k);
       // (Its resting clip, as the teleport eased it in — named so, not played again over it with a snap.)
       this.clip = this.restingClip();
     });
@@ -1051,7 +1112,8 @@ export class Fighter {
    * unhurtable, or braced to counter (that one turns it back).
    */
   takeHit(by: Fighter, move: string, flinch: Promise<unknown> | (() => Promise<unknown>), arena: Arena, damageOverride?: number): boolean {
-    if (this.down || this.invulnerable) return false;
+    // (Nor from one down: a blow wound up before its striker fainted lands nothing.)
+    if (this.down || this.invulnerable || (by !== this && by.down)) return false;
     // (Braced to counter: the blow sets it off — none of it taken.)
     if (this.countering && by !== this && this.setsOff(move)) { this.counter(by, arena, move); return false; }
     const over = typeof flinch === 'function' ? flinch() : flinch;
@@ -1061,7 +1123,9 @@ export class Fighter {
     this.pushFrom(by);
     const damage = damageOverride ?? Math.max(1, Math.round(by.strength(move, this) / DAMAGE_SCALE));
     // (Struck while braced: the brace is broken — out of it, as if it had run out.)
-    if (this.countering) { this.counterUntil = -1; this.firing = false; this.using = ''; this.counterReady = this.time + COUNTER_COOL; }
+    // (Its move under way cut off by the blow: no cooldown for it — nor for a brace broken so.)
+    this.interruptRun();
+    if (this.countering) { this.counterUntil = -1; this.firing = false; this.using = ''; }
     // (Its beam, charging or pouring, cut off by the blow — quietly: its flinch, not its idle, takes over.)
     if (this.beam) { this.beam.play.cancel?.(true); this.beam = null; this.firing = false; this.using = ''; }
     this.hp = Math.max(0, this.hp - damage);

@@ -3,6 +3,7 @@
 // (Its cooldown waived for this: each braces again the moment its turn comes.) A broken chain starts a new round.
 // Run in the page: (0, eval)(await (await fetch('/docs/demos/counter-counter-loop.js')).text())
 // Counter's chain instead (physical blows only; gone backwards, back in at the front): window.__ccBrace = 'Counter'.
+// Mid-air (both held aloft, level): window.__ccAir = true.
 // Stop: window.__cc.stop = true — window.__cc.links: counters in the current chain; window.__cc.rounds: past chains
 (async () => {
   // (Boot's own zone made first — else it lives on under this one.)
@@ -33,11 +34,16 @@
   pf.ai.paused = false;
   pf.restart(); await sleep(1.2);
   const c = window.__cc = { stop: false, links: 0, rounds: [] };
+  const air = !!window.__ccAir, y = air ? 3.2 : 0;
+  // (Aloft: both held up, level, still — but for their moves.)
+  const keep = air ? sc.onBeforeRenderObservable.add(() => {
+    for (const f of [Pl, B]) if (!f.quick && !f.down) { f.flying = true; f.vy = 0; if (!f.busy) f.vx = 0; if (Math.abs(f.y - y) > 0.01 && !f.busy) f.node.position.y = y; }
+  }) : null;
   const brace = (f) => { f.counterReady = 0; f.brace(); };
   const byName = (name) => (name === Pl.name ? Pl : B);
   while (!c.stop) {
     Pl.restore(); B.restore();
-    Pl.place(-3, 0, 1); B.place(3, 0, -1); Pl.face(1, true); B.face(-1, true);
+    Pl.place(-3, y, 1); B.place(3, y, -1); Pl.face(1, true); B.face(-1, true);
     await sleep(1.0);
     let n = pf.events.length;
     c.links = 0;
@@ -72,4 +78,5 @@
     c.rounds.push({ links: c.links, last: pf.events.slice(-2).map((e) => e.text) });
     await sleep(2);
   }
+  if (keep) sc.onBeforeRenderObservable.remove(keep);
 })();

@@ -115,7 +115,7 @@ export class BossAI {
     let chose = 'watch';
     if (me.busy) {
       chose = 'busy';
-    } else if (charging && facingFoe && level && t >= this.beamReady && Math.random() < CONTEST) {
+    } else if (charging && facingFoe && level && t >= this.beamReady && me.ready(me.moves.ranged) && Math.random() < CONTEST) {
       // Meet it: a clash.
       i = { ...i, ranged: true };
       this.beamReady = t + this.rnd(BEAM_COOL);
@@ -132,13 +132,13 @@ export class BossAI {
       i = { ...i, want: Math.abs(dx) > 3 ? dir : 0, sink: true };
       chose = 'sink to foe';
     } else if (dist <= reachClose && Math.abs(dy) < me.H * 0.8) {
-      if (facingFoe && Math.random() < SLASH) { i = { ...i, close: true }; chose = `close: ${me.moves.close}`; }
+      if (facingFoe && me.ready(me.moves.close) && Math.random() < SLASH) { i = { ...i, close: true }; chose = `close: ${me.moves.close}`; }
       else { i = { ...i, want: -dir }; chose = 'back off'; }
-    } else if (level && facingFoe && meets(aim, me.beamRange) && t >= this.beamReady) {
+    } else if (level && facingFoe && meets(aim, me.beamRange) && t >= this.beamReady && me.ready(me.moves.ranged)) {
       i = { ...i, ranged: true };
       this.beamReady = t + this.rnd(BEAM_COOL);
       chose = `ranged: ${me.moves.ranged}`;
-    } else if (facingFoe && level && me.moves.mobility === 'Quick Attack' && gap <= QUICK_DIST * me.H && gap > 0.6 && Math.random() < 0.5) {
+    } else if (facingFoe && level && me.moves.mobility === 'Quick Attack' && me.ready('Quick Attack') && gap <= QUICK_DIST * me.H && gap > 0.6 && Math.random() < 0.5) {
       i = { ...i, mobility: true };
       chose = 'mobility: Quick Attack in';
     } else if (gap > 0.3) {

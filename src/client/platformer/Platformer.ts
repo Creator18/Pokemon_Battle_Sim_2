@@ -175,14 +175,14 @@ export class Platformer {
   static async start(scene: Scene, factory: RecipeFactory, camera: Camera, o: PlatformerOptions): Promise<Platformer> {
     const node = await factory.createPokemon(o.species, 1);
     const player = new Fighter(node, factory, 1, PLAYER_HP, o.moves ?? DEFAULT_KIT, `${o.species.name} (you)`, o.species.types);
-    player.attack = o.species.attack; player.spAtk = o.species.spAtk;
+    player.attack = o.species.attack; player.spAtk = o.species.spAtk; player.speed = o.species.speed;
     const foes: Fighter[] = [];
     for (const e of o.enemies ?? []) {
       const n = await factory.createPokemon(e.species, 2);
       foes.push(e.boss
         ? new Fighter(n, factory, 2, BOSS_HP, e.moves ?? DEFAULT_KIT, `${e.species.name} (boss)`, e.species.types)
         : new Fighter(n, factory, 2, TARGET_HP, {}, e.species.name, e.species.types, { x: e.x, y: e.y }));
-      foes[foes.length - 1].attack = e.species.attack; foes[foes.length - 1].spAtk = e.species.spAtk;
+      foes[foes.length - 1].attack = e.species.attack; foes[foes.length - 1].spAtk = e.species.spAtk; foes[foes.length - 1].speed = e.species.speed;
     }
     return new Platformer(scene, factory, camera, player, foes, o);
   }
