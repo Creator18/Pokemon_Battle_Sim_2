@@ -470,6 +470,8 @@ export class AnimationPlayer {
       if (b.scale) { sample(b.scale, frame, 3, tmp, b.cs); P[o + 7] = tmp[0]; P[o + 8] = tmp[1]; P[o + 9] = tmp[2]; }
     }
     if (this.fade < 1) blendPose(P, this.from, smooth(this.fade), this.N);
+    // (A pose adjusted after its clip — a gaze turned up or down: posePost(P, STRIDE), P the bones' local poses.)
+    if (this.posePost) this.posePost(P, STRIDE);
     this._apply(P);
     this._show(clip, frame);
   }

@@ -15,6 +15,10 @@ export interface BeamSpec {
   palette?: BeamPalette;
   /** Its noise bursts all along the column, past its starting egg (flame billowing: Flamethrower). */
   burstAlong?: boolean;
+  /** Out of a clash, the whole beam one long egg, broad and round at the target (BeamShot.eggBeam: Flamethrower). */
+  eggBeam?: boolean;
+  /** How far it reaches (world units) where range matters (the platformer); unset: a long beam. */
+  range?: number;
   /** How thick it is (1 = as the others). */
   thickness?: number;
   /** A bolt from the beam's starting egg, in place of its column (BeamShot.bolt). */
@@ -66,7 +70,7 @@ export const BEAM_MOVES: Record<string, BeamSpec> = {
   'Hydro Cannon': { element: 'Water' },
   'Steel Beam': { element: 'Steel', style: 2 },
   // A fire beam, billowing all along.
-  'Flamethrower': { element: 'Fire', burstAlong: true },
+  'Flamethrower': { element: 'Fire', burstAlong: true, eggBeam: true, range: 6 },
   // Flamethrower's billowing flame in fire and psychic together: its torn
   // skin in fire red and psychic pink, round a hot pink-orange body.
   'Mystical Fire': { element: 'Fire', burstAlong: true, palette: { skin: [1.0, 0.3, 0.06], body: [1.0, 0.5, 0.72],

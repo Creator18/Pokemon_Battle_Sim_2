@@ -304,6 +304,10 @@ interface Unit {
   clamp: number;
   /** Who it keeps facing, and whether it is walking (then it faces its path). */
   lookAt: TransformNode | null;
+  /** Off the ground by its own means (a platformer's jump or flight — not the hover): its air clips, as if hovering. */
+  airborne?: boolean;
+  /** Its gaze up (+) or down (−) from level (radians): asked for, and as shown now (eased) — its neck and head turned so. */
+  gaze?: number; gazeShown?: number;
   /** Holding the way it faces for now (not turning to its opponent): after a miss, until it has stopped and looked. */
   lookHold?: boolean;
   /** In a rolling attack (Rollout, Ice Ball, Gyro Ball…): its crystal sphere rolls along with it. */
@@ -402,6 +406,18 @@ const THUNDER_CLEAR = 0.5, THUNDER_CLEAR_BODY = 0.7;
  * moment of contact), and how often it leaves an afterimage of its pose (s).
  */
 const QS_DASH = 0.16, QS_GHOST_EVERY = 0.035;
+/** A teleport (playTeleport): its flickers out (how many, over how long, s), the squeeze to a line (s), the gap with nothing (s). */
+const TP_FLICKERS = 3, TP_FLICKER = 0.12, TP_SQUASH = 0.1, TP_GAP = 0.1;
+/** Its flickering speed lines' life, going and coming (s). */
+const TP_LINES = 0.26;
+/** Its forward pose: the first clip of these it has; how far it leans in (radians, nose down); how long it takes to settle upright after (s). */
+const TP_POSES = ['airRun', 'airWalk', 'run'], TP_LEAN = 0.12, TP_SETTLE = 0.18;
+/** Its pose as it goes: springing off — its jump up, else its fast flight. */
+const TP_VANISH_POSES = ['jumpUpLoop', 'jumpUpStart', 'airRun', 'airWalk', 'run'];
+/** How much of its snout's miss it makes up each frame as it lines up (a frame behind: under 1, so it settles, not overshoots). */
+const TP_ALIGN = 0.6;
+/** The most its body tilts to line its snout up (radians). */
+const TP_TILT_MAX = 1.1;
 /** Its bursts' radii (× its height): small behind it as it goes, larger at the blow. */
 const QS_LAUNCH_BURST = 0.6, QS_HIT_BURST = 1.15;
 /** A chasing charge (chargeAt): how fast it runs (world units / s), and how long it may chase before it gives up (s). */
@@ -495,6 +511,10 @@ const SWING_BEFORE = 0.1, SWING_AFTER = 0.03;
 
 /** An action's airborne twin, when the unit is in the air and has one ('idle' -> 'airIdle'). */
 const airName = (action: string) => `air${action[0].toUpperCase()}${action.slice(1)}`;
+/** A point-blank burst of two beams (playFaceBurst): its size (× the two's height). */
+const FACE_BURST = 0.9;
+/** A gaze (setGaze): the most it turns (radians), the bones it turns (neck to head) and each one's share, which way round, how quickly it eases (per s). */
+const GAZE_MAX = 0.7, GAZE_BONES = ['neck_01', 'neck_02', 'neck_03', 'head'], GAZE_SHARE = [0.15, 0.2, 0.25, 0.4], GAZE_SIGN = 1, GAZE_EASE = 10;
 
 const sleep = (s: number) => new Promise<void>((r) => setTimeout(r, s * 1000));
 
@@ -609,6 +629,25 @@ export class RecipeFactory implements UnitFactory {
   private meadowSrc: Mesh | null = null;
   /** The impact frame (a beam clash's blow), once one fires. */
   private impact: ImpactFrame | null = null;
+  /**
+   * Two beams let go point-blank (a clash too close to hold): both burst between the two mouths at once — each one's
+   * heavy noise, in its own colours, blown back in the other's face — with an impact frame.
+   */
+  playFaceBurst(a: TransformNode, b: TransformNode, elementA: string, elementB: string): void {
+    const ma = this.mouthOf(a)(), mb = this.mouthOf(b)();
+    const mid = Vector3.Lerp(ma, mb, 0.5);
+    const ab = mb.subtract(ma);
+    if (ab.lengthSquared() < 1e-6) ab.set(1, 0, 0);
+    ab.normalize();
+    const size = (this.heightOf(a) + this.heightOf(b)) / 2 * FACE_BURST;
+    if (this.beams) {
+      // (Each beam's burst toward the other: a's into b's face, b's into a's.)
+      this.beams.hemiBurst(mid, ab, size, this.hueOf(a, elementA), false);
+      this.beams.hemiBurst(mid, ab.scale(-1), size, this.hueOf(b, elementB), false);
+    }
+    this.impactFrame()?.fire(mid, Math.min(a.position.y, b.position.y));
+  }
+
   private impactFrame(): ImpactFrame | null {
     const cam = this.scene.activeCamera;
     return cam ? (this.impact ??= new ImpactFrame(this.scene, cam)) : null;
@@ -639,6 +678,9 @@ export class RecipeFactory implements UnitFactory {
       this.units.set(model.root, u);
       this.fx?.register(model.root, model.meshes, model.skeleton, model.props.map((p) => p.mesh));
       u.upkeep = this.scene.onBeforeRenderObservable.add(() => this.updateHeight(model.root, u));
+      // (Its gaze, turned over every clip.)
+      const gaze = this.gazeHook(u);
+      if (gaze) (model.player as unknown as { posePost: typeof gaze }).posePost = gaze;
       u.waterParts = this.soakWaterParts(model);
       void model.player.play('idle', { fade: 0 });
       return model.root;
@@ -949,7 +991,7 @@ export class RecipeFactory implements UnitFactory {
     const player = u.model.player;
     // (In the air the swipe even for those whose claw is their plain attack,
     // CLAW_ON_ATTACK: Charizard dashes in with its air swipe.)
-    const airborne0 = u.hoverTarget > 0 && !!this.strikeClip(u, 'swipe');
+    const airborne0 = this.aloft(u) && !!this.strikeClip(u, 'swipe');
     const swipe = strike === 'swipe' && (airborne0 || this.strikeKey(u, true) === 'swipe');
     // The clip's moment of contact (s from now): the dash ends on it.
     let hitAt: number;
@@ -1321,7 +1363,7 @@ export class RecipeFactory implements UnitFactory {
     // A flyer charges through the air at the height it hovers: its bursts
     // with it, no dust off the ground below.
     const lift = new Vector3(0, u.hover + u.clamp, 0);
-    const airborne = u.hoverTarget > 0.05;
+    const airborne = this.aloft(u, 0.05);
     burst(start.add(lift).add(new Vector3(0, H * 0.45, 0)).subtract(way.scale(H * 0.25)), H * QS_LAUNCH_BURST);
     if (!airborne) fx.dust(start, H);
     // (A run needs three points at least: the walk runs only a longer path.)
@@ -1363,6 +1405,141 @@ export class RecipeFactory implements UnitFactory {
   }
 
   /** An afterimage of `node` as it is this moment (its pose held, fading from `alpha`: QuickStepFx.ghost). */
+  /**
+   * A teleport (the instant step of the anime) to `to`: nothing crosses between. It flickers (TP_FLICKERS on and off
+   * over TP_FLICKER s), and is gone — its copy, held in its pose, squeezed flat into a line and snapped away; TP_GAP s
+   * of nothing; then there, the same backwards — a line opened out into its body — and it flickers in. Round it, going
+   * and coming (`look`): speed lines flickering ('lines': going, along the way it goes; coming, the way it will face —
+   * `face`, its yaw there) or a ring with a flare of short lines ('ring'). It goes in a forward, about-to-fly pose
+   * (TP_POSES: its fast flight, else its run), leant toward where it goes (TP_LEAN, and tipped up or down with the way),
+   * and arrives in it, leant the way it will face, easing back upright after (TP_SETTLE s). Resolves once it is whole again.
+   */
+  async playTeleport(node: TransformNode, to: Vector3, opts: { look?: 'lines' | 'ring'; face?: number; element?: string;
+    /** Arriving mid-attack (Feint): called as it is put there, before it opens out — its strike begun, the copy that opens out caught in it; no forward pose there, no settling after. */
+    onArrive?: () => void } = {}): Promise<void> {
+    const u = this.units.get(node);
+    if (!u) { node.position.copyFrom(to); return; }
+    const fx = (this.quickStep ??= new QuickStepFx(this.scene));
+    const H = this.heightOf(node);
+    const shown = u.model.meshes.map((m) => m.visibility);
+    const show = (on: boolean) => u.model.meshes.forEach((m, i) => { m.visibility = on ? shown[i] : 0; });
+    const middle = () => base.add(new Vector3(0, H * 0.5 + u.hover + u.clamp, 0));
+    const frame = () => new Promise<void>((r) => { this.scene.onAfterRenderObservable.addOnce(() => r()); });
+    const beat = TP_FLICKER / (TP_FLICKERS * 2);
+    // Going: its springing pose (TP_VANISH_POSES: its jump up, else its fast flight), its whole body tilted so its snout
+    // points straight along the way it goes — level, up or down (nose down: +x tilt).
+    const player = u.model.player;
+    const pose = TP_POSES.find((c) => player.has(c));
+    const vanishPose = TP_VANISH_POSES.find((c) => player.has(c));
+    // (Its tilt turns it about its body's middle, not its feet — the body stays where it is as it lines up — and at most
+    // TP_TILT_MAX: a pose whose snout points far off, a bird's beak held high, never flips the body over.)
+    let base = node.position.clone();
+    const pivot = H * 0.5;
+    const lean = (k: number) => {
+      const a = Math.max(-TP_TILT_MAX, Math.min(TP_TILT_MAX, k));
+      node.rotation.x = a;
+      const fx0 = Math.sin(node.rotation.y), fz0 = Math.cos(node.rotation.y);
+      // (Tilted by a, its middle would swing forward by pivot·sin a and down by pivot·(1 − cos a): put back.)
+      node.position.set(base.x - fx0 * pivot * Math.sin(a), base.y + pivot * (1 - Math.cos(a)), base.z - fz0 * pivot * Math.sin(a));
+    };
+    lean(0);
+    if (vanishPose) void player.play(vanishPose, { fade: 0.04, loop: true });
+    const way0 = to.subtract(node.position);
+    const climb = Math.atan2(way0.y, Math.hypot(way0.x, way0.z) || 1e-6);
+    // (Its snout kept on the way it goes, every frame till it is gone — the pose blending in, its gaze, its clip's own
+    // movement all made up for: tilted by however far its snout, head to mouth, still points off that way.)
+    const align = this.scene.onAfterRenderObservable.add(() => {
+      lean(node.rotation.x + TP_ALIGN * (this.snoutPitch(node, u) - climb));
+    });
+    // A flicker as it lines up, then gone.
+    for (let i = 0; i < TP_FLICKERS; i++) { show(false); await sleep(beat); show(true); await sleep(beat); }
+    await frame();
+    this.scene.onAfterRenderObservable.remove(align);
+    const look = opts.look ?? 'lines';
+    // (The ring and flare in a type's aura fill — bright, as they glow additively: Shadow Sneak's Ghost purple, not its
+    // black outline — else white.)
+    const tint = opts.element ? new Color3(...auraGlow(this.hueOf(node, opts.element))[3]) : undefined;
+    const from = middle();
+    const g0 = this.frozenCopy(u);
+    show(false);
+    const going = to.subtract(base);
+    // (Squeezed into a line along the way it goes.)
+    fx.squash(g0.meshes, g0.dispose, from, false, TP_SQUASH, undefined, going);
+    if (look === 'lines') fx.speedFlicker(from, going, H, TP_LINES);
+    else { fx.ring(from, H * 1.3, tint); fx.flare(from, H, undefined, tint); }
+    await sleep(TP_GAP);
+    // There: turned the way it will face, its pose copied where it now stands (still unseen), opened out of a line,
+    // and then the body itself.
+    base = to.clone();
+    node.position.copyFrom(to);
+    if (opts.face !== undefined) this.setFacing(node, opts.face);
+    // (Leant the way it will face: forward, level — or, arriving mid-attack, upright, its strike already under way.)
+    const striking = !!opts.onArrive;
+    lean(striking ? 0 : TP_LEAN);
+    if (striking) opts.onArrive!();
+    await frame();
+    const at = middle();
+    const g1 = this.frozenCopy(u);
+    if (look === 'lines') fx.speedFlicker(at, new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y)), H, TP_LINES);
+    else { fx.ring(at, H * 1.3, tint); fx.flare(at, H, undefined, tint); }
+    // (Opened out of a line along the way it now faces.)
+    const facing = new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y));
+    await new Promise<void>((r) => fx.squash(g1.meshes, g1.dispose, at, true, TP_SQUASH, r, facing));
+    show(true);
+    for (let i = 0; i < TP_FLICKERS - 1; i++) { await sleep(beat); show(false); await sleep(beat); show(true); }
+    // Upright again, out of its pose (arriving mid-attack: already upright, its strike playing on).
+    if (striking) return;
+    if (pose && !u.down) void player.play(this.act(u, 'idle'), { fade: TP_SETTLE });
+    await new Promise<void>((done) => {
+      let t = 0;
+      const o = this.scene.onBeforeRenderObservable.add(() => {
+        t += Math.min(0.05, this.scene.getEngine().getDeltaTime() / 1000);
+        const k = Math.min(1, t / TP_SETTLE);
+        lean(TP_LEAN * (1 - k * k * (3 - 2 * k)));
+        if (k >= 1) { this.scene.onBeforeRenderObservable.remove(o); done(); }
+      });
+    });
+  }
+
+  /**
+   * A plain strike where it stands (Feint, as Quick Attack's blow): its attack clip, no slash drawn — at the clip's
+   * moment of contact `onBlow` is asked whether it landed; if so, a burst at the contact point (the hemisphere burst,
+   * in the move's colours, its dome on into the target), as a quick step's blow. Resolves as its clip plays out.
+   */
+  async playStrike(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: () => boolean | void): Promise<void> {
+    const u = this.units.get(node);
+    if (!u) { onBlow?.(); return; }
+    const H = this.heightOf(node);
+    const d = targetPos.subtract(node.position);
+    if (Math.abs(d.x) + Math.abs(d.z) > 1e-3) this.setFacing(node, Math.atan2(d.x, d.z));
+    const clip = this.act(u, 'attack');
+    const hitAt = this.oneShot(u, clip, HIT_AT, HIT_CAP);
+    const rest = Math.max(0, (u.model.player.clips.get(clip)?.duration ?? hitAt) - hitAt);
+    await sleep(hitAt);
+    if (onBlow?.() === false) { await sleep(rest); return; }
+    const way = targetPos.subtract(node.position); way.y = 0;
+    if (way.lengthSquared() < 1e-6) way.set(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y));
+    way.normalize();
+    const at = Vector3.Lerp(node.position, targetPos, 0.5).add(new Vector3(0, H * 0.45 + u.hover + u.clamp, 0));
+    const tone = this.hueOf(node, element);
+    if (this.beams) this.beams.hemiBurst(at, way, H * QS_HIT_BURST, tone, true);
+    else (this.quickStep ??= new QuickStepFx(this.scene)).hemisphere(at, way, H * QS_HIT_BURST * 2, new Color3(...auraGlow(tone)[0]));
+    await sleep(rest);
+  }
+
+  /** How far its snout points above level (radians), as it is posed now: from its head bone to its mouth, along the way it faces. */
+  private snoutPitch(node: TransformNode, u: Unit): number {
+    const bones = u.model.skeleton?.bones ?? [];
+    const head = bones.find((b) => b.name === 'head');
+    const mouth = this.mouthOf(node)();
+    const mesh = u.model.meshes[0];
+    const from = head ? head.getAbsolutePosition(mesh) : node.position.add(new Vector3(0, this.heightOf(node) * 0.6, 0));
+    const d = mouth.subtract(from);
+    const fwd = Math.sin(node.rotation.y) * d.x + Math.cos(node.rotation.y) * d.z;
+    if (Math.abs(fwd) + Math.abs(d.y) < 1e-4) return 0;
+    return Math.atan2(d.y, Math.max(1e-4, fwd));
+  }
+
   afterimage(node: TransformNode, alpha?: number): void {
     const u = this.units.get(node);
     if (!u) return;
@@ -2066,6 +2243,12 @@ export class RecipeFactory implements UnitFactory {
     };
     let endContact = () => {};
     const contactEnds = new Promise<void>((r) => { endContact = r; });
+    // Cut off (cancel): every wait below gives way to it, and it dies away at once — never landing.
+    let cancelled = false, cancelNow = () => {};
+    const cancelP = new Promise<void>((r) => { cancelNow = () => { cancelled = true; r(); }; });
+    const orCancel = <T>(p: Promise<T>) => Promise.race([p, cancelP]);
+    let launchedNow = () => {};
+    const launched = new Promise<void>((r) => { launchedNow = r; });
     // A bolt off the body (Thunderbolt): its Electric aura, lightning earthing off
     // it to the ground, from the start of its charge until it lets go.
     if (spec.bolt && spec.eggless) {
@@ -2078,16 +2261,25 @@ export class RecipeFactory implements UnitFactory {
       // It charges at least BEAM_CHARGE (the wind-up, held at its end while the egg builds) before it pours.
       const t0 = performance.now();
       const charged = () => sleep(Math.max(0, BEAM_CHARGE - (performance.now() - t0) / 1000));
+      // (Cut off: back to its idle; the beam dies away at once.)
+      const cutOff = async () => {
+        if (u && player && !u.down) void player.play(this.act(u, 'idle'), { fade: 0.15 });
+        endContact();
+        await beam.release(0.12);
+      };
       if (u && player && chain) {
         // The wind-up draws nothing (the jaw is shut); the channel opens with the loop.
-        await player.play(this.act(u, 'beamStart'), { fade: 0.12 });
-        await charged();
+        await orCancel(player.play(this.act(u, 'beamStart'), { fade: 0.12 }));
+        if (!cancelled) await orCancel(charged());
+        if (cancelled) return cutOff();
         void player.play(this.act(u, 'beamLoop'), { fade: 0.06 });
       } else if (u) {
-        await sleep(this.oneShot(u, this.act(u, 'ranged'), 0.5, 0.8));
-        await charged();
+        await orCancel(sleep(this.oneShot(u, this.act(u, 'ranged'), 0.5, 0.8)));
+        if (!cancelled) await orCancel(charged());
+        if (cancelled) return cutOff();
       }
       beam.open();
+      launchedNow();
       // A bolt (Ice Beam, Thunderbolt in a clash): lightning from each egg's tip to
       // where its front is, held until the beam lets go.
       // Eggless (Thunderbolt), it leaves the body itself, as its own bolt does
@@ -2113,9 +2305,11 @@ export class RecipeFactory implements UnitFactory {
         }
 
       }
-      await beam.front;
+      await orCancel(beam.front);
+      if (cancelled) return cutOff();
       // It pours a beat past the hit — or for as long as it is held.
-      await (holdUntil ?? sleep(BEAM_HOLD));
+      await orCancel(holdUntil ?? sleep(BEAM_HOLD));
+      if (cancelled) return cutOff();
       let endDur = 0.6;
       if (u && player && chain) {
         const end = this.act(u, 'beamEnd');
@@ -2128,7 +2322,7 @@ export class RecipeFactory implements UnitFactory {
       await beam.release(endDur);
     })();
     const front = () => handles.reduce((acc, h) => acc.addInPlace(h.end()), Vector3.Zero()).scaleInPlace(1 / handles.length);
-    return { hit: beam.front, contactEnds, done, origin: () => beam.origin(), front };
+    return { hit: beam.front, contactEnds, done, origin: () => beam.origin(), front, launched, cancel: () => cancelNow() };
   }
 
   /**
@@ -3088,6 +3282,9 @@ export class RecipeFactory implements UnitFactory {
   }
 
   /** Where the mouth is, from the jaw and nose bones (the head, or the top, if none). */
+  /** Where its beams leave it, now (its mouth): for aiming one level (the platformer). */
+  mouthAt(node: TransformNode): Vector3 { return this.mouthOf(node)(); }
+
   private mouthOf(node: TransformNode): () => Vector3 {
     const u = this.units.get(node);
     if (!u) {
@@ -3113,9 +3310,30 @@ export class RecipeFactory implements UnitFactory {
   }
 
   /** How tall it stands, as shown (world units). */
+  /** Its clips' player (to play its idle, run, jump… directly: the platformer), or null for a stand-in model. */
+  playerOf(node: TransformNode): { has(action: string): boolean; play(action: string, opts?: { loop?: boolean; fade?: number; speed?: number }): Promise<boolean> } | null {
+    return this.units.get(node)?.model.player ?? null;
+  }
+
   heightOf(node: TransformNode): number {
     const u = this.units.get(node);
     return u ? displayHeight(u.model.height) : 1.0;
+  }
+
+  /**
+   * How far its skin reaches ahead of where it stands and behind it, along the way it faces (world units, as it is
+   * posed this frame — wings, tail and all). Null for one with no skin to measure.
+   */
+  reachAlong(node: TransformNode): { front: number; back: number } | null {
+    const u = this.units.get(node);
+    if (!u) return null;
+    const fx = Math.sin(node.rotation.y), fz = Math.cos(node.rotation.y);
+    let front = 0, back = 0, n = 0;
+    u.skin.forEachPoint((p) => {
+      const along = (p.x - node.position.x) * fx + (p.z - node.position.z) * fz;
+      front = Math.max(front, along); back = Math.max(back, -along); n++;
+    });
+    return n ? { front, back } : null;
   }
 
   faceEachOther(a: TransformNode, b: TransformNode): void {
@@ -3625,7 +3843,68 @@ export class RecipeFactory implements UnitFactory {
 
   /** The clip for `action` in the unit's current state: its air twin while it hovers. */
   private act(u: Unit, action: string): string {
-    return u.hoverTarget > 0 && u.model.player.has(airName(action)) ? airName(action) : action;
+    return this.aloft(u) && u.model.player.has(airName(action)) ? airName(action) : action;
+  }
+
+  /** In the air: hovering, or off the ground by its own means (setAirborne). */
+  private aloft(u: Unit, above = 0): boolean { return u.hoverTarget > above || !!u.airborne; }
+
+  /** Off the ground by its own means (a side-on platformer's jump or flight): its moves and flinches play their air clips. */
+  setAirborne(node: TransformNode, on: boolean): void {
+    const u = this.units.get(node);
+    if (u) u.airborne = on;
+  }
+
+  /**
+   * Its gaze up (+) or down (−) from level (radians, at most GAZE_MAX each way): its neck and head turned that far over
+   * whatever its clip does with them (GAZE_SHARE of it each, down the chain), eased there at GAZE_EASE. Its mouth — and
+   * so a beam's start — goes with them.
+   */
+  setGaze(node: TransformNode, angle: number): void {
+    const u = this.units.get(node);
+    if (u) u.gaze = Math.max(-GAZE_MAX, Math.min(GAZE_MAX, angle));
+  }
+
+  /** Its neck and head turned by its gaze, over its clip's pose (AnimationPlayer.posePost). */
+  private gazeHook(u: Unit): ((P: Float32Array, stride: number) => void) | null {
+    const bones = u.model.skeleton?.bones;
+    if (!bones) return null;
+    const chain = GAZE_BONES.map((n) => bones.findIndex((b) => b.name === n));
+    if (chain.some((i) => i < 0)) return null;
+    const player = u.model.player as unknown as { parentIndex: Int32Array };
+    const q = new Quaternion(), L = new Matrix(), W = new Matrix(), Wi = new Matrix(), R = new Matrix(), tmp = new Matrix(), wr = new Matrix();
+    const axisW = new Vector3(), axis = new Vector3();
+    return (P, S) => {
+      const a = u.gazeShown ?? 0;
+      if (Math.abs(a) < 1e-4) return;
+      // Its pitch axis in the skeleton's own space: the body's right, from the world.
+      const mesh = u.model.meshes[0];
+      const yaw = u.model.root.rotation.y;
+      axisW.set(Math.cos(yaw), 0, -Math.sin(yaw));
+      mesh.getWorldMatrix().getRotationMatrixToRef(wr);
+      wr.invert();
+      Vector3.TransformNormalToRef(axisW, wr, axis);
+      axis.normalize();
+      chain.forEach((bi, k) => {
+        // The parent's rotation in skeleton space: its chain's rotations, child to root.
+        W.copyFrom(Matrix.IdentityReadOnly);
+        for (let p = player.parentIndex[bi]; p >= 0; p = player.parentIndex[p]) {
+          const o = p * S;
+          q.set(P[o + 3], P[o + 4], P[o + 5], P[o + 6]);
+          q.toRotationMatrix(tmp);
+          W.multiplyToRef(tmp, W);
+        }
+        W.invertToRef(Wi);
+        // Its local rotation, then turned about the axis in skeleton space: L' = L · W · R · W⁻¹.
+        const o = bi * S;
+        q.set(P[o + 3], P[o + 4], P[o + 5], P[o + 6]);
+        q.toRotationMatrix(L);
+        Matrix.RotationAxisToRef(axis, GAZE_SIGN * a * GAZE_SHARE[k], R);
+        L.multiplyToRef(W, tmp); tmp.multiplyToRef(R, tmp); tmp.multiplyToRef(Wi, tmp);
+        Quaternion.FromRotationMatrixToRef(tmp, q);
+        P[o + 3] = q.x; P[o + 4] = q.y; P[o + 5] = q.z; P[o + 6] = q.w;
+      });
+    };
   }
 
   /** Set the hover height and resolve once the unit has climbed or sunk to it. */
@@ -3644,6 +3923,11 @@ export class RecipeFactory implements UnitFactory {
    */
   private updateHeight(root: TransformNode, u: Unit): void {
     const dt = Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
+    // Its gaze eased toward where it is asked to look.
+    if ((u.gaze ?? 0) !== (u.gazeShown ?? 0)) {
+      const g = u.gaze ?? 0, k = 1 - Math.exp(-dt * GAZE_EASE);
+      u.gazeShown = Math.abs(g - (u.gazeShown ?? 0)) < 1e-3 ? g : (u.gazeShown ?? 0) + (g - (u.gazeShown ?? 0)) * k;
+    }
     // Keep facing the opponent (not while walking: then it faces its path; nor frozen).
     if (u.lookAt && !u.moving && !u.down && !u.ice && !u.lookHold) {
       const d = u.lookAt.position.subtract(root.position);

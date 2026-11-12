@@ -9,6 +9,7 @@
 
 import type { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -37,6 +38,10 @@ const BURST_LIFE = 0.3, BURST_SWELL = 1.6;
 const STREAKS = 12, STREAK_LIFE = 0.3;
 /** Of them, how many are heavy, through the body's middle. */
 const STREAK_HEAVY = 3;
+/** A teleport: how much wider its body's copy is drawn as it squeezes to a line; its ring's and flare's lives (s), how many flare lines. */
+const SQUASH_WIDE = 0.9, RING_LIFE = 0.28, FLARE_LIFE = 0.22, FLARE_LINES = 10;
+/** A teleport's flickering speed lines: how many, how long each blinks (s). */
+const SPEED_LINES = 22, SPEED_BLINK = 0.05;
 
 const Y = new Vector3(0, 1, 0);
 
@@ -196,6 +201,130 @@ export class QuickStepFx {
         line.scaling.set(1 - 0.6 * after, Math.max(1e-3, L), 1 - 0.6 * after);
         line.position.copyFrom(from).addInPlace(dir.scale((front + back) / 2)).addInPlace(off);
         m.alpha = 0.9 * (1 - after * after);
+      }, () => { line.dispose(); m.dispose(); });
+    }
+  }
+
+  /**
+   * A teleport's vanishing (or, `appearing`, its arrival), on copies of the body held in its pose (frozenCopy): squeezed
+   * about `centre` into a thin line along `axis` — drawn out along it, flattened across it, gone — over `seconds` (or,
+   * arriving, opened back out of one into the body); then `done` (and the copies are freed).
+   */
+  squash(copies: Mesh[], dispose: () => void, centre: Vector3, appearing: boolean, seconds: number, done?: () => void,
+    axis?: Vector3): void {
+    const pivot = new TransformNode('tpPivot', this.scene);
+    pivot.position.copyFrom(centre);
+    // (Squeezed along `axis` — the way it goes, or comes in facing: its local x laid along it, so it is drawn out along
+    // that way and flattened across it. Unset: the world's level.)
+    if (axis && axis.lengthSquared() > 1e-8) {
+      const turn = new Quaternion();
+      Quaternion.FromUnitVectorsToRef(new Vector3(1, 0, 0), axis.normalizeToNew(), turn);
+      pivot.rotationQuaternion = turn;
+      pivot.computeWorldMatrix(true);
+    }
+    for (const c of copies) { c.setParent(pivot); c.visibility = 1; c.isPickable = false; }
+    over(this.scene, seconds, (k) => {
+      // (Vanishing: k from whole to a line; arriving: the other way round.)
+      const e = appearing ? 1 - k : k;
+      const q = e * e * (3 - 2 * e);
+      pivot.scaling.set(1 + SQUASH_WIDE * q, Math.max(0.02, 1 - 0.98 * q), 1 + SQUASH_WIDE * q);
+      const fade = appearing ? Math.min(1, k * 3) : 1 - Math.max(0, (k - 0.7) / 0.3);
+      for (const c of copies) c.visibility = fade;
+    }, () => { for (const c of copies) c.dispose(); pivot.dispose(); dispose(); done?.(); });
+  }
+
+  /** A flat ring bursting out round `at`, facing the camera, `size` across at its widest. */
+  ring(at: Vector3, size: number, color: Color3 = GLOW): void {
+    const ring = MeshBuilder.CreateTorus('tpRing', { diameter: 1, thickness: 0.06, tessellation: 40 }, this.scene);
+    ring.isPickable = false;
+    ring.position.copyFrom(at);
+    // (Its round face toward the camera.)
+    const cam = this.scene.activeCamera;
+    const toCam = cam ? cam.globalPosition.subtract(at).normalize() : new Vector3(0, 0, -1);
+    const turn = new Quaternion();
+    Quaternion.FromUnitVectorsToRef(Y, toCam, turn);
+    ring.rotationQuaternion = turn;
+    const m = glowMat(this.scene, 'tpRingMat', 0.95);
+    m.emissiveColor = color;
+    ring.material = m;
+    over(this.scene, RING_LIFE, (k) => {
+      const e = 1 - (1 - k) * (1 - k);
+      const r = size * (0.2 + 0.8 * e);
+      ring.scaling.set(r, r * (1 - 0.6 * k), r);
+      m.alpha = 0.95 * (1 - k);
+    }, () => { ring.dispose(); m.dispose(); });
+  }
+
+  /** Short lines flaring out from `at` across the screen's plane (`n` of them, `size` their reach), quick and gone. */
+  flare(at: Vector3, size: number, n = FLARE_LINES, color: Color3 = GLOW): void {
+    const cam = this.scene.activeCamera;
+    const toCam = cam ? cam.globalPosition.subtract(at).normalize() : new Vector3(0, 0, -1);
+    const a = Vector3.Cross(toCam, Y).normalize(), b = Vector3.Cross(a, toCam).normalize();
+    const fade = this.fadeTexture();
+    for (let i = 0; i < n; i++) {
+      const th = (i / n) * Math.PI * 2 + Math.random() * 0.4;
+      const dir = a.scale(Math.cos(th)).addInPlace(b.scale(Math.sin(th)));
+      const line = MeshBuilder.CreateCylinder('tpFlare', { height: 1, diameterTop: 0.03 * size, diameterBottom: 0, tessellation: 5 }, this.scene);
+      line.isPickable = false;
+      const turn = new Quaternion();
+      Quaternion.FromUnitVectorsToRef(Y, dir, turn);
+      line.rotationQuaternion = turn;
+      const m = glowMat(this.scene, 'tpFlareMat', 0.9);
+      m.emissiveColor = color;
+      m.opacityTexture = fade;
+      line.material = m;
+      const reach = size * (0.6 + 0.5 * Math.random()), len = size * (0.25 + 0.2 * Math.random());
+      over(this.scene, FLARE_LIFE, (k) => {
+        const e = 1 - (1 - k) * (1 - k);
+        const head = size * 0.25 + reach * e;
+        line.scaling.set(1 - 0.7 * k, Math.max(1e-3, len * (1 - 0.5 * k)), 1 - 0.7 * k);
+        line.position.copyFrom(at).addInPlace(dir.scale(head - len * 0.5));
+        m.alpha = 0.9 * (1 - k * k);
+      }, () => { line.dispose(); m.dispose(); });
+    }
+  }
+
+  /**
+   * Speed lines flickering round a body (a teleport's, in place of a ring): SPEED_LINES thin tapered lines, all along
+   * `dir` (heads forward), spread through the body round `centre` (`height` tall), each on and off by turns
+   * (SPEED_BLINK s), sliding a little along `dir`, thinning and gone over `seconds`.
+   */
+  speedFlicker(centre: Vector3, dir: Vector3, height: number, seconds: number): void {
+    const way = dir.lengthSquared() > 1e-8 ? dir.normalizeToNew() : new Vector3(1, 0, 0);
+    // (Across the way, two axes: one in the view, one toward the camera — the lines spread through the body's bulk.)
+    const cam = this.scene.activeCamera;
+    const toCam = cam ? cam.globalPosition.subtract(centre).normalize() : new Vector3(0, 0, -1);
+    let across = Vector3.Cross(toCam, way);
+    if (across.lengthSquared() < 1e-6) across = Vector3.Cross(Y, way);
+    across.normalize();
+    const deep = Vector3.Cross(way, across).normalize();
+    const turn = new Quaternion();
+    Quaternion.FromUnitVectorsToRef(Y, way, turn);
+    const fade = this.fadeTexture();
+    for (let i = 0; i < SPEED_LINES; i++) {
+      const heavy = i < 5;
+      const thick = (heavy ? 0.065 : 0.022 + 0.025 * Math.random()) * height;
+      const line = MeshBuilder.CreateCylinder('tpLine', { height: 1, diameterTop: thick, diameterBottom: 0, tessellation: 5 }, this.scene);
+      line.isPickable = false;
+      line.rotationQuaternion = turn.clone();
+      const m = glowMat(this.scene, 'tpLineMat', 1);
+      m.opacityTexture = fade;
+      line.material = m;
+      const len = height * (heavy ? 1.5 : 0.6 + 0.8 * Math.random());
+      const off = across.scale((Math.random() - 0.5) * (heavy ? 0.6 : 1.3) * height)
+        .addInPlace(deep.scale((Math.random() - 0.5) * 0.8 * height))
+        .addInPlace(way.scale((Math.random() - 0.5) * 0.6 * height));
+      const slide = height * (0.3 + 0.5 * Math.random());
+      // (Its own blinking: a phase of its own, on more than off.)
+      const phase = Math.random(), blink = SPEED_BLINK * (0.7 + 0.6 * Math.random());
+      let t = 0;
+      over(this.scene, seconds, (k) => {
+        t = k * seconds;
+        const on = ((t / blink + phase) % 1) < 0.62;
+        line.setEnabled(on && k < 0.98);
+        line.scaling.set(1 - 0.5 * k, Math.max(1e-3, len * (1 - 0.3 * k)), 1 - 0.5 * k);
+        line.position.copyFrom(centre).addInPlace(off).addInPlace(way.scale(slide * k));
+        m.alpha = 1 - k * k;
       }, () => { line.dispose(); m.dispose(); });
     }
   }

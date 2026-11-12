@@ -24,6 +24,10 @@ export interface BeamPlay {
   origin?: () => Vector3;
   /** Where its front is, this frame (beams and balls in a clash: where they will meet). */
   front?: () => Vector3;
+  /** Resolves as it launches: its front leaves the mouth (beams). */
+  launched?: Promise<void>;
+  /** Cut it off now (beams: struck while charging or pouring, or turned into a clash) — it dies away at once, never landing. */
+  cancel?: () => void;
 }
 /** A beam clash: `met` as the two beams meet, `hit` when the winner's beam lands (or, a tie, as both disperse); `done` once both are gone. */
 export interface ClashPlay { met: Promise<void>; hit: Promise<void>; done: Promise<void> }

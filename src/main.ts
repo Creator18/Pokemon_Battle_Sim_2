@@ -1,19 +1,20 @@
 /**
- * Bootstrap: create engine/scene, board, camera, lights, factory, vfx, net
- * client, and the top-level GameController. Runs the render loop + resize.
+ * Bootstrap — Pokémon Metroidverse: create the engine and scene, the camera and its lights, the model factory and
+ * every move's effects; then into the game — the boss battlefield by default (?zone=room: the first room). Runs the
+ * render loop and the resize.
+ *
+ * (The hex-board battle game this grew from — its board, lobby and netcode — is no longer started.)
  */
 
 import { Engine } from '@babylonjs/core/Engines/engine';
 import { Scene } from '@babylonjs/core/scene';
-import { Color4 } from '@babylonjs/core/Maths/math.color';
+import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 
 // Side-effect imports required for the tree-shaken feature set.
 import '@babylonjs/core/Meshes/meshBuilder';
 import '@babylonjs/core/Particles/particleSystemComponent';
-import '@babylonjs/core/Culling/ray'; // required by scene pointer picking
+import '@babylonjs/core/Culling/ray'; // required by scene picking (the camera's occlusion rays)
 
-import { HexBoard } from './client/render/HexBoard.ts';
-import { Environment } from './client/render/Environment.ts';
 import { PokemonFactory } from './client/render/PokemonFactory.ts';
 import { RecipeFactory } from './client/render/RecipeFactory.ts';
 import { MoveVfx } from './client/vfx/MoveVfx.ts';
@@ -24,67 +25,66 @@ import { PulseFx } from './client/vfx/PulseFx.ts';
 import { WindFx } from './client/vfx/WindFx.ts';
 import { LightningFx } from './client/vfx/LightningFx.ts';
 import { SlashFx } from './client/vfx/SlashFx.ts';
-import { FieldFx } from './client/vfx/FieldFx.ts';
 import { BattleCamera } from './client/camera/BattleCamera.ts';
-import { NetClient } from './client/net/NetClient.ts';
-import { GameController } from './client/GameController.ts';
-import { hexToRgb, ENV } from './client/theme.ts';
-import { TILE_SCALE } from './client/hexWorld.ts';
+import { startBossZone, startFirstRoom } from './client/metroidverse/zones.ts';
+import type { Zone } from './client/metroidverse/zones.ts';
 
-function boot(): void {
+async function boot(): Promise<void> {
   const canvas = document.getElementById('renderCanvas') as unknown as HTMLCanvasElement;
-  const uiRoot = document.getElementById('ui-root') as HTMLElement;
 
   const engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
   const scene = new Scene(engine);
-  const [br, bg, bb] = hexToRgb(ENV.clear);
-  scene.clearColor = new Color4(br, bg, bb, 1);
+  scene.clearColor = new Color4(0.05, 0.05, 0.1, 1);
   scene.metadata = {};
 
-  // Camera + lights (shadow generator registered into scene.metadata for board/factory).
+  // Camera + lights (the shadow generator registered into scene.metadata for the factory). Its own keys stay unbound:
+  // the game's are the player's.
   const camera = new BattleCamera(scene, engine, canvas);
   (scene.metadata as { shadowGen?: unknown }).shadowGen = camera.shadows;
-  camera.bindKeys();
 
-  const board = new HexBoard(scene);
-  // Painterly forest scenery around the arena (non-interactive; isPickable=false
-  // so it never intercepts tile clicks). Built after the shadow generator is
-  // registered so trees/rocks cast shadows onto the arena.
-  const environment = new Environment(scene, 10 * TILE_SCALE);
-  void environment;
-  // The real models, built at runtime from the archive data; the stylized
-  // primitives stand in for any Pokémon that cannot be loaded.
+  // The real models, built at runtime from the archive data; the stylized primitives stand in for any Pokémon that
+  // cannot be loaded. Every move's effects.
   const fx = new UnitFx(scene, camera.camera); // hit flash + aura outlines
   const vfx = new MoveVfx(scene, camera.camera);
-  const beams = new BeamFx(scene, camera.camera, { shake: (m, ms) => vfx.shake(m, ms) }); // beam attacks
-  const dash = new DashRings(scene, camera.camera); // wake rings left by a dash
-  const pulses = new PulseFx(scene, camera.camera); // the sonar pulse (Psychic, Water Pulse)
-  const wind = new WindFx(scene, camera.camera); // tornadoes and wind (Gust, Twister)
-  const lightning = new LightningFx(scene, camera.camera, { shake: (m, ms) => vfx.shake(m, ms) }); // bolts and earthing
-  const slashes = new SlashFx(scene, camera.camera); // claw marks
+  const beams = new BeamFx(scene, camera.camera, { shake: (m, ms) => vfx.shake(m, ms) });
+  const dash = new DashRings(scene, camera.camera);
+  const pulses = new PulseFx(scene, camera.camera);
+  const wind = new WindFx(scene, camera.camera);
+  const lightning = new LightningFx(scene, camera.camera, { shake: (m, ms) => vfx.shake(m, ms) });
+  const slashes = new SlashFx(scene, camera.camera);
   const factory = new RecipeFactory(scene, new PokemonFactory(scene), fx, beams, dash, pulses, wind, lightning, slashes);
-  // The weather and the terrain over the whole field: the sky, fog, grade and their particles.
-  const field = new FieldFx(scene, { pipeline: camera.pipeline, sky: environment.sky, keyLight: camera.keyLight, fill: camera.fill,
-    lightning, wind, tileTop: (q, r) => board.tileTop(q, r) });
-  board.onField((weather, terrain) => field.set(weather, terrain));
 
-  const net = new NetClient(); // ws://<host>:8080 by default
-
-  const controller = new GameController({ net, board, factory, vfx, camera, uiRoot });
-  controller.start();
-
-  // Dev-only inspection handle (scene, camera, models) for debugging and
-  // scripted checks; stripped from production builds.
-  if (import.meta.env.DEV) {
-    (window as unknown as { __pbw?: unknown }).__pbw = { scene, camera, factory, board, vfx, fx, beams, dash, pulses, wind, lightning, slashes, field, net, controller };
-  }
+  // (A zone's air — for the demo scripts, which set it as the old field did.)
+  const field = {
+    setAir: (air: { fog: Color3; fogStart: number; fogEnd: number } | null) => {
+      if (!air) { scene.fogMode = 0; return; }
+      scene.fogMode = 3; scene.fogColor = air.fog; scene.fogStart = air.fogStart; scene.fogEnd = air.fogEnd;
+    },
+  };
 
   engine.runRenderLoop(() => scene.render());
   window.addEventListener('resize', () => engine.resize());
+
+  // Dev-only inspection handle (scene, camera, models, effects) for debugging and scripted checks — and the demo
+  // scripts; stripped from production builds.
+  const deps = { scene, factory, camera: camera.camera };
+  if (import.meta.env.DEV) {
+    (window as unknown as { __pbw?: unknown }).__pbw = { scene, camera, factory, vfx, fx, beams, dash, pulses, wind, lightning, slashes, field,
+      startBossZone: (o?: Parameters<typeof startBossZone>[1]) => startBossZone(deps, o), startFirstRoom: (o?: Parameters<typeof startFirstRoom>[1]) => startFirstRoom(deps, o) };
+  }
+
+  // Into the game.
+  const which = new URLSearchParams(location.search).get('zone');
+  const zone: Zone = which === 'room' ? await startFirstRoom(deps) : await startBossZone(deps);
+  if (import.meta.env.DEV) {
+    const w = window as unknown as { __zone?: Zone; __pf?: unknown; __arena?: unknown };
+    w.__zone = zone; w.__pf = zone.pf; w.__arena = zone.arena;
+  }
+  canvas.focus();
 }
 
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot);
+  document.addEventListener('DOMContentLoaded', () => { void boot(); });
 } else {
-  boot();
+  void boot();
 }
