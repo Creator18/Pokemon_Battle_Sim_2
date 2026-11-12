@@ -406,12 +406,15 @@ const THUNDER_CLEAR = 0.5, THUNDER_CLEAR_BODY = 0.7;
  * moment of contact), and how often it leaves an afterimage of its pose (s).
  */
 const QS_DASH = 0.16, QS_GHOST_EVERY = 0.035;
+/** A live clash (playClash's struggle): how far its meeting point moves toward the side losing at the full (share of the way), the longest it lasts (s), within what balance it ends a tie. */
+const STRUGGLE_SHIFT = 0.28, STRUGGLE_MAX = 5, STRUGGLE_TIE = 0.15;
+/** A blink (unhurtable after a blow): how often it flickers (s), how faint it is drawn. */
+const BLINK_EVERY = 0.06, BLINK_FAINT = 0.35;
 /** A teleport (playTeleport): its flickers out (how many, over how long, s), the squeeze to a line (s), the gap with nothing (s). */
 const TP_FLICKERS = 3, TP_FLICKER = 0.12, TP_SQUASH = 0.1, TP_GAP = 0.1;
 /** Its flickering speed lines' life, going and coming (s). */
 const TP_LINES = 0.26;
 /** Its forward pose: the first clip of these it has; how far it leans in (radians, nose down); how long it takes to settle upright after (s). */
-const TP_POSES = ['airRun', 'airWalk', 'run'], TP_LEAN = 0.12, TP_SETTLE = 0.18;
 /** Its pose as it goes: springing off — its jump up, else its fast flight. */
 const TP_VANISH_POSES = ['jumpUpLoop', 'jumpUpStart', 'airRun', 'airWalk', 'run'];
 /** How much of its snout's miss it makes up each frame as it lines up (a frame behind: under 1, so it settles, not overshoots). */
@@ -1021,7 +1024,7 @@ export class RecipeFactory implements UnitFactory {
     // A flyer dashes at the height it hovers: its bursts and streaks with it,
     // and no dust kicked up off the ground below.
     const lift = new Vector3(0, u.hover + u.clamp, 0);
-    const airborne = u.hover > 0.05;
+    const airborne = this.aloft(u, 0.05);
     burst(start.add(lift).add(new Vector3(0, H * 0.45, 0)).subtract(way.scale(H * 0.25)), H * QS_LAUNCH_BURST);
     if (!airborne) fx.dust(start, H);
 
@@ -1192,7 +1195,7 @@ export class RecipeFactory implements UnitFactory {
         else fx.hemisphere(p, d, size * 2, new Color3(...auraGlow(tone)[0]));
       };
       const lift = new Vector3(0, u.hover + u.clamp, 0);
-      const airborne = u.hover > 0.05;
+      const airborne = this.aloft(u, 0.05);
       // (Mid-leap, its bursts go up with it.)
       const liftAt = (s: number) => lift.add(new Vector3(0, heightAt(s), 0));
       const mid = new Vector3(0, H * 0.45, 0);
@@ -1410,9 +1413,9 @@ export class RecipeFactory implements UnitFactory {
    * over TP_FLICKER s), and is gone — its copy, held in its pose, squeezed flat into a line and snapped away; TP_GAP s
    * of nothing; then there, the same backwards — a line opened out into its body — and it flickers in. Round it, going
    * and coming (`look`): speed lines flickering ('lines': going, along the way it goes; coming, the way it will face —
-   * `face`, its yaw there) or a ring with a flare of short lines ('ring'). It goes in a forward, about-to-fly pose
-   * (TP_POSES: its fast flight, else its run), leant toward where it goes (TP_LEAN, and tipped up or down with the way),
-   * and arrives in it, leant the way it will face, easing back upright after (TP_SETTLE s). Resolves once it is whole again.
+   * `face`, its yaw there) or a ring with a flare of short lines ('ring'). It goes springing off (TP_VANISH_POSES), its
+   * snout lined up on the way it goes, and arrives upright in its resting pose (its idle; aloft, its air idle). Resolves
+   * once it is whole again.
    */
   async playTeleport(node: TransformNode, to: Vector3, opts: { look?: 'lines' | 'ring'; face?: number; element?: string;
     /** Arriving mid-attack (Feint): called as it is put there, before it opens out — its strike begun, the copy that opens out caught in it; no forward pose there, no settling after. */
@@ -1429,7 +1432,6 @@ export class RecipeFactory implements UnitFactory {
     // Going: its springing pose (TP_VANISH_POSES: its jump up, else its fast flight), its whole body tilted so its snout
     // points straight along the way it goes — level, up or down (nose down: +x tilt).
     const player = u.model.player;
-    const pose = TP_POSES.find((c) => player.has(c));
     const vanishPose = TP_VANISH_POSES.find((c) => player.has(c));
     // (Its tilt turns it about its body's middle, not its feet — the body stays where it is as it lines up — and at most
     // TP_TILT_MAX: a pose whose snout points far off, a bird's beak held high, never flips the body over.)
@@ -1473,32 +1475,24 @@ export class RecipeFactory implements UnitFactory {
     base = to.clone();
     node.position.copyFrom(to);
     if (opts.face !== undefined) this.setFacing(node, opts.face);
-    // (Leant the way it will face: forward, level — or, arriving mid-attack, upright, its strike already under way.)
+    // (Upright, in its resting pose already — its idle, aloft its air idle — or, arriving mid-attack, its strike under way.)
     const striking = !!opts.onArrive;
-    lean(striking ? 0 : TP_LEAN);
+    lean(0);
+    // (Aloft or not by where it lands — not where it left: a hop up off the ground arrives in its air clips.)
+    if (u.hoverTarget <= 0) u.airborne = to.y > 0.05;
     if (striking) opts.onArrive!();
+    else if (!u.down) void player.play(this.act(u, 'idle'), { fade: 0, loop: true });
     await frame();
     const at = middle();
     const g1 = this.frozenCopy(u);
-    if (look === 'lines') fx.speedFlicker(at, new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y)), H, TP_LINES);
+    // (Coming in: its lines trailing behind it, the way it now faces — not ahead of it.)
+    if (look === 'lines') fx.speedFlicker(at, new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y)), H, TP_LINES, true);
     else { fx.ring(at, H * 1.3, tint); fx.flare(at, H, undefined, tint); }
     // (Opened out of a line along the way it now faces.)
     const facing = new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y));
     await new Promise<void>((r) => fx.squash(g1.meshes, g1.dispose, at, true, TP_SQUASH, r, facing));
     show(true);
     for (let i = 0; i < TP_FLICKERS - 1; i++) { await sleep(beat); show(false); await sleep(beat); show(true); }
-    // Upright again, out of its pose (arriving mid-attack: already upright, its strike playing on).
-    if (striking) return;
-    if (pose && !u.down) void player.play(this.act(u, 'idle'), { fade: TP_SETTLE });
-    await new Promise<void>((done) => {
-      let t = 0;
-      const o = this.scene.onBeforeRenderObservable.add(() => {
-        t += Math.min(0.05, this.scene.getEngine().getDeltaTime() / 1000);
-        const k = Math.min(1, t / TP_SETTLE);
-        lean(TP_LEAN * (1 - k * k * (3 - 2 * k)));
-        if (k >= 1) { this.scene.onBeforeRenderObservable.remove(o); done(); }
-      });
-    });
   }
 
   /**
@@ -1538,6 +1532,25 @@ export class RecipeFactory implements UnitFactory {
     const fwd = Math.sin(node.rotation.y) * d.x + Math.cos(node.rotation.y) * d.z;
     if (Math.abs(fwd) + Math.abs(d.y) < 1e-4) return 0;
     return Math.atan2(d.y, Math.max(1e-4, fwd));
+  }
+
+  /** A Pokémon flashed `rgb` and held so `hold` s (a boss's tell before it strikes). */
+  tell(node: TransformNode, rgb: [number, number, number], hold: number): void {
+    if (this.fx?.has(node)) this.fx.flash(node, rgb, { peak: 0.75, hold, fade: 0.12 });
+  }
+
+  /** A Pokémon blinking (drawn faint by turns, BLINK_EVERY s) for `seconds` — unhurtable for a moment after a blow. */
+  blink(node: TransformNode, seconds: number): void {
+    const u = this.units.get(node);
+    if (!u) return;
+    const shown = u.model.meshes.map((m) => m.visibility);
+    let t = 0;
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      t += Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
+      const faint = t < seconds && Math.floor(t / BLINK_EVERY) % 2 === 0;
+      u.model.meshes.forEach((m, i) => { if (m.visibility > 0.01 || faint) m.visibility = faint ? shown[i] * BLINK_FAINT : shown[i]; });
+      if (t >= seconds) { this.scene.onBeforeRenderObservable.remove(obs); u.model.meshes.forEach((m, i) => { m.visibility = shown[i]; }); }
+    });
   }
 
   afterimage(node: TransformNode, alpha?: number): void {
@@ -2216,7 +2229,7 @@ export class RecipeFactory implements UnitFactory {
       // Out of a muzzle: the ball sits at it (not a face's gap ahead); no egg: at the mouth.
       root: muzzles || spec.eggless ? 0 : undefined,
       // No dust round the feet of a unit in the air (and only once for twins).
-      feet: () => (i > 0 || (u && u.hover > 0.05) ? null : node.position),
+      feet: () => (i > 0 || (u && this.aloft(u, 0.05)) ? null : node.position),
       // (Cannon beams aim straight at their meeting point, not along the gaze; and so does a beam in a clash, straight
       // from its mouth to the clash point — the two shafts one straight line, mouth to mouth, not two side by side.)
       facing: meet || clash ? undefined : () => node.rotation.y, targetSize: () => (target ? this.heightOf(target) : height),
@@ -2244,8 +2257,8 @@ export class RecipeFactory implements UnitFactory {
     let endContact = () => {};
     const contactEnds = new Promise<void>((r) => { endContact = r; });
     // Cut off (cancel): every wait below gives way to it, and it dies away at once — never landing.
-    let cancelled = false, cancelNow = () => {};
-    const cancelP = new Promise<void>((r) => { cancelNow = () => { cancelled = true; r(); }; });
+    let cancelled = false, quietly = false, cancelNow = (_quiet = false) => {};
+    const cancelP = new Promise<void>((r) => { cancelNow = (quiet = false) => { cancelled = true; quietly = quiet; r(); }; });
     const orCancel = <T>(p: Promise<T>) => Promise.race([p, cancelP]);
     let launchedNow = () => {};
     const launched = new Promise<void>((r) => { launchedNow = r; });
@@ -2263,7 +2276,7 @@ export class RecipeFactory implements UnitFactory {
       const charged = () => sleep(Math.max(0, BEAM_CHARGE - (performance.now() - t0) / 1000));
       // (Cut off: back to its idle; the beam dies away at once.)
       const cutOff = async () => {
-        if (u && player && !u.down) void player.play(this.act(u, 'idle'), { fade: 0.15 });
+        if (u && player && !u.down && !quietly) void player.play(this.act(u, 'idle'), { fade: 0.15 });
         endContact();
         await beam.release(0.12);
       };
@@ -2322,7 +2335,7 @@ export class RecipeFactory implements UnitFactory {
       await beam.release(endDur);
     })();
     const front = () => handles.reduce((acc, h) => acc.addInPlace(h.end()), Vector3.Zero()).scaleInPlace(1 / handles.length);
-    return { hit: beam.front, contactEnds, done, origin: () => beam.origin(), front, launched, cancel: () => cancelNow() };
+    return { hit: beam.front, contactEnds, done, origin: () => beam.origin(), front, launched, cancel: (quiet?: boolean) => cancelNow(quiet) };
   }
 
   /**
@@ -2363,7 +2376,7 @@ export class RecipeFactory implements UnitFactory {
     const ball = throwBall(this.beams, { element: spec.element, colours: spec.colours, height, from: this.mouthOf(node), target: aimAt,
       targetSize: () => (target ? this.heightOf(target) : height),
       // No wind spiral round the feet of a unit in the air.
-      feet: () => (u && u.hover > 0.05 ? null : node.position),
+      feet: () => (u && this.aloft(u, 0.05) ? null : node.position),
       overlay: this.fx ? (mesh, mat) => this.fx!.addOverlay(mesh, mat) : undefined,
       // A tornado ball's noise (Aeroblast, Aura Sphere, Moonblast): the Flying coat's tornado spheres, two at a slant.
       noise: spec.tornado && this.wind ? (heavy, light, free) => this.wind!.orb(heavy, light, free) : undefined,
@@ -2952,12 +2965,20 @@ export class RecipeFactory implements UnitFactory {
     return this.wind.statChange(() => node.position.add(new Vector3(0, u ? u.hover + u.clamp : 0, 0)), this.heightOf(node), up, radius);
   }
 
-  /** `meetAt`: where they meet, as a share of the way from a to b (0.5: the middle) — fixed, both beams running to it; none: wherever their fronts cross. */
+  /**
+   * `meetAt`: where they meet, as a share of the way from a to b (0.5: the middle) — fixed, both beams running to it;
+   * none: wherever their fronts cross. `struggle`: a live clash — once they meet, its balance each frame (−1 b has it …
+   * 1 a has it) shifts their meeting point toward the side losing (STRUGGLE_SHIFT of the way at the full), until one side
+   * has it (±1: that one wins, pushing through) or STRUGGLE_MAX s pass (the stronger by then, or within STRUGGLE_TIE, a
+   * tie) — `winner` and `margin` then only what it starts from.
+   */
   playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null, margin: number, standUntil?: Promise<void>,
-    meetAt?: number): ClashPlay {
+    meetAt?: number, struggle?: () => number): ClashPlay {
     const ma = this.mouthOf(a), mb = this.mouthOf(b);
     const beamH = (n: TransformNode) => { const u = this.units.get(n); return u ? displayHeight(u.model.height) : 1.2; };
-    const loser = winner === a ? b : winner === b ? a : null;
+    let loser = winner === a ? b : winner === b ? a : null;
+    // (A live struggle: its balance as it stands, shifting the meeting point.)
+    let balance = 0;
     // How far the ball is pushed: until its surface meets the loser's beam
     // where it leaves the loser (its ball, kept clear of its body).
     let pa: BeamPlay | null = null, pb: BeamPlay | null = null;
@@ -2972,7 +2993,8 @@ export class RecipeFactory implements UnitFactory {
     let meetU = meetAt ?? -1;
     const at = () => {
       if (meetU < 0) return null;
-      const met = Vector3.Lerp(ma(), mb(), meetU);
+      const u = Math.min(1 - CLASH_MEET, Math.max(CLASH_MEET, meetU + balance * STRUGGLE_SHIFT));
+      const met = Vector3.Lerp(ma(), mb(), u);
       return loser && push > 0 ? Vector3.Lerp(met, loserRoot(), ease(Math.min(1, push))) : met;
     };
     const size = (beamH(a) + beamH(b)) / 2;
@@ -3017,8 +3039,25 @@ export class RecipeFactory implements UnitFactory {
     const met = Promise.all([playA.hit, playB.hit]).then(() => {});
     void (async () => {
       await met;
-      // (They stand off a moment — or, held, until `standUntil`.)
-      await (standUntil ?? sleep(CLASH_STANDOFF));
+      if (struggle) {
+        // The struggle: its balance followed till one side has it, or time is up.
+        let t = 0;
+        await new Promise<void>((done) => {
+          const obs = this.scene.onBeforeRenderObservable.add(() => {
+            t += Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
+            balance = Math.max(-1, Math.min(1, struggle()));
+            if (Math.abs(balance) >= 1 || t >= STRUGGLE_MAX) { this.scene.onBeforeRenderObservable.remove(obs); done(); }
+          });
+        });
+        winner = Math.abs(balance) < STRUGGLE_TIE ? null : balance > 0 ? a : b;
+        loser = winner === a ? b : winner === b ? a : null;
+        margin = Math.abs(balance);
+        // (The push on from where the struggle left the ball.)
+        meetU = Math.min(1 - CLASH_MEET, Math.max(CLASH_MEET, meetU + balance * STRUGGLE_SHIFT)); balance = 0;
+      } else {
+        // (They stand off a moment — or, held, until `standUntil`.)
+        await (standUntil ?? sleep(CLASH_STANDOFF));
+      }
       if (!loser) {
         // Evenly matched: the ball bursts as a ball attack's does, and both beams disperse.
         burst = true;
@@ -3043,7 +3082,7 @@ export class RecipeFactory implements UnitFactory {
       await sleep(BEAM_HOLD);
       (winner === a ? endA : endB)();
     })();
-    return { met, hit, done: Promise.all([playA.done, playB.done]).then(() => {}) };
+    return { met, hit, done: Promise.all([playA.done, playB.done]).then(() => {}), winner: () => winner };
   }
 
   /**
@@ -3077,7 +3116,7 @@ export class RecipeFactory implements UnitFactory {
       feet: () => null, targetSize: () => height, clashNoise: wind ? () => wind.hemi(heavy, light) : undefined });
     // The ball itself, flying at the other; where the two meet, it goes (its half takes over).
     const ball = throwBall(this.beams!, { element, colours, height, from: mouth, target: toTarget, targetSize: () => this.heightOf(other),
-      feet: () => (u && u.hover > 0.05 ? null : node.position), overlay, vanish: true, noise });
+      feet: () => (u && this.aloft(u, 0.05) ? null : node.position), overlay, vanish: true, noise });
     // (It goes only once it has flown there: where they meet can be known from the first — a clash meeting at a
     // fixed point, `meetAt` — long before the ball has even left the hand.)
     const meets = this.scene.onBeforeRenderObservable.add(() => {
@@ -3599,8 +3638,8 @@ export class RecipeFactory implements UnitFactory {
     // Each surface keeps its feet on the ground as it morphs — if its form has
     // feet and stands on the ground (one in the air is left in the air).
     const none = new Int32Array(0);
-    const feetA = ua.hover > 0.01 ? none : footVertices(ua.model.meshes, skA);
-    const feetB = ub.hover > 0.01 ? none : footVertices(ub.model.meshes, skB);
+    const feetA = this.aloft(ua, 0.01) ? none : footVertices(ua.model.meshes, skA);
+    const feetB = this.aloft(ub, 0.01) ? none : footVertices(ub.model.meshes, skB);
     const ground = node.position.y;
 
     // Through its white glow: the ball's wind spiral round its feet (not in
@@ -3614,7 +3653,7 @@ export class RecipeFactory implements UnitFactory {
       // A Mega Evolution (or a Primal Reversion): the bursts in rainbow colours.
       mega: /^(Mega|Primal) /.test(species.name),
       centre: () => node.position.add(new Vector3(0, height() * 0.5 + ua.hover, 0)),
-      feet: () => (ua.hover > 0.01 ? null : node.position),
+      feet: () => (this.aloft(ua, 0.01) ? null : node.position),
       overlay: this.fx ? (mesh, m) => this.fx!.addOverlay(mesh, m) : undefined,
     }) : null;
 
@@ -3981,7 +4020,7 @@ export class RecipeFactory implements UnitFactory {
       u.clamp += (want - u.clamp) * Math.min(1, rate * dt);
     }
     u.model.setLift((u.hover + u.clamp) / (root.scaling.y || 1));
-    this.fx?.setAirborne(root, u.hover > 0.05);
+    this.fx?.setAirborne(root, this.aloft(u, 0.05));
   }
 
   /** Move a node to `to` over `seconds`, eased, on the render clock. */

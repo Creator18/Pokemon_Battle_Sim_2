@@ -28,6 +28,20 @@ const CONTEST = 0.55;
 const BEAM_COOL: [number, number] = [2.2, 3.6];
 /** A foe this far above it (× its height) is "above": it flies up after it. */
 const ABOVE = 0.9;
+/**
+ * Its tells — before each attack it flashes (orange: dodge it; blue: a blow at hand, counter it) and holds a beat
+ * (s): a beam, a slash, a Quick Attack, a beam fired back to meet yours. After each, it recovers (s): an opening.
+ */
+const TELL: Record<string, { rgb: [number, number, number]; hold: number; recover: number }> = {
+  ranged: { rgb: [1, 0.5, 0.08], hold: 0.45, recover: 0.9 },
+  close: { rgb: [0.3, 0.6, 1], hold: 0.3, recover: 0.5 },
+  mobility: { rgb: [1, 0.5, 0.08], hold: 0.3, recover: 0.4 },
+  contest: { rgb: [1, 0.5, 0.08], hold: 0.2, recover: 0.9 },
+};
+/** Its foe braced to counter (glowing): how often it holds off attacking till the brace runs out (then it punishes the whiff). */
+const WARY = 0.75;
+/** In a clash's struggle, how often it presses (per s). */
+const AI_MASH = 6.5;
 
 export interface Thought { t: number; saw: string; chose: string }
 
@@ -36,6 +50,9 @@ export class BossAI {
   private next = 0;
   private hold: Intent = IDLE;
   private beamReady = 0;
+  /** A tell under way: the attack it will make, and when; the recovery after its last, till when; its last frame's clock. */
+  private pending: { intent: Intent; at: number; kind: string; cut: number } | null = null;
+  private recovering = 0; private lastKind = ''; private wasBusy = false; private lastT = 0;
   /** Paused: it only stands and watches. */
   paused = false;
 
@@ -46,7 +63,24 @@ export class BossAI {
   /** Its intent this frame. */
   think(): Intent {
     const me = this.me, foe = this.foe, t = me.time;
-    if (this.paused || me.down || foe.down) return { ...IDLE, face: Math.sign(foe.x - me.x) || me.facing };
+    const dtNow = Math.max(0, t - this.lastT); this.lastT = t;
+    const faceFoe = Math.sign(foe.x - me.x) || me.facing;
+    if (this.paused || me.down || foe.down) { this.pending = null; return { ...IDLE, face: faceFoe }; }
+    // In a struggle: pressing away at it.
+    if (me.clashing) return { ...IDLE, face: faceFoe, ranged: Math.random() < AI_MASH * dtNow };
+    // Its move just over: it recovers (an opening).
+    if (this.wasBusy && !me.busy && this.lastKind) { this.recovering = t + TELL[this.lastKind].recover; this.lastKind = ''; }
+    this.wasBusy = me.busy;
+    if (t < this.recovering && !me.busy) return { ...IDLE, face: faceFoe };
+    // A tell under way: held still, then the attack.
+    // (Countered while telling: the attack it was winding up is gone.)
+    if (this.pending && me.interrupted !== this.pending.cut) this.pending = null;
+    if (this.pending) {
+      if (t < this.pending.at) return { ...IDLE, face: this.pending.intent.face, aim: this.pending.intent.aim };
+      const go = this.pending.intent; this.lastKind = this.pending.kind; this.pending = null;
+      this.log.push({ t: +t.toFixed(2), saw: '', chose: 'strike' });
+      return go;
+    }
     // (Presses last one frame; held keys last till its next thought.)
     if (t < this.next) return { ...this.hold, ranged: false, close: false, mobility: false, jumpPressed: false };
     this.next = t + this.rnd(THINK);
@@ -103,6 +137,21 @@ export class BossAI {
     } else if (gap > 0.3) {
       i = { ...i, want: dir };
       chose = 'close in';
+    }
+    // (Its foe braced to counter: mostly it waits the brace out rather than walk into it.)
+    if ((i.ranged || i.close || i.mobility) && foe.countering && Math.random() < WARY) {
+      i = { ...IDLE, face: i.face, aim: i.aim };
+      chose = 'wait out the counter';
+    }
+    // (An attack: told first — it flashes and holds — then made.)
+    const kind = i.ranged ? (chose.includes('contest') ? 'contest' : 'ranged') : i.close ? 'close' : i.mobility ? 'mobility' : '';
+    if (kind) {
+      const tell = TELL[kind];
+      const move = kind === 'close' ? me.moves.close : kind === 'mobility' ? me.moves.mobility : me.moves.ranged;
+      this.pending = { intent: i, at: t + tell.hold, kind, cut: me.interrupted };
+      me.tell(tell.rgb, tell.hold, move ?? '');
+      i = { ...IDLE, face: i.face, aim: i.aim };
+      chose = `tell ${kind} → ${chose}`;
     }
     this.hold = i;
     this.log.push({ t: +t.toFixed(2), saw, chose });

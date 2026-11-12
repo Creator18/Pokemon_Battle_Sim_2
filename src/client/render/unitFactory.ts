@@ -26,11 +26,11 @@ export interface BeamPlay {
   front?: () => Vector3;
   /** Resolves as it launches: its front leaves the mouth (beams). */
   launched?: Promise<void>;
-  /** Cut it off now (beams: struck while charging or pouring, or turned into a clash) — it dies away at once, never landing. */
-  cancel?: () => void;
+  /** Cut it off now (beams: struck while charging or pouring, or turned into a clash) — it dies away at once, never landing; `quiet`: its user's clip left as it is (another — a stagger — takes over). */
+  cancel?: (quiet?: boolean) => void;
 }
 /** A beam clash: `met` as the two beams meet, `hit` when the winner's beam lands (or, a tie, as both disperse); `done` once both are gone. */
-export interface ClashPlay { met: Promise<void>; hit: Promise<void>; done: Promise<void> }
+export interface ClashPlay { met: Promise<void>; hit: Promise<void>; done: Promise<void>; /** Who won (a live struggle: once decided; none: a tie). */ winner?: () => import('@babylonjs/core/Meshes/transformNode').TransformNode | null }
 
 import { MoveCategory, type MoveDefinition, type SpeciesDefinition } from '../../shared/index.ts';
 

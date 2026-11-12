@@ -295,6 +295,8 @@ const SNAP = 0.07, POP = 0.14; //     s, launch: ball to nothing, then back to f
 export const BLUR_LIFE = 0.35, SLASH_LIFE = 0.38, DUST_LIFE = 2.6;
 /** Beam 2 (the aura beam) letting go: the whole of it — column, egg, outline, rings — swells out to this × as it tears away (a gentle burst), where a beam 1 narrows. */
 const RELEASE_BURST = 1.8;
+/** A beam whose front strikes nothing (BeamShot.endBall): its end ball this much of its size; how quickly it eases between (per s). */
+const END_BALL_MISS = 0.45, END_BALL_EASE = 8;
 const RELEASE_SPAN = 0.6; //          share of the release clip spent dissolving
 
 /**
@@ -875,6 +877,8 @@ export interface BeamShot {
    * the way to a broad round end at the target (EGG_BEAM_START to EGG_BEAM_END × its radius), its tip's burst there.
    */
   eggBeam?: boolean;
+  /** Whether its front strikes something now (unset: always): its end ball full then, else END_BALL_MISS × (eased between). */
+  endBall?: () => boolean;
   /** How thick it is (1 = as the others): its column, eggs and puffs (not a clash's ball). */
   thickness?: number;
   /**
@@ -1189,6 +1193,8 @@ class Beam implements BeamHandle {
   private backR = 0;
   /** The target's reach in each arc's direction over all its struck poses (worked out once). */
   private reachOut: number[] | null = null;
+  /** Its end ball's size, eased (BeamShot.endBall: full on a target, END_BALL_MISS × off one). */
+  private endBallK = -1;
   /** How far the release has dissolved it (0..1), this frame. */
   private dissolveNow = 0;
   private balls: { mesh: Mesh; layer: Layer }[] = [];
@@ -1784,6 +1790,11 @@ class Beam implements BeamHandle {
     const H = this.H;
     const clashing = !!this.shot.clash && this.clashEndT < 0;
     const on = !clashing && !this.finished && !this.shot.bolt; // (a bolt has no tip)
+    // (Its front striking nothing — endBall — a smaller end ball, eased there and back.)
+    const ballWant = this.shot.endBall && !this.shot.endBall() ? END_BALL_MISS : 1;
+    // (From the first frame as it should be — then eased.)
+    if (this.endBallK < 0) this.endBallK = ballWant;
+    this.endBallK += (ballWant - this.endBallK) * Math.min(1, this.scene.getEngine().getDeltaTime() / 1000 * END_BALL_EASE);
     if (on && this.splitT >= 0 && this.loopT < 0) this.loopT = this.time;
     // Grows in with the front; released, swells out as it disperses (as a ball attack's burst).
     const grownIn = clamp01(len / (SPHERE_R[BEAM_R.length - 1] * H * this.W * 2));
@@ -1793,7 +1804,7 @@ class Beam implements BeamHandle {
     Quaternion.FromUnitVectorsToRef(Y, aim.scale(-1), back); // its narrow end back along the beam
     // (One long egg: its end ball as much bigger as its end is broader than the oval's, and round — no tail drawn out
     // back along the beam: the long egg itself narrows back to the start.)
-    const tipScale = this.eggBeam ? EGG_BEAM_END / OVAL_END : 1;
+    const tipScale = (this.eggBeam ? EGG_BEAM_END / OVAL_END : 1) * this.endBallK;
     const rFat = SPHERE_R[BEAM_R.length - 1] * H * this.W * TIP * EGG_BACK * grownIn * tipScale;
     // The fat end's far side at the front of the beam.
     const centre = front.subtract(aim.scale(rFat * 0.85));

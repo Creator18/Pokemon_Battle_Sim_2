@@ -33,7 +33,7 @@
     const chose = {};
     for (const l of pf.ai.log) { const c = l.chose.replace(/:.*/, ''); chose[c] = (chose[c] || 0) + 1; }
     const blows = {};
-    for (const e of pf.events) { const m = e.text.match(/^(.*?) (Flamethrower|Dragon Claw|Quick Attack) →/); if (m) { const k = `${m[1].includes('boss') ? 'boss' : 'you'} ${m[2]}`; blows[k] = (blows[k] || 0) + 1; } }
+    for (const e of pf.events) { const m = e.text.match(/^(.*?\((?:you|boss)\)) (.+?) →/); if (m) { const k = `${m[1].includes('boss') ? 'boss' : 'you'} ${m[2]}`; blows[k] = (blows[k] || 0) + 1; } }
     const r = { name, result: pf.result ?? 'timeout', secs: +((performance.now() - t0) / 1000).toFixed(1), hp: { you: P.hp, boss: B.hp }, blows,
       bossChose: chose, minGap: +minGap.toFixed(3), overlapFrames,
       heldShare: { you: +(stunP / frames).toFixed(2), boss: +(stunB / frames).toFixed(2) },

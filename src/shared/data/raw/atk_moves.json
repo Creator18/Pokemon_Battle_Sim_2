@@ -117,6 +117,22 @@
       "skip_turn_on_hit": false,
       "description": "Strikes first \u2014 but ONLY if the target declared an attack move this turn. Fails completely if the target declared a movement or status action."
     },
+    "Counter": {
+      "category": "physical",
+      "base_power": 60,
+      "move_type": "Fighting",
+      "is_ranged": false,
+      "requires_los": false,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "recoil_fraction": 0.0,
+      "self_debuff": {},
+      "skip_turn_on_hit": false,
+      "description": "Braces for a blow; as the foe moves to attack, vanishes behind it and strikes first, turning its own attack back on it."
+    },
     "Feint": {
       "category": "physical",
       "base_power": 30,

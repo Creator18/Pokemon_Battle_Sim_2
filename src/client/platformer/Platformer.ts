@@ -156,7 +156,9 @@ export class Platformer {
         if (on.hp <= 0) this.note(`${on.name} fainted`);
       },
       onBurst: (a, b, ma, mb) => this.note(`point-blank: ${a.name} ${ma} × ${b.name} ${mb} — both burst, both knocked back`),
-      onClash: (a, b, w, meet) => this.note(`clash: ${a.name} ${a.using} × ${b.name} ${b.using} at ${meet} → ${w ? `${w.name} wins` : 'tie'}`),
+      onClash: (a, b, _w, meet) => this.note(`clash: ${a.name} ${a.using} × ${b.name} ${b.using} at ${meet}`),
+      onCounter: (by, on, move, dmg) => this.note(`counter: ${by.name} on ${on.name}'s ${move} (${dmg})`),
+      onClashEnd: (_a, _b, w) => this.note(`clash over → ${w ? `${w.name} wins` : 'tie'}`),
     };
     this.build(o.backdrop ?? true);
     this.placeAll();
@@ -264,6 +266,15 @@ export class Platformer {
       return box;
     };
     hud.append(bar(this.player, false), bar(this.boss!, true));
+    // The struggle: MASH U, and where the ball stands between the two.
+    const tug = document.createElement('div');
+    tug.dataset.tug = '';
+    Object.assign(tug.style, { position: 'fixed', left: '50%', top: '30%', transform: 'translate(-50%,-50%)', display: 'none', textAlign: 'center',
+      font: '900 30px system-ui', color: '#fff', textShadow: '0 2px 6px #000' });
+    tug.innerHTML = `<div>MASH U!</div><div style="position:relative;width:min(60vw,420px);height:14px;margin-top:8px;border-radius:7px;overflow:hidden;
+      background:linear-gradient(90deg,#ef4444,#ef4444 50%,#3b82f6 50%,#3b82f6)"><div data-tug-ball style="position:absolute;top:-3px;width:20px;height:20px;
+      margin-left:-10px;border-radius:50%;background:#fff;box-shadow:0 0 8px #fff"></div></div>`;
+    hud.append(tug);
     const banner = document.createElement('div');
     banner.dataset.banner = '';
     Object.assign(banner.style, { position: 'fixed', left: '50%', top: '40%', transform: 'translate(-50%,-50%)', font: '800 42px system-ui',
@@ -281,6 +292,11 @@ export class Platformer {
       fills[i].style.width = `${k * 100}%`;
       fills[i].style.background = k > 0.5 ? '#4ade80' : k > 0.2 ? '#facc15' : '#ef4444';
     });
+    // (The struggle's bar: the ball toward the boss's side as you win.)
+    const tug = this.hud.querySelector<HTMLDivElement>('[data-tug]')!;
+    const c = this.player.clashing;
+    tug.style.display = c ? 'block' : 'none';
+    if (c) tug.querySelector<HTMLDivElement>('[data-tug-ball]')!.style.left = `${50 + 50 * c.standing()}%`;
     const banner = this.hud.querySelector<HTMLDivElement>('[data-banner]')!;
     banner.style.display = this.result ? 'block' : 'none';
     banner.innerHTML = this.result === 'won' ? 'You win!<div style="font-size:16px">R: fight again</div>'

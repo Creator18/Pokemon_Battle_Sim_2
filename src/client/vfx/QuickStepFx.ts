@@ -289,7 +289,7 @@ export class QuickStepFx {
    * `dir` (heads forward), spread through the body round `centre` (`height` tall), each on and off by turns
    * (SPEED_BLINK s), sliding a little along `dir`, thinning and gone over `seconds`.
    */
-  speedFlicker(centre: Vector3, dir: Vector3, height: number, seconds: number): void {
+  speedFlicker(centre: Vector3, dir: Vector3, height: number, seconds: number, trailing = false): void {
     const way = dir.lengthSquared() > 1e-8 ? dir.normalizeToNew() : new Vector3(1, 0, 0);
     // (Across the way, two axes: one in the view, one toward the camera — the lines spread through the body's bulk.)
     const cam = this.scene.activeCamera;
@@ -314,7 +314,9 @@ export class QuickStepFx {
       const off = across.scale((Math.random() - 0.5) * (heavy ? 0.6 : 1.3) * height)
         .addInPlace(deep.scale((Math.random() - 0.5) * 0.8 * height))
         .addInPlace(way.scale((Math.random() - 0.5) * 0.6 * height));
-      const slide = height * (0.3 + 0.5 * Math.random());
+      // (Trailing — an arrival's: behind the body, sliding up to it, its heads at it; else through it and on, going.)
+      const slide = height * (trailing ? 0.15 + 0.2 * Math.random() : 0.3 + 0.5 * Math.random());
+      if (trailing) off.addInPlace(way.scale(-(len * 0.5 + height * (0.25 + 0.2 * Math.random()))));
       // (Its own blinking: a phase of its own, on more than off.)
       const phase = Math.random(), blink = SPEED_BLINK * (0.7 + 0.6 * Math.random());
       let t = 0;

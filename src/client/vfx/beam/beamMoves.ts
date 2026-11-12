@@ -17,6 +17,8 @@ export interface BeamSpec {
   burstAlong?: boolean;
   /** Out of a clash, the whole beam one long egg, broad and round at the target (BeamShot.eggBeam: Flamethrower). */
   eggBeam?: boolean;
+  /** Its end ball only while this says so (BeamShot.endBall: its front on a target). */
+  endBall?: () => boolean;
   /** How far it reaches (world units) where range matters (the platformer); unset: a long beam. */
   range?: number;
   /** How thick it is (1 = as the others). */
