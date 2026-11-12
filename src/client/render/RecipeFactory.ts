@@ -2305,16 +2305,35 @@ export class RecipeFactory implements UnitFactory {
         // its zap): one with the auras, never apart from them.
         const body = this.surfaceToward(node, toTarget);
         const struck = target ? this.surfaceToward(target, () => this.middleOf(node)) : null;
+        // (Whoever it is on now — `spec.onto`: struck directly, or stepped into it — its surface facing back.)
+        const onSurface = new Map<TransformNode, () => Vector3>();
+        const surfaceOf = (t: TransformNode) => {
+          let f = onSurface.get(t);
+          if (!f) { f = this.surfaceToward(t, () => this.middleOf(node)); onSurface.set(t, f); }
+          return f();
+        };
         for (const h of handles) {
           const start = spec.eggless ? body : () => h.eggTip();
           const end = () => {
             const e = h.end();
+            // Connecting, it runs right into the body: on whoever it is on, or (a clash won) the loser pushed through to.
+            const on = spec.onto?.();
+            if (on) return surfaceOf(on);
+            if (struck && clash?.over?.()) return struck();
+            // Held in a clash: it stops at the ball's surface, never on over it (the ball hides where it goes in).
+            const met = clash && !clash.over?.() ? clash.at() : null;
+            if (met) {
+              const s0 = start(), way = met.subtract(s0), L = way.length(), r = clashBallRadius(clash!.size) * 0.85;
+              return L > r ? s0.add(way.scale((L - r) / L)) : s0;
+            }
             if (!struck) return e;
             const s0 = start(), sp = struck();
             return Vector3.DistanceSquared(s0, e) >= Vector3.DistanceSquared(s0, sp) * 0.97 ? sp : e;
           };
           this.lightning.bolt(start, end, { width: W * 7, strands: 2, forks: 4, hold: 0, light: 2.5,
-            colors, holdUntil: contactEnds });
+            colors, holdUntil: contactEnds,
+            // (Over the auras, without the scene's tone mapping: the aura's yellow, not bleached to cream.)
+            over: this.fx ? (mesh) => this.fx!.addOver(mesh) : undefined });
         }
 
       }
@@ -2973,7 +2992,7 @@ export class RecipeFactory implements UnitFactory {
    * tie) — `winner` and `margin` then only what it starts from.
    */
   playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null, margin: number, standUntil?: Promise<void>,
-    meetAt?: number, struggle?: () => number): ClashPlay {
+    meetAt?: number, struggle?: () => number | { balance: number; done: boolean }): ClashPlay {
     const ma = this.mouthOf(a), mb = this.mouthOf(b);
     const beamH = (n: TransformNode) => { const u = this.units.get(n); return u ? displayHeight(u.model.height) : 1.2; };
     let loser = winner === a ? b : winner === b ? a : null;
@@ -3045,8 +3064,9 @@ export class RecipeFactory implements UnitFactory {
         await new Promise<void>((done) => {
           const obs = this.scene.onBeforeRenderObservable.add(() => {
             t += Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
-            balance = Math.max(-1, Math.min(1, struggle()));
-            if (Math.abs(balance) >= 1 || t >= STRUGGLE_MAX) { this.scene.onBeforeRenderObservable.remove(obs); done(); }
+            const v = struggle(), s = typeof v === 'number' ? { balance: v, done: false } : v;
+            balance = Math.max(-1, Math.min(1, s.balance));
+            if (s.done || Math.abs(balance) >= 1 || t >= STRUGGLE_MAX) { this.scene.onBeforeRenderObservable.remove(obs); done(); }
           });
         });
         winner = Math.abs(balance) < STRUGGLE_TIE ? null : balance > 0 ? a : b;
@@ -3082,7 +3102,7 @@ export class RecipeFactory implements UnitFactory {
       await sleep(BEAM_HOLD);
       (winner === a ? endA : endB)();
     })();
-    return { met, hit, done: Promise.all([playA.done, playB.done]).then(() => {}), winner: () => winner };
+    return { met, hit, done: Promise.all([playA.done, playB.done]).then(() => {}), winner: () => winner, point: at };
   }
 
   /**

@@ -37,6 +37,7 @@ import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Effect } from '@babylonjs/core/Materials/effect';
 import { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
+import { Constants } from '@babylonjs/core/Engines/constants';
 import { PointLight } from '@babylonjs/core/Lights/pointLight';
 import { illum, wander, fbm1, smoothstep } from './bolt.ts';
 import { TILE_SCALE } from '../hexWorld.ts';
@@ -52,7 +53,11 @@ const TRAIL = 1.1, TRAIL_MIN = 0.35;
 /** Pressing in a clash (EarthBody.press): how far its strokes are thrown back behind it, and out to either side (body heights, at most) — out past its aura, grown and stretched back as it is in a clash. */
 const PRESS_BACK = 1.9, PRESS_SIDE = 1.3;
 const GIRTH_CUT = 0.52, GIRTH_RATE = 2.6;
-const POOL_R = 0.3, POOL_GAIN = 2.4;
+/**
+ * The pools of light lightning casts on the ground: their size, and how bright (0: none — seen side-on, a pool smears
+ * in behind the bolt as a muddy amber band over the grass; they were for the hex board's tiles, seen from above).
+ */
+const POOL_R = 0.3, POOL_GAIN = 0;
 /** How fast the field drifts (the source's tCur is seconds; lightning writhes faster). */
 const WRITHE = 1.6;
 
@@ -99,25 +104,29 @@ precision highp float;
 varying vec2 vUV;
 varying vec4 vHot;
 uniform float lit;
-uniform vec3 arc, halo;
+uniform vec3 arc, halo, outer;
 void main(void) {
   // across: 0 down the middle, 1 at the halo's edge; the core is the inner 1/HALO.
   float a = abs(vUV.y * 2.0 - 1.0);
   float x = a * ${HALO.toFixed(1)};
-  // Defined, not blurred: a hard-edged core, a crisp amber rim round it,
-  // and only a tight, faint halo outside.
-  float core = 1.0 - smoothstep(0.86, 1.0, x);
-  float rim = smoothstep(0.78, 0.95, x) * (1.0 - smoothstep(1.08, 1.3, x));
-  float glow = pow(max(0.0, 1.0 - a * 1.4), 3.0);
-  // The source's colour line: brightness along the stroke is coverage.
+  // Defined, not blurred, in the Electric aura's own colours (auraPalette GLOWS): a hairline of its white-hot line
+  // down the middle, a solid body of its yellow inner glow, an edge of its amber outer glow — all solid, no faint halo
+  // outside it (half-seen amber over the grass reads as mud, not light).
+  // The source's colour line: brightness along the stroke is coverage — here, as width: dimming (its flicker, its
+  // ends, dying away) it thins, staying solid, never half see-through (amber half over the grass reads as mud).
   float hot = vHot.x * lit;
-  if (hot < 0.01) discard;
-  // Only the core glows white-hot; the halo stays a saturated amber, so the
-  // tone mapping cannot bleach it into the pale tiles.
-  vec3 rgb = mix(halo, mix(arc, vec3(1.0), 0.3 * core), core) * mix(1.0, ${GLOW.toFixed(2)}, core);
-  float alpha = clamp(core + 0.95 * rim + 0.4 * glow, 0.0, 1.0) * clamp(hot * 1.6, 0.0, 1.0);
+  if (hot < 0.04) discard;
+  float w = clamp(hot * 1.4, 0.2, 1.0);
+  float xw = x / w;
+  float core = 1.0 - smoothstep(0.08, 0.16, xw);
+  float body = 1.0 - smoothstep(0.98, 1.1, xw);
+  float edge = 1.0 - smoothstep(1.3, 1.45, xw);
+  vec3 rgb = mix(mix(outer, halo, body), arc, core) * mix(1.0, ${GLOW.toFixed(2)}, core);
+  float alpha = edge;
   if (alpha < 0.01) discard;
-  gl_FragColor = vec4(rgb, alpha);
+  // (Premultiplied — Porter-Duff over: where strokes cross, the nearer laid over the farther, never summed past
+  // full cover; summed, the pass over the auras divides its colour down to dark olive there.)
+  gl_FragColor = vec4(rgb * alpha, alpha);
 }`;
 
 // A stroke in a unit's silhouette mask (UnitFx.addToMask): its core only (so
@@ -162,8 +171,10 @@ void main(void) {
 }`;
 
 /** The arc's colour (the source's (0.9, 0.9, 0.6), brightened) and the amber halo round it. */
-const ARC = new Vector3(1.0, 0.93, 0.4);
-const AMBER = new Vector3(1.0, 0.5, 0.0);
+/** Its colours, the Electric aura's (auraPalette GLOWS): a white-hot core, a yellow glow, amber at the glow's outer edge. */
+const ARC = new Vector3(1.0, 1.0, 0.93);
+const YELLOW = new Vector3(1.0, 0.88, 0.25);
+const AMBER = new Vector3(1.0, 0.56, 0.02);
 
 /** A bolt's (or earthing stroke's) colours: its core, its halo, and the light it casts. */
 export interface BoltColors { arc: Vector3; halo: Vector3; light: Color3 }
@@ -235,13 +246,15 @@ class Stroke {
     vd.applyToMesh(this.mesh, true);
     this.mat = new ShaderMaterial('boltMat', scene, { vertex: 'bolt', fragment: 'bolt' }, {
       attributes: ['position', 'uv', 'color'],
-      uniforms: ['viewProjection', 'lit', 'arc', 'halo'],
+      uniforms: ['viewProjection', 'lit', 'arc', 'halo', 'outer'],
       needAlphaBlending: true,
     });
     this.mat.backFaceCulling = false;
     this.mat.disableDepthWrite = true;
+    this.mat.alphaMode = Constants.ALPHA_PREMULTIPLIED_PORTERDUFF;
     this.mat.setVector3('arc', ARC);
-    this.mat.setVector3('halo', AMBER);
+    this.mat.setVector3('halo', YELLOW);
+    this.mat.setVector3('outer', AMBER);
     this.mesh.material = this.mat;
     this.mesh.isPickable = false;
     this.mesh.alwaysSelectAsActiveMesh = true;
@@ -261,8 +274,10 @@ class Stroke {
     const from = o.from(), to = o.to();
     const chord = to.subtract(from);
     const run = chord.length();
-    if (run < 1e-4) { this.mesh.isVisible = false; return; }
-    this.mesh.isVisible = this.lit > 0.01;
+    // (Drawn over the auras — UnitFx owns its isVisible there — it shows and hides by being enabled.)
+    const show = (on: boolean) => { if (this.unover) this.mesh.setEnabled(on); else this.mesh.isVisible = on; };
+    if (run < 1e-4) { show(false); return; }
+    show(this.lit > 0.01);
     const dir = chord.scale(1 / run);
     // Two axes across the chord.
     const ref = Math.abs(dir.y) < 0.9 ? Vector3.Up() : Vector3.Right();
@@ -321,7 +336,14 @@ class Stroke {
     this.maskMat?.setFloat('lit', this.lit);
   }
 
-  dispose(): void { this.unmask?.(); this.maskMat?.dispose(); this.mat.dispose(); this.mesh.dispose(); }
+  /**
+   * Drawn over the auras (UnitFx.addOver: its own pass, after the scene's — so without the scene's tone mapping,
+   * which bleaches its yellow to cream): its colours come out as they are, as the auras' do.
+   */
+  overAuras(add: (mesh: Mesh) => () => void): void { this.unover = add(this.mesh); }
+  private unover: (() => void) | null = null;
+
+  dispose(): void { this.unmask?.(); this.unover?.(); this.maskMat?.dispose(); this.mat.dispose(); this.mesh.dispose(); }
 }
 
 /** The amber dome of light where a stroke lands. */
@@ -468,7 +490,7 @@ export class LightningFx {
         from: () => (body.pointAt(slots[k].idx, head) ? head : head),
         to: () => foot, width, k,
       });
-      if (o.colors) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); }
+      if (o.colors) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); s.mat.setVector3('outer', o.colors.halo); }
       const undoOver = body.overAura?.(s.mesh);
       slots.push({ s, pool: new Pool(this.scene), idx: 0, head, foot, born: -1, share: 1, undoOver });
       // Stagger the first ones so they do not all go out together.
@@ -508,7 +530,9 @@ export class LightningFx {
     /** No camera shake as it strikes (Electric Terrain's crackle over the ground). */
     quiet?: boolean;
     /** The unit whose silhouette the bolt joins (its aura wraps body and bolt as one): its mask colour and UnitFx.addToMask. */
-    mask?: { color: Color4; add: (mesh: Mesh, mat: ShaderMaterial) => () => void } }): LightningPlay {
+    mask?: { color: Color4; add: (mesh: Mesh, mat: ShaderMaterial) => () => void };
+    /** Drawn over the auras, without the scene's tone mapping (UnitFx.addOver): its colours as they are. */
+    over?: (mesh: Mesh) => () => void }): LightningPlay {
     const strands = o.strands ?? 2;
     const forks = o.forks ?? 3;
     let resolveHit!: () => void, resolveEnd!: () => void, resolveDone!: () => void;
@@ -523,8 +547,9 @@ export class LightningFx {
     const forkStrokes = forkEnds.map((f, i) => new Stroke(this.scene, {
       from: () => mains[f.host].at(f.at), to: () => f.end, width: o.width * 0.35, k: base + 10 + i,
     }));
-    if (o.colors) for (const s of [...mains, ...forkStrokes]) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); }
+    if (o.colors) for (const s of [...mains, ...forkStrokes]) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); s.mat.setVector3('outer', o.colors.halo); }
     if (o.mask) for (const s of mains) s.maskIn(this.scene, o.mask.color, o.mask.add);
+    if (o.over) for (const s of [...mains, ...forkStrokes]) s.overAuras(o.over);
     const light = new PointLight('boltLight', Vector3.Zero(), this.scene);
     light.diffuse = o.colors?.light ?? new Color3(1, 0.92, 0.6);
     light.range = 3.5 * TILE_SCALE;

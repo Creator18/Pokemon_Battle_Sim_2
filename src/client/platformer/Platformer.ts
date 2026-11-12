@@ -100,6 +100,9 @@ export interface PlatformerOptions {
 /** Something that happened in a fight (s from its start). */
 export interface FightEvent { t: number; text: string }
 
+/** The stopper's perfect zone, as drawn (Fighter's METER_PERFECT). */
+const METER_PERFECT_HUD = 0.15;
+
 export class Platformer {
   readonly player: Fighter;
   readonly fighters: Fighter[];
@@ -158,7 +161,7 @@ export class Platformer {
       onBurst: (a, b, ma, mb) => this.note(`point-blank: ${a.name} ${ma} × ${b.name} ${mb} — both burst, both knocked back`),
       onClash: (a, b, _w, meet) => this.note(`clash: ${a.name} ${a.using} × ${b.name} ${b.using} at ${meet}`),
       onCounter: (by, on, move, dmg) => this.note(`counter: ${by.name} on ${on.name}'s ${move} (${dmg})`),
-      onClashEnd: (_a, _b, w) => this.note(`clash over → ${w ? `${w.name} wins` : 'tie'}`),
+      onClashEnd: (_a, _b, w, s) => this.note(`clash over → ${w ? `${w.name} wins` : 'tie'}${s ? ` (stops ${s.rival.toFixed(2)} / ${s.you.toFixed(2)}${s.outright ? ', outright' : ''})` : ''}`),
     };
     this.build(o.backdrop ?? true);
     this.placeAll();
@@ -172,12 +175,14 @@ export class Platformer {
   static async start(scene: Scene, factory: RecipeFactory, camera: Camera, o: PlatformerOptions): Promise<Platformer> {
     const node = await factory.createPokemon(o.species, 1);
     const player = new Fighter(node, factory, 1, PLAYER_HP, o.moves ?? DEFAULT_KIT, `${o.species.name} (you)`, o.species.types);
+    player.attack = o.species.attack; player.spAtk = o.species.spAtk;
     const foes: Fighter[] = [];
     for (const e of o.enemies ?? []) {
       const n = await factory.createPokemon(e.species, 2);
       foes.push(e.boss
         ? new Fighter(n, factory, 2, BOSS_HP, e.moves ?? DEFAULT_KIT, `${e.species.name} (boss)`, e.species.types)
         : new Fighter(n, factory, 2, TARGET_HP, {}, e.species.name, e.species.types, { x: e.x, y: e.y }));
+      foes[foes.length - 1].attack = e.species.attack; foes[foes.length - 1].spAtk = e.species.spAtk;
     }
     return new Platformer(scene, factory, camera, player, foes, o);
   }
@@ -266,14 +271,16 @@ export class Platformer {
       return box;
     };
     hud.append(bar(this.player, false), bar(this.boss!, true));
-    // The struggle: MASH U, and where the ball stands between the two.
+    // A clash's stopper: STOP U, its needle swinging across its meter (the perfect zone in the middle), then how it went.
     const tug = document.createElement('div');
     tug.dataset.tug = '';
     Object.assign(tug.style, { position: 'fixed', left: '50%', top: '30%', transform: 'translate(-50%,-50%)', display: 'none', textAlign: 'center',
       font: '900 30px system-ui', color: '#fff', textShadow: '0 2px 6px #000' });
-    tug.innerHTML = `<div>MASH U!</div><div style="position:relative;width:min(60vw,420px);height:14px;margin-top:8px;border-radius:7px;overflow:hidden;
-      background:linear-gradient(90deg,#ef4444,#ef4444 50%,#3b82f6 50%,#3b82f6)"><div data-tug-ball style="position:absolute;top:-3px;width:20px;height:20px;
-      margin-left:-10px;border-radius:50%;background:#fff;box-shadow:0 0 8px #fff"></div></div>`;
+    tug.innerHTML = `<div data-tug-say>STOP U!</div><div style="position:relative;width:min(60vw,420px);height:16px;margin:8px auto 0;border-radius:8px;
+      background:linear-gradient(90deg,#7f1d1d,#ef4444 25%,#facc15 40%,#4ade80 50%,#facc15 60%,#ef4444 75%,#7f1d1d);box-shadow:0 0 0 2px rgba(0,0,0,.5)">
+      <div style="position:absolute;top:-3px;bottom:-3px;left:${50 - 50 * METER_PERFECT_HUD}%;width:${100 * METER_PERFECT_HUD}%;border:2px solid #fff;border-radius:4px"></div>
+      <div data-tug-ball style="position:absolute;top:-7px;width:6px;height:30px;margin-left:-3px;border-radius:3px;background:#fff;box-shadow:0 0 8px #fff"></div></div>
+      <div data-tug-note style="font-size:16px;margin-top:6px"></div>`;
     hud.append(tug);
     const banner = document.createElement('div');
     banner.dataset.banner = '';
@@ -292,11 +299,19 @@ export class Platformer {
       fills[i].style.width = `${k * 100}%`;
       fills[i].style.background = k > 0.5 ? '#4ade80' : k > 0.2 ? '#facc15' : '#ef4444';
     });
-    // (The struggle's bar: the ball toward the boss's side as you win.)
+    // (The stopper: your needle, then your stop, then the outcome.)
     const tug = this.hud.querySelector<HTMLDivElement>('[data-tug]')!;
-    const c = this.player.clashing;
-    tug.style.display = c ? 'block' : 'none';
-    if (c) tug.querySelector<HTMLDivElement>('[data-tug-ball]')!.style.left = `${50 + 50 * c.standing()}%`;
+    const c = this.player.clashing, n = c?.needle() ?? null;
+    tug.style.display = c && (n !== null || c.outcome() !== null) ? 'block' : 'none';
+    if (c) {
+      const ball = tug.querySelector<HTMLDivElement>('[data-tug-ball]')!;
+      if (n !== null) ball.style.left = `${50 + 50 * n}%`;
+      const q = c.quality(), o = c.outcome();
+      const grade = q === null ? '' : q >= 1 ? 'PERFECT' : q >= 0.7 ? 'GREAT' : q >= 0.4 ? 'GOOD' : q > 0 ? 'WEAK' : 'MISSED';
+      tug.querySelector<HTMLDivElement>('[data-tug-say]')!.textContent = o === null ? (q === null ? 'STOP U!' : grade)
+        : o > 0 ? (c.outright() ? 'OVERPOWERED THEM!' : 'YOU WIN THE CLASH!') : o < 0 ? (c.outright() ? 'OVERPOWERED!' : 'CLASH LOST') : 'EVEN — IT BURSTS!';
+      tug.querySelector<HTMLDivElement>('[data-tug-note]')!.textContent = q === null ? '' : `${grade} ×${c.timing()!.toFixed(2)}`;
+    }
     const banner = this.hud.querySelector<HTMLDivElement>('[data-banner]')!;
     banner.style.display = this.result ? 'block' : 'none';
     banner.innerHTML = this.result === 'won' ? 'You win!<div style="font-size:16px">R: fight again</div>'

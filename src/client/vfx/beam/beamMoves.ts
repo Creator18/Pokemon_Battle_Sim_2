@@ -25,6 +25,8 @@ export interface BeamSpec {
   thickness?: number;
   /** A bolt from the beam's starting egg, in place of its column (BeamShot.bolt). */
   bolt?: boolean;
+  /** A bolt: who it is on now (struck by it), its end run into that one's body (none: out to its front). */
+  onto?: () => import('@babylonjs/core/Meshes/transformNode').TransformNode | null;
   /** A bolt straight off the body: no egg (Thunderbolt in a clash; BeamShot.eggless). */
   eggless?: boolean;
   /** A ball attack in a clash: it flies in and becomes its half of the clash's ball (RecipeFactory.clashBall). */

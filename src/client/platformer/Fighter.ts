@@ -38,20 +38,26 @@
  *
  * Beam duels: a beam takes BEAM_CHARGE s to launch, then its front FRONT_TIME s to cross. Too close to clash (their
  * mouths nearer than CLASH_MIN × their height), the two burst point-blank between them at once, and both are knocked
- * back (KNOCK_SPEED, flinching till they come down). Else, firing at a foe whose beam at it has not launched yet, the
- * two CLASH — where their fronts would meet, given the head start (the later one's front
- * meets the earlier's nearer its own mouth) — and the two STRUGGLE: each presses its ranged key to push the ball (MASH
- * a press), the stronger beam (power × effectiveness × STAB) leaning it their way by itself (STRUGGLE_LEAN); whoever
- * pushes it home wins, pushing through (time up: the one ahead, or near even, a tie — both burst). Its beam already out, the foe's reaches it before it
- * can fire: it is struck, and its own beam cut off.
+ * back (KNOCK_SPEED, flinching till they come down), each hurt as near a burst (below). Else, firing at a foe whose
+ * beam at it has not launched yet, the two CLASH — however far either would reach alone (a beam's range never
+ * decides a clash) — where their fronts would meet, given the head start (the later one's front meets the earlier's
+ * nearer its own mouth). Then the STOPPER: each has one press of its ranged key to stop a needle swinging across its
+ * meter (METER_PERIOD s a swing; unstopped by METER_TIME s: nothing), its quality q (1 within METER_PERFECT of the
+ * middle, down to 0 at the ends) its timing ×(TIMING_MIN … TIMING_MAX). Each beam's power P (base power × STAB) and
+ * type effectiveness E on the other (P a special move's base power × STAB × its user's Special Attack ÷ STAT_REF): one ahead on both (neither behind) wins outright — else the higher
+ * P × E × timing wins, within CLASH_TIE of each other a tie. The winner pushes through for its beam's damage × its
+ * timing; a tie bursts the ball where they met — hurting only a body near it (BURST_NEAR … BURST_FAR × its height,
+ * BURST_CHIP of the other's beam's damage, knocked back). Its beam already out, the foe's reaches it before it can
+ * fire: it is struck, and its own beam cut off.
  */
 import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { RecipeFactory } from '../render/RecipeFactory.ts';
 import type { BeamPlay } from '../render/unitFactory.ts';
-import { beamFor } from '../vfx/beam/beamMoves.ts';
+import { beamFor as beamSpecFor } from '../vfx/beam/beamMoves.ts';
+import { lightningFor } from '../vfx/lightningMoves.ts';
 import type { BeamSpec } from '../vfx/beam/beamMoves.ts';
-import { getMove, getTypeEffectiveness } from '../../shared/index.ts';
+import { getMove, getTypeEffectiveness, MoveCategory } from '../../shared/index.ts';
 
 /** A platform: its left edge, its top, its width, its depth below its top (world units); `hidden`: solid but not drawn. */
 export interface Platform { x: number; top: number; w: number; h: number; hidden?: boolean }
@@ -87,7 +93,7 @@ export interface Arena {
   /** A counter going off: who countered whom, on what attack, for how much. */
   onCounter?(by: Fighter, on: Fighter, move: string, damage: number): void;
   /** A clash's struggle over: who won (none: a tie). */
-  onClashEnd?(first: Fighter, second: Fighter, winner: Fighter | null): void;
+  onClashEnd?(first: Fighter, second: Fighter, winner: Fighter | null, stops?: { you: number; rival: number; outright: boolean }): void;
   /** Two beams let go too close to clash: both burst point-blank (who, with what). */
   onBurst?(a: Fighter, b: Fighter, moveA: string, moveB: string): void;
 }
@@ -155,16 +161,47 @@ export const BEAM_REACH = 8;
  * BEAM_REACH, a beam 2 (the aura beams, the great ones) BEAM2_REACH. Its line, its hit zone, its end ball, no further.
  */
 const BEAM2_REACH = 10;
+/**
+ * Its ranged move as a beam: a beam move's own; a bolt (Thunderbolt) a beam of lightning straight off its body, no egg
+ * (as the hex battle's clashes drew it).
+ */
+export function beamFor(move: string | null | undefined): BeamSpec | null {
+  const own = beamSpecFor(move);
+  if (own || !move || lightningFor(move)?.kind !== 'bolt') return own;
+  return { element: getMove(move)?.moveType ?? 'Electric', bolt: true, eggless: true };
+}
 export function beamReach(spec: BeamSpec): number { return spec.range ?? (spec.style === 2 ? BEAM2_REACH : BEAM_REACH); }
 const FOE_NEAR = 0.3;
 /** A blow's damage: power × effectiveness × STAB, ÷ this (HP; a move it doesn't know: DAMAGE_UNKNOWN). */
 const DAMAGE_SCALE = 5, DAMAGE_UNKNOWN = 8;
+/** A move's power scales with its user's Attack (physical) or Special Attack (special), against this (a stat of 100: × 1). */
+const STAT_REF = 100;
 /** A beam: its charge before it launches, its front's crossing (s — RecipeFactory's BEAM_CHARGE, BeamFx's GROW). */
 const BEAM_CHARGE = 1.1, FRONT_TIME = 0.6;
 /** Nearer than CLASH_MIN × their height (mouth to mouth): no clash — a burst in both their faces. */
 const CLASH_MIN = 2.4;
-/** A clash's struggle: how far one press pushes the ball (of the whole way, −1 … 1); how fast the stronger beam leans it by itself (per s, at the full difference). */
-const MASH = 0.075, STRUGGLE_LEAN = 0.35;
+/**
+ * A clash's stopper: its needle swings −1 … 1 and back in METER_PERIOD s; stopped within METER_PERFECT of the middle,
+ * perfect (q 1), else q falling to 0 at the ends; not stopped by METER_TIME s after they meet, q 0. Its timing
+ * multiplier TIMING_MIN + (TIMING_MAX − TIMING_MIN) · q.
+ */
+const METER_PERIOD = 1.6, METER_PERFECT = 0.15, METER_TIME = 2.4, TIMING_MIN = 0.6, TIMING_MAX = 1.6;
+/** Scores (P × E × timing) within this ratio: a tie. How long the decided ball takes to swing to the loser before it pushes home (s). */
+const CLASH_TIE = 1.08, CLASH_DECIDE = 0.35;
+/** A burst (a tie, point-blank): a body within BURST_NEAR × its height of it takes BURST_CHIP of the other beam's damage, falling to none at BURST_FAR. */
+const BURST_NEAR = 0.8, BURST_FAR = 1.8, BURST_CHIP = 0.5;
+
+/** A clash's stopper, as one side sees it. */
+export interface ClashMeter {
+  /** Its one press: stops its needle. */
+  press(): void;
+  /** Its needle (−1 … 1; none till the beams meet); where it stopped it, and its quality, once it has. */
+  needle(): number | null; stopped(): number | null; quality(): number | null;
+  /** Its timing multiplier, once stopped (or time up). */
+  timing(): number | null;
+  /** The outcome for it: 1 won, −1 lost, 0 a tie, none yet; whether it was decided by power and type alone. */
+  outcome(): number | null; outright(): boolean;
+}
 /** Struck: pushed back this fast (world units/s), for this long (s); unhurtable this long after its flinch ends (s). */
 const PUSH_SPEED = 7, PUSH_TIME = 0.18, HIT_GRACE = 0.5;
 /** Knocked back: how fast it is thrown (world units/s), how high, how long it is out of its own control (s), how quickly the throw dies away (per s). */
@@ -183,7 +220,9 @@ interface Firing { id: number; play: BeamPlay; move: string; spec: BeamSpec; at:
   /** Where its end is (the very point the beam pours to — moved, it follows), and how far it reaches at most (to the foe it was fired at, or its range). */
   end: Vector3; reach: number;
   /** Its front on a foe now (a beam 2 forms its end ball only then). */
-  connected: boolean }
+  connected: boolean;
+  /** Who it is on now (its front on that one), none while it strikes nothing. */
+  onto: Fighter | null }
 let beamIds = 0;
 
 export class Fighter {
@@ -215,8 +254,10 @@ export class Fighter {
   private counterUntil = -1; private lagUntil = 0; private arenaRef: Arena | null = null; private counterReady = 0;
   /** The move it is telling (about to make), and how many times its attack has been cut off by a counter. */
   telling = ''; interrupted = 0;
-  /** In a clash's struggle: pressing its ranged key pushes the ball; how it stands for it (−1 losing … 1 winning). */
-  clashing: { press(): void; standing(): number } | null = null;
+  /** Its Attack and Special Attack (its species'): a physical move's power × attack ÷ STAT_REF, a special move's × spAtk ÷ STAT_REF. */
+  attack = STAT_REF; spAtk = STAT_REF;
+  /** In a clash: its stopper (its ranged key stops its needle). */
+  clashing: ClashMeter | null = null;
 
   constructor(readonly node: TransformNode, private readonly factory: RecipeFactory, readonly team: number,
     readonly maxHp: number, moves: MoveKit, readonly name: string, readonly types: readonly string[],
@@ -265,11 +306,23 @@ export class Fighter {
     this.counterUntil = -1; this.lagUntil = 0;
   }
 
+  /** `move` from it against `on`, for a clash: its power P (base power × STAB) and its type effectiveness E. */
+  clashTerms(move: string, on: Fighter): { P: number; E: number } {
+    const m = getMove(move);
+    if (!m) return { P: DAMAGE_UNKNOWN * DAMAGE_SCALE, E: 1 };
+    return { P: m.basePower * (this.types.includes(m.moveType) ? 1.5 : 1) * this.statFor(m.category), E: getTypeEffectiveness(m.moveType, on.types) };
+  }
+
+  /** A move's stat factor: a special move's, its Special Attack ÷ STAT_REF; a physical move's, its Attack ÷ STAT_REF; else 1. */
+  private statFor(category: MoveCategory | string | undefined): number {
+    return category === MoveCategory.SPECIAL ? this.spAtk / STAT_REF : category === MoveCategory.PHYSICAL ? this.attack / STAT_REF : 1;
+  }
+
   /** How strong `move` is from it against `on`: power × effectiveness × STAB. */
   strength(move: string, on: Fighter): number {
     const m = getMove(move);
     if (!m) return DAMAGE_UNKNOWN * DAMAGE_SCALE;
-    return m.basePower * getTypeEffectiveness(m.moveType, on.types) * (this.types.includes(m.moveType) ? 1.5 : 1);
+    return m.basePower * getTypeEffectiveness(m.moveType, on.types) * (this.types.includes(m.moveType) ? 1.5 : 1) * this.statFor(m.category);
   }
 
   private foes(arena: Arena): Fighter[] { return arena.fighters.filter((f) => f !== this && f.team !== this.team); }
@@ -295,7 +348,7 @@ export class Fighter {
     if (!this.down) { this.aim = it.aim; this.factory.setGaze(this.node, this.aim * AIM_ANGLE); }
     // Its beam's line, while it pours, a hit zone: a foe moving into it is struck there and then.
     this.sweepBeam(arena);
-    // In a clash's struggle: its ranged key pushes the ball.
+    // In a clash: its ranged key stops its needle.
     if (this.clashing && intent.ranged && !this.down) this.clashing.press();
     // Its moves, pressed this frame.
     if (!this.busy) {
@@ -436,10 +489,11 @@ export class Fighter {
     this.face(this.facing, true);
     const range = beamReach(spec);
     const from = this.mouth(), dir = this.aimDir();
-    // A foe's beam toward it, not yet launched, whose line meets its own (each within its reach): a clash — whether
-    // or not either would reach the other alone.
+    // A foe's beam toward it, not yet launched, whose line meets its own: a clash — however far either would reach
+    // alone (each line taken out past the other's mouth).
+    const span = (f: Fighter) => { const [fx, fy] = f.mouth(); return Math.hypot(fx - from[0], fy - from[1]) + f.H; };
     const rival = this.foes(arena).find((f) => f.beam && !f.beam.launched && !f.down && f.facing === -this.facing
-      && Fighter.linesMeet(from, dir, range, f.beam.from, f.beam.dir, f.beam.range, (this.H + f.H) * 0.25));
+      && Fighter.linesMeet(from, dir, span(f), f.beam.from, f.beam.dir, span(f), (this.H + f.H) * 0.25));
     if (rival) {
       // (Too close to hold a clash: both burst in their faces.)
       const [rx, ry] = rival.mouth();
@@ -454,11 +508,13 @@ export class Fighter {
     this.begin(name);
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
     // (A beam 2: its end ball full while its front is on a foe, smaller while it strikes nothing.)
-    const conn = { on: false };
-    const play = this.factory.playBeam(this.node, null, at, spec.style === 2 ? { ...spec, endBall: () => conn.on } : spec);
+    const conn = { on: false, onto: null as Fighter | null };
+    const play = this.factory.playBeam(this.node, null, at, spec.style === 2 ? { ...spec, endBall: () => conn.on }
+      : spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) } : spec);
     const mine: Firing = { id: ++beamIds, play, move: name, spec, at: ahead, pressedAt: this.time, launched: false, from, dir,
-      range: hit ? hit.d + 0.3 : range, launchedAt: Infinity, pouring: true, struck: new Set(), end: at, reach: Math.max(1, reach),
-      get connected() { return conn.on; }, set connected(v: boolean) { conn.on = v; } };
+      range: hit ? hit.d + 0.3 : range, launchedAt: Infinity, pouring: true, struck: new Set(), end: at, reach: Math.max(1, range),
+      get connected() { return conn.on; }, set connected(v: boolean) { conn.on = v; },
+      get onto() { return conn.onto; }, set onto(v: Fighter | null) { conn.onto = v; } };
     this.beam = mine;
     void play.launched?.then(() => { mine.launched = true; mine.launchedAt = this.time; });
     void play.contactEnds.then(() => { mine.pouring = false; });
@@ -467,7 +523,7 @@ export class Fighter {
         // (Cut off, or gone from its path by the time the beam reaches it — jumped, flown or stepped out: it misses.)
         if (this.beam !== mine || mine.struck.has(ahead) || ahead.down || ahead.invulnerable || Fighter.lineMeets(from, dir, range + 0.5, ahead) === null) return;
         mine.struck.add(ahead);
-        if (ahead.takeHit(this, name, play.contactEnds, arena)) this.factory.holdHitReact(ahead.node, play.contactEnds);
+        if (ahead.takeHit(this, name, play.contactEnds, arena)) { this.factory.holdHitReact(ahead.node, play.contactEnds); this.zap(ahead, name, play.contactEnds); }
       });
     }
     void play.done.then(() => { if (this.beam === mine) { this.beam = null; this.end(); } });
@@ -483,9 +539,49 @@ export class Fighter {
     rival.beam = null; rival.firing = false; rival.using = '';
     this.factory.playFaceBurst(this.node, rival.node, spec.element, theirs.spec.element);
     arena.onBurst?.(this, rival, name, theirs.move);
+    const [ax, ay] = this.mouth(), [bx, by] = rival.mouth();
+    const at: [number, number] = [(ax + bx) / 2, (ay + by) / 2];
     const away = Math.sign(this.x - rival.x) || -this.facing;
     this.knockBack(away);
     rival.knockBack(-away);
+    this.burntBy(rival, theirs.move, at, arena);
+    rival.burntBy(this, name, at, arena);
+  }
+
+  /**
+   * Struck by its lightning (Thunderbolt and any Electric move; Ice Beam's icy, Psybeam's psychic): `on` lit up in that
+   * aura, filled and shivering — zapped — till `until` (the bolt lets go).
+   */
+  zap(on: Fighter, move: string, until: Promise<unknown>): void {
+    const type = getMove(move)?.moveType;
+    const element = move === 'Ice Beam' ? 'Ice' : move === 'Psybeam' ? 'Psychic' : type === 'Electric' ? 'Electric' : null;
+    if (!element || on.down) return;
+    const aura = this.factory.aura(on.node, { element, edge: 'smooth', reach: 'body', fill: true, ignite: 0.08, die: 0.35, shiver: true });
+    void until.then(() => aura.release());
+  }
+
+  /**
+   * A burst at `at` (a tie's ball, a point-blank burst) of `by`'s `move`: within BURST_NEAR × its height of it, it
+   * takes BURST_CHIP of that beam's damage, falling to none at BURST_FAR (further: nothing). Returns whether it was
+   * near enough to be hurt.
+   */
+  burntBy(by: Fighter, move: string, at: [number, number], arena: Arena): boolean {
+    if (this.down || this.invulnerable) return false;
+    const [l, r, b, t] = this.box();
+    const d = Math.hypot(Math.max(l, Math.min(r, at[0])) - at[0], Math.max(b, Math.min(t, at[1])) - at[1]) / this.H;
+    const k = Math.max(0, Math.min(1, (BURST_FAR - d) / (BURST_FAR - BURST_NEAR)));
+    if (k <= 0) return false;
+    const damage = Math.max(1, Math.round(BURST_CHIP * k * by.strength(move, this) / DAMAGE_SCALE));
+    this.hp = Math.max(0, this.hp - damage);
+    arena.onHit?.(by, this, move, damage);
+    if (this.hp <= 0) {
+      this.down = true;
+      this.beam?.play.cancel?.(true); this.beam = null; this.firing = false; this.using = '';
+      void this.factory.playFaint(this.node).then(() => {
+        if (this.respawn) setTimeout(() => { if (this.down) this.restore(); }, RESPAWN * 1000);
+      });
+    }
+    return true;
   }
 
   /** Pushed back from `by` (a blow): a short shove away from it, along the ground or the air it is in. */
@@ -560,19 +656,22 @@ export class Fighter {
       f.takeHit(this, b.move, b.play.contactEnds, arena);
       if (this.beam !== b) return;
     }
-    let nearest = Infinity;
+    let nearest = Infinity, onto: Fighter | null = null;
     for (const f of this.foes(arena)) {
       if (f.down) continue;
-      const d = Fighter.lineMeets(b.from, b.dir, Math.min(reach, b.reach + 0.3), f);
+      // (Its front out — or this one already struck by it — its line runs to its full reach: pushed back, it is still in it.)
+      const held = k >= 1 || b.struck.has(f);
+      const d = Fighter.lineMeets(b.from, b.dir, held ? b.reach : Math.min(reach, b.reach + 0.3), f);
       if (d === null) continue;
       // (The beam stops on the nearest in its line — struck now, or held in it since.)
-      nearest = Math.min(nearest, d);
+      if (d < nearest) { nearest = d; onto = held ? f : d <= reach + 0.05 ? f : null; }
       if (b.struck.has(f) || f.invulnerable) continue;
       b.struck.add(f);
-      if (f.takeHit(this, b.move, b.play.contactEnds, arena)) this.factory.holdHitReact(f.node, b.play.contactEnds);
+      if (f.takeHit(this, b.move, b.play.contactEnds, arena)) { this.factory.holdHitReact(f.node, b.play.contactEnds); this.zap(f, b.move, b.play.contactEnds); }
     }
     // Its end on that one (its end ball on it) — or, none in its line, out to its full reach again (a beam 2's end ball smaller).
-    b.connected = nearest < Infinity && nearest <= reach + 0.05;
+    b.connected = onto !== null;
+    b.onto = b.connected ? onto : null;
     const to = Math.max(1, Math.min(b.reach, nearest));
     b.end.set(b.from[0] + b.dir[0] * to, b.from[1] + b.dir[1] * to, 0);
   }
@@ -604,17 +703,43 @@ export class Fighter {
     // as the time allows — the rival's share of the way (from its mouth) 1/2 + head / (2 · FRONT_TIME).
     const head = Math.max(0, Math.min(FRONT_TIME, rival.time - theirs.pressedAt));
     const fromRival = Math.min(0.85, 0.5 + head / (2 * FRONT_TIME));
-    const mine = this.strength(name, rival), its = rival.strength(theirs.move, this);
-    // The struggle: its balance (the rival's way +, this one's −), leant by the stronger beam, pushed by each press.
-    const lean = (its - mine) / Math.max(its + mine, 1e-6);
-    let balance = 0, last = performance.now();
-    const struggle = () => {
-      const now = performance.now(), dt = Math.min(0.1, (now - last) / 1000); last = now;
-      balance = Math.max(-1, Math.min(1, balance + lean * STRUGGLE_LEAN * dt));
-      return balance;
+    // Each beam's power and type effectiveness on the other.
+    const mineT = this.clashTerms(name, rival), itsT = rival.clashTerms(theirs.move, this);
+    const ahead = (p: { P: number; E: number }, q: { P: number; E: number }) => p.P >= q.P && p.E >= q.E && (p.P > q.P || p.E > q.E);
+    // The stopper: a needle each (its own phase), from when the beams meet; one stop each.
+    type Side = { phase: number; stop: number | null; q: number | null };
+    const rs: Side = { phase: Math.random() * Math.PI * 2, stop: null, q: null }, ms: Side = { phase: Math.random() * Math.PI * 2, stop: null, q: null };
+    let t0 = -1, decidedAt = -1, outcome: number | null = null, outright = false;
+    const swing = (s: Side, now: number) => Math.sin(s.phase + (2 * Math.PI * (now - t0)) / (1000 * METER_PERIOD));
+    const quality = (x: number) => (Math.abs(x) <= METER_PERFECT ? 1 : Math.max(0, 1 - (Math.abs(x) - METER_PERFECT) / (1 - METER_PERFECT)));
+    const timing = (q: number) => TIMING_MIN + (TIMING_MAX - TIMING_MIN) * q;
+    const decide = (now: number) => {
+      rs.q ??= 0; ms.q ??= 0;
+      // (Ahead on both power and type: it wins whatever the timing. Else power × type × timing.)
+      if (ahead(itsT, mineT)) { outcome = 1; outright = true; } else if (ahead(mineT, itsT)) { outcome = -1; outright = true; } else {
+        const r = (itsT.P * itsT.E * timing(rs.q)) / (mineT.P * mineT.E * timing(ms.q));
+        outcome = r > CLASH_TIE ? 1 : r < 1 / CLASH_TIE ? -1 : 0;
+      }
+      decidedAt = now;
     };
-    rival.clashing = { press: () => { balance = Math.min(1, balance + MASH); }, standing: () => balance };
-    this.clashing = { press: () => { balance = Math.max(-1, balance - MASH); }, standing: () => -balance };
+    // Its balance (the rival's way +, this one's −): a tremble while they stop, then swung to the loser.
+    const struggle = () => {
+      const now = performance.now();
+      if (t0 < 0) t0 = now;
+      if (outcome === null && ((rs.stop !== null && ms.stop !== null) || now - t0 >= METER_TIME * 1000)) decide(now);
+      if (outcome === null) return { balance: 0.05 * Math.sin((now - t0) / 1000 * 11), done: false };
+      const k = Math.min(1, (now - decidedAt) / (CLASH_DECIDE * 1000));
+      return { balance: outcome * k * k * (3 - 2 * k), done: k >= 1 };
+    };
+    const meter = (s: Side, sign: number): ClashMeter => ({
+      press: () => { if (t0 < 0 || s.stop !== null || outcome !== null) return; const now = performance.now(); s.stop = swing(s, now); s.q = quality(s.stop); },
+      needle: () => (t0 < 0 ? null : s.stop ?? (outcome !== null ? null : swing(s, performance.now()))),
+      stopped: () => s.stop, quality: () => s.q,
+      timing: () => (s.q === null ? null : timing(s.q)),
+      outcome: () => (outcome === null ? null : outcome * sign), outright: () => outright,
+    });
+    rival.clashing = meter(rs, 1);
+    this.clashing = meter(ms, -1);
     const play = this.factory.playClash(rival.node, this.node, theirs.spec, spec, null, 0, undefined, fromRival, struggle);
     for (const f of [this, rival]) { f.firing = true; f.using = f === this ? name : theirs.move; f.usingSince = f.time; }
     this.beam = null; rival.beam = null;
@@ -623,10 +748,21 @@ export class Fighter {
       this.clashing = null; rival.clashing = null;
       const w = play.winner?.();
       const winner = w === this.node ? this : w === rival.node ? rival : null;
-      arena.onClashEnd?.(rival, this, winner);
-      if (!winner) return;
+      arena.onClashEnd?.(rival, this, winner, { you: ms.q ?? 0, rival: rs.q ?? 0, outright });
+      if (!winner) {
+        // A tie: the ball bursts where they met — hurting (and throwing back) only a body near it.
+        const p = play.point?.();
+        if (!p) return;
+        const at: [number, number] = [p.x, p.y];
+        if (this.burntBy(rival, theirs.move, at, arena)) this.knockBack(Math.sign(this.x - p.x) || -this.facing);
+        if (rival.burntBy(this, name, at, arena)) rival.knockBack(Math.sign(rival.x - p.x) || -rival.facing);
+        return;
+      }
       const loser = winner === this ? rival : this;
-      loser.takeHit(winner, winner === this ? name : theirs.move, () => this.factory.playHitReact(loser.node), arena);
+      // (Its beam's damage × its timing.)
+      const move = winner === this ? name : theirs.move, q = (winner === this ? ms.q : rs.q) ?? 0;
+      const damage = Math.max(1, Math.round(timing(q) * winner.strength(move, loser) / DAMAGE_SCALE));
+      if (loser.takeHit(winner, move, () => this.factory.playHitReact(loser.node), arena, damage)) winner.zap(loser, move, play.done);
     });
     void play.done.then(() => { this.clashing = null; rival.clashing = null; this.end(); rival.end(); });
   }

@@ -30,7 +30,8 @@ export interface BeamPlay {
   cancel?: (quiet?: boolean) => void;
 }
 /** A beam clash: `met` as the two beams meet, `hit` when the winner's beam lands (or, a tie, as both disperse); `done` once both are gone. */
-export interface ClashPlay { met: Promise<void>; hit: Promise<void>; done: Promise<void>; /** Who won (a live struggle: once decided; none: a tie). */ winner?: () => import('@babylonjs/core/Meshes/transformNode').TransformNode | null }
+export interface ClashPlay { met: Promise<void>; hit: Promise<void>; done: Promise<void>; /** Who won (a live struggle: once decided; none: a tie). */ winner?: () => import('@babylonjs/core/Meshes/transformNode').TransformNode | null;
+  /** Where the two meet (world; none before they do). */ point?: () => import('@babylonjs/core/Maths/math.vector').Vector3 | null }
 
 import { MoveCategory, type MoveDefinition, type SpeciesDefinition } from '../../shared/index.ts';
 

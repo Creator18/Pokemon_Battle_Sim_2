@@ -40,8 +40,8 @@ const TELL: Record<string, { rgb: [number, number, number]; hold: number; recove
 };
 /** Its foe braced to counter (glowing): how often it holds off attacking till the brace runs out (then it punishes the whiff). */
 const WARY = 0.75;
-/** In a clash's struggle, how often it presses (per s). */
-const AI_MASH = 6.5;
+/** In a clash: how near the middle (of −1 … 1) it waits for its needle to come before it stops it — rolled each clash. */
+const AI_STOP: [number, number] = [0.04, 0.6];
 
 export interface Thought { t: number; saw: string; chose: string }
 
@@ -52,7 +52,7 @@ export class BossAI {
   private beamReady = 0;
   /** A tell under way: the attack it will make, and when; the recovery after its last, till when; its last frame's clock. */
   private pending: { intent: Intent; at: number; kind: string; cut: number } | null = null;
-  private recovering = 0; private lastKind = ''; private wasBusy = false; private lastT = 0;
+  private recovering = 0; private lastKind = ''; private wasBusy = false; private lastT = 0; private stopWithin: number | null = null;
   /** Paused: it only stands and watches. */
   paused = false;
 
@@ -67,7 +67,14 @@ export class BossAI {
     const faceFoe = Math.sign(foe.x - me.x) || me.facing;
     if (this.paused || me.down || foe.down) { this.pending = null; return { ...IDLE, face: faceFoe }; }
     // In a struggle: pressing away at it.
-    if (me.clashing) return { ...IDLE, face: faceFoe, ranged: Math.random() < AI_MASH * dtNow };
+    // In a clash: it stops its needle once it comes within its (rolled) band of the middle.
+    if (!me.clashing) this.stopWithin = null;
+    else {
+      const n = me.clashing.needle();
+      if (n === null || me.clashing.stopped() !== null) return { ...IDLE, face: faceFoe };
+      this.stopWithin ??= this.rnd(AI_STOP);
+      return { ...IDLE, face: faceFoe, ranged: Math.abs(n) <= this.stopWithin };
+    }
     // Its move just over: it recovers (an opening).
     if (this.wasBusy && !me.busy && this.lastKind) { this.recovering = t + TELL[this.lastKind].recover; this.lastKind = ''; }
     this.wasBusy = me.busy;
