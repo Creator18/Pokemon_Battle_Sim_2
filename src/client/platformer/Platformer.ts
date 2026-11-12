@@ -26,6 +26,8 @@ import type { Camera } from '@babylonjs/core/Cameras/camera';
 import type { RecipeFactory } from '../render/RecipeFactory.ts';
 import type { SpeciesDefinition } from '../../shared/index.ts';
 import { Fighter, DEFAULT_KIT, IDLE } from './Fighter.ts';
+import { Hud } from './Hud.ts';
+import { typeColor } from '../theme.ts';
 import type { Arena, Intent, MoveKit, Platform } from './Fighter.ts';
 import { BossAI } from './BossAI.ts';
 import { backdrop as paintedBackdrop } from '../render/arenas/backdrops.ts';
@@ -122,7 +124,7 @@ export class Platformer {
   private readonly camAt = new Vector3();
   private camDist = CAM_DIST;
   private clock = 0;
-  private hud: HTMLDivElement | null = null;
+  private hud: Hud | null = null;
   private painted: Backdrop | null = null;
   /**
    * What is faded out of the way: its own visibility (to go back to), and what is drawn faded in its place — itself, or,
@@ -156,11 +158,18 @@ export class Platformer {
       level: this.level, fighters: this.fighters,
       onHit: (by, on, move, dmg) => {
         this.note(`${by.name} ${move} → ${on.name} −${dmg} (${on.hp}/${on.maxHp})`);
-        if (on.hp <= 0) this.note(`${on.name} fainted`);
+        this.hud?.hit(by, on, move);
+        if (on.hp <= 0) { this.note(`${on.name} fainted`); this.hud?.call('K.O.!', '#f43f5e'); }
       },
-      onBurst: (a, b, ma, mb) => this.note(`point-blank: ${a.name} ${ma} × ${b.name} ${mb} — both burst, both knocked back`),
-      onClash: (a, b, _w, meet) => this.note(`clash: ${a.name} ${a.using} × ${b.name} ${b.using} at ${meet}`),
-      onCounter: (by, on, move, dmg, brace = 'Sucker Punch') => this.note(`${brace.toLowerCase()}: ${by.name} on ${on.name}'s ${move} (${dmg})`),
+      onBurst: (a, b, ma, mb) => {
+        this.note(`point-blank: ${a.name} ${ma} × ${b.name} ${mb} — both burst, both knocked back`);
+        this.hud?.call('Point blank!', '#fb923c');
+      },
+      onClash: (a, b, _w, meet) => { this.note(`clash: ${a.name} ${a.using} × ${b.name} ${b.using} at ${meet}`); this.hud?.call('Clash!', '#fbbf24'); },
+      onCounter: (by, on, move, dmg, brace = 'Sucker Punch') => {
+        this.note(`${brace.toLowerCase()}: ${by.name} on ${on.name}'s ${move} (${dmg})`);
+        this.hud?.call(`${brace}!`, brace === 'Counter' ? typeColor('Fighting') : '#a78bfa');
+      },
       onClashEnd: (_a, _b, w, s) => this.note(`clash over → ${w ? `${w.name} wins` : 'tie'}${s ? ` (stops ${s.rival.toFixed(2)} / ${s.you.toFixed(2)}${s.outright ? ', outright' : ''})` : ''}`),
     };
     this.build(o.backdrop ?? true);
@@ -196,7 +205,7 @@ export class Platformer {
     for (const [m, f] of this.faded) this.unfade(m, f);
     // (Its fighters gone with it: a new level brings its own — a beam one was charging or pouring, gone too.)
     for (const f of this.fighters) { f.beam?.play.cancel?.(true); f.beam = null; this.factory.remove(f.node); }
-    this.hud?.remove();
+    this.hud?.dispose();
   }
 
   private note(text: string): void { this.events.push({ t: +this.clock.toFixed(2), text }); }
@@ -258,64 +267,13 @@ export class Platformer {
     scene.clearColor = new Color4(0.62, 0.8, 0.95, 1);
   }
 
-  // ── HP bars ──────────────────────────────
+  // ── the HUD ──────────────────────────────
   private buildHud(): void {
-    const hud = document.createElement('div');
-    Object.assign(hud.style, { position: 'fixed', left: '0', right: '0', top: '52px', display: 'flex', justifyContent: 'space-between',
-      padding: '0 24px', pointerEvents: 'none', zIndex: '60', font: '600 14px system-ui', color: '#fff' });
-    const bar = (f: Fighter, right: boolean) => {
-      const box = document.createElement('div');
-      Object.assign(box.style, { width: 'min(38vw, 360px)', textAlign: right ? 'right' : 'left', textShadow: '0 1px 2px #000' });
-      box.innerHTML = `<div>${f.name}</div><div style="height:12px;background:rgba(20,24,40,.75);border-radius:6px;overflow:hidden;margin-top:4px">
-        <div data-fill style="height:100%;width:100%;background:#4ade80;transition:width .2s;${right ? 'margin-left:auto' : ''}"></div></div>`;
-      return box;
-    };
-    hud.append(bar(this.player, false), bar(this.boss!, true));
-    // A clash's stopper: STOP U, its needle swinging across its meter (the perfect zone in the middle), then how it went.
-    const tug = document.createElement('div');
-    tug.dataset.tug = '';
-    Object.assign(tug.style, { position: 'fixed', left: '50%', top: '30%', transform: 'translate(-50%,-50%)', display: 'none', textAlign: 'center',
-      font: '900 30px system-ui', color: '#fff', textShadow: '0 2px 6px #000' });
-    tug.innerHTML = `<div data-tug-say>STOP U!</div><div style="position:relative;width:min(60vw,420px);height:16px;margin:8px auto 0;border-radius:8px;
-      background:linear-gradient(90deg,#7f1d1d,#ef4444 25%,#facc15 40%,#4ade80 50%,#facc15 60%,#ef4444 75%,#7f1d1d);box-shadow:0 0 0 2px rgba(0,0,0,.5)">
-      <div style="position:absolute;top:-3px;bottom:-3px;left:${50 - 50 * METER_PERFECT_HUD}%;width:${100 * METER_PERFECT_HUD}%;border:2px solid #fff;border-radius:4px"></div>
-      <div data-tug-ball style="position:absolute;top:-7px;width:6px;height:30px;margin-left:-3px;border-radius:3px;background:#fff;box-shadow:0 0 8px #fff"></div></div>
-      <div data-tug-note style="font-size:16px;margin-top:6px"></div>`;
-    hud.append(tug);
-    const banner = document.createElement('div');
-    banner.dataset.banner = '';
-    Object.assign(banner.style, { position: 'fixed', left: '50%', top: '40%', transform: 'translate(-50%,-50%)', font: '800 42px system-ui',
-      color: '#fff', textShadow: '0 3px 8px #000', display: 'none', textAlign: 'center' });
-    hud.append(banner);
-    document.body.append(hud);
-    this.hud = hud;
+    this.hud = new Hud(this.player, this.boss!, METER_PERFECT_HUD);
   }
 
-  private updateHud(): void {
-    if (!this.hud) return;
-    const fills = this.hud.querySelectorAll<HTMLDivElement>('[data-fill]');
-    [this.player, this.boss!].forEach((f, i) => {
-      const k = f.hp / f.maxHp;
-      fills[i].style.width = `${k * 100}%`;
-      fills[i].style.background = k > 0.5 ? '#4ade80' : k > 0.2 ? '#facc15' : '#ef4444';
-    });
-    // (The stopper: your needle, then your stop, then the outcome.)
-    const tug = this.hud.querySelector<HTMLDivElement>('[data-tug]')!;
-    const c = this.player.clashing, n = c?.needle() ?? null;
-    tug.style.display = c && (n !== null || c.outcome() !== null) ? 'block' : 'none';
-    if (c) {
-      const ball = tug.querySelector<HTMLDivElement>('[data-tug-ball]')!;
-      if (n !== null) ball.style.left = `${50 + 50 * n}%`;
-      const q = c.quality(), o = c.outcome();
-      const grade = q === null ? '' : q >= 1 ? 'PERFECT' : q >= 0.7 ? 'GREAT' : q >= 0.4 ? 'GOOD' : q > 0 ? 'WEAK' : 'MISSED';
-      tug.querySelector<HTMLDivElement>('[data-tug-say]')!.textContent = o === null ? (q === null ? 'STOP U!' : grade)
-        : o > 0 ? (c.outright() ? 'OVERPOWERED THEM!' : 'YOU WIN THE CLASH!') : o < 0 ? (c.outright() ? 'OVERPOWERED!' : 'CLASH LOST') : 'EVEN — IT BURSTS!';
-      tug.querySelector<HTMLDivElement>('[data-tug-note]')!.textContent = q === null ? '' : `${grade} ×${c.timing()!.toFixed(2)}`;
-    }
-    const banner = this.hud.querySelector<HTMLDivElement>('[data-banner]')!;
-    banner.style.display = this.result ? 'block' : 'none';
-    banner.innerHTML = this.result === 'won' ? 'You win!<div style="font-size:16px">R: fight again</div>'
-      : this.result === 'lost' ? 'Defeated<div style="font-size:16px">R: fight again</div>' : '';
+  private updateHud(dt: number): void {
+    this.hud?.update(dt, this.time, this.result);
   }
 
   // ── input ──────────────────────────────
@@ -366,7 +324,7 @@ export class Platformer {
       if (this.boss.down) { this.result = 'won'; this.endedAt = this.clock; this.note('you win'); }
       else if (this.player.down) { this.result = 'lost'; this.endedAt = this.clock; this.note('you lose'); }
     }
-    this.updateHud();
+    this.updateHud(dt);
     this.follow(dt);
   }
 

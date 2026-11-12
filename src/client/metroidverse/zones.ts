@@ -13,6 +13,7 @@ import { getSpecies } from '../../shared/index.ts';
 import type { RecipeFactory } from '../render/RecipeFactory.ts';
 import { Platformer, bossRoom } from '../platformer/Platformer.ts';
 import type { MoveKit } from '../platformer/Platformer.ts';
+import { keyLegend } from '../platformer/Hud.ts';
 import { grassStadium } from '../render/arenas/grassStadium.ts';
 import type { Arena } from '../render/arenas/grassStadium.ts';
 import { colosseum } from '../render/arenas/colosseum.ts';
@@ -44,16 +45,17 @@ function readyCamera(camera: Camera): void {
   cam.lowerRadiusLimit = 0.1; cam.upperRadiusLimit = 200; cam.maxZ = Math.max(cam.maxZ, 400);
 }
 
-/** A help line along the top: its controls, its moves on their keys. */
-function helpLine(moves: MoveKit): HTMLDivElement {
+/** The controls, as key caps along the bottom right (the moves are on the move bar; with no boss, listed here too). */
+function helpLine(moves: MoveKit, withBar = true): HTMLDivElement {
   document.querySelector('[data-pf-help]')?.remove();
-  const help = document.createElement('div');
-  help.dataset.pfHelp = '';
-  Object.assign(help.style, { position: 'fixed', left: '50%', top: '14px', transform: 'translateX(-50%)', padding: '8px 14px', background: 'rgba(20,24,40,0.85)',
-    color: '#fff', font: '600 14px system-ui', borderRadius: '8px', zIndex: '60', whiteSpace: 'nowrap', pointerEvents: 'none' });
-  help.textContent = `A / D run · Space jump / fly · W / S aim · U ${moves.ranged ?? '—'} · I ${moves.close ?? '—'} · J ${moves.mobility ?? '—'} · K ${moves.control ?? '—'} · L back dash`;
-  document.body.append(help);
-  return help;
+  const items: [string[], string][] = [[['A', 'D'], 'run'], [['Space'], 'jump / fly'], [['W', 'S'], 'aim']];
+  if (!withBar) items.push([['U'], moves.ranged ?? '—'], [['I'], moves.close ?? '—'], [['J'], moves.mobility ?? '—'], [['K'], moves.control ?? '—'], [['L'], 'back dash']);
+  items.push([['R'], 'restart']);
+  const box = document.createElement('div');
+  box.className = 'mvh'; box.dataset.pfHelp = '';
+  box.append(keyLegend(items));
+  document.body.append(box);
+  return box;
 }
 
 /** The boss battlefield: the League stadium (or the colosseum, or the 3D grass stadium), you against a boss. */
@@ -99,6 +101,6 @@ export async function startFirstRoom(d: ZoneDeps, o: { species?: string; enemy?:
     species: species(o.species ?? 'Charizard'), moves: o.moves, backdrop: o.backdrop ?? true,
     enemies: [{ species: species(o.enemy ?? 'Venusaur'), x: 19, y: 0 }],
   });
-  const help = helpLine(pf.moves);
+  const help = helpLine(pf.moves, false);
   return { pf, arena: null, dispose: () => { help.remove(); pf.dispose(); } };
 }

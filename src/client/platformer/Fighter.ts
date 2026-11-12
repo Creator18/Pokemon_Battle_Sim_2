@@ -286,6 +286,8 @@ export class Fighter {
   attack = STAT_REF; spAtk = STAT_REF; speed = STAT_REF;
   /** Its moves' cooldowns: when each is ready again, and how hot each is (its abuse: heat, as of when). */
   readonly readyAt = new Map<string, number>();
+  /** How long each move's last cooldown was (s): the HUD's sweep. */
+  readonly coolLen = new Map<string, number>();
   private heat = new Map<string, { h: number; at: number }>();
   /** The move under way that will cool down once it has gone as it should (cut off: cleared, no cooldown). */
   private run: { move: string; k: number } | null = null; private runSeq = 0; private braceK = -1;
@@ -337,7 +339,7 @@ export class Fighter {
     this.beam?.play.cancel?.(); this.beam = null;
     this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null;
     this.counterUntil = -1; this.lagUntil = 0;
-    this.readyAt.clear(); this.heat.clear(); this.run = null;
+    this.readyAt.clear(); this.coolLen.clear(); this.heat.clear(); this.run = null;
   }
 
   /** `move` ready (its cooldown over). */
@@ -346,7 +348,7 @@ export class Fighter {
   private get counterReady(): number { return this.readyAt.get(this.moves.control ?? '') ?? 0; }
   private set counterReady(v: number) { if (this.moves.control) this.readyAt.set(this.moves.control, v); }
   /** `move`'s heat now (its abuse, halving every ABUSE_HALF s). */
-  private heatOf(move: string): number {
+  heatOf(move: string): number {
     const e = this.heat.get(move);
     return e ? e.h * Math.pow(0.5, (this.time - e.at) / ABUSE_HALF) : 0;
   }
@@ -366,7 +368,8 @@ export class Fighter {
   private finishRun(k: number): void {
     if (this.run?.k !== k) return;
     const m = this.run.move; this.run = null;
-    this.readyAt.set(m, this.time + this.cooldownFor(m));
+    const cd = this.cooldownFor(m);
+    this.readyAt.set(m, this.time + cd); this.coolLen.set(m, cd);
     this.heat.set(m, { h: this.heatOf(m) + 1, at: this.time });
   }
   /** Its move under way cut off: no cooldown for it. */
