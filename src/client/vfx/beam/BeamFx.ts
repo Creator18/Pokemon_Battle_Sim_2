@@ -80,6 +80,20 @@ const OUTLINE_SOFT_IN = 0.75;
  * much round the beam staggers them.
  */
 const SPIKE = 0.6, SPIKE_GAP = 1.6, SPIKE_RATE = 3.2, SPIKE_STAGGER = 0.45;
+/** Finer spikes (BeamShot.eggSpike's fine): how much closer they come along it, and how many points each ring breaks into round it. */
+const SPIKE_FINE_GAP = 0.55, SPIKE_FINE_ROUND = 11;
+/** Spikes streaming forward (spikeForward): how much further they lean toward the beam's end (× the column's radius, on top of SPIKE_LEAN). */
+const SPIKE_FORWARD_LEAN = 2.6;
+/** Its front half's spikes, finer still (spikeForward): how much closer along it, how many points round it. */
+const SPIKE_FRONT_GAP = 0.4, SPIKE_FRONT_ROUND = 17;
+/** Its front half's push: how much of its forward part is taken off along its sides (1: straight out from the axis there), its tip still pushed forward. */
+const SPIKE_FRONT_SIDE = 0.85;
+/** Where, toward its tip, its front half's sideways push gives way to straight forward (its point's direction from its centre, cos). */
+const SPIKE_TIP_FROM = 0.6;
+/** Its front half's outline: how much of its band's thickness is taken off there (its spikes as they are). */
+const SPIKE_FRONT_THIN = 0.7;
+/** Every beam 2's long egg: its outline's spikes (× its core's radius) and how fine (BeamShot.eggSpike's). */
+const EGG_SPIKE: { spike: number; grow?: number; fine?: number; forward?: number } = { spike: 1.4, fine: 1, forward: 1 };
 /** A starting egg drawn as its user's aura (BeamShot.maskBall: Ice Beam's): its spiked outline's spikes and swell, wider. */
 const MASK_EGG_SPIKE = 1.6, MASK_EGG_GROW = 1.9;
 /** And how far a spike's tip leans forward, the way the beam travels (× the core's radius, at a spike's full height). */
@@ -90,11 +104,20 @@ const SPIKE_FRONT = 0.15;
 const WIND_SPIKES_ROUND = 16, WIND_SPIKES_UP = 9, WIND_SPIKE_RATE = 2.6;
 /** How long its spikes take to go from straight out to leaning, as it is let go (s). */
 const WINDUP_EASE = 0.25;
-const SPIKE_GLSL = `float spikeAt(float along, float th, float rad, float time) {
-  float x = along / (${SPIKE_GAP.toFixed(2)} * rad) - time * ${SPIKE_RATE.toFixed(2)} + ${SPIKE_STAGGER.toFixed(2)} * sin(th * 3.0 + 1.7) + 0.25 * sin(th * 7.0 - 0.6);
+const SPIKE_GLSL = `
+// (Finer spikes — spikeFine 1: closer along it, and each of its rings broken round it into separate thin points.)
+uniform float spikeFine;
+// (\`front\` 0 … 1: finer still — a long egg's front half, its spikes streaming on: closer, more round it, sharper.)
+float spikeAtF(float along, float th, float rad, float time, float fine, float front) {
+  float gap = ${SPIKE_GAP.toFixed(2)} * (1.0 - ${SPIKE_FINE_GAP.toFixed(2)} * fine) * (1.0 - ${SPIKE_FRONT_GAP.toFixed(2)} * front);
+  float x = along / (gap * rad) - time * ${SPIKE_RATE.toFixed(2)} + ${SPIKE_STAGGER.toFixed(2)} * sin(th * 3.0 + 1.7) + 0.25 * sin(th * 7.0 - 0.6);
   float s = fract(x);
-  return s < ${(1 - SPIKE_FRONT).toFixed(2)} ? pow(s / ${(1 - SPIKE_FRONT).toFixed(2)}, 2.5) : (1.0 - s) / ${SPIKE_FRONT.toFixed(2)};
+  float rise = s < ${(1 - SPIKE_FRONT).toFixed(2)} ? pow(s / ${(1 - SPIKE_FRONT).toFixed(2)}, 2.5) : (1.0 - s) / ${SPIKE_FRONT.toFixed(2)};
+  float points = pow(0.5 + 0.5 * cos(th * ${SPIKE_FINE_ROUND.toFixed(1)} + floor(x) * 2.3), 3.0);
+  float pointsF = pow(0.5 + 0.5 * cos(th * ${SPIKE_FRONT_ROUND.toFixed(1)} + floor(x) * 2.3), 5.0);
+  return rise * mix(1.0, mix(points, pointsF, front), fine);
 }
+float spikeAt(float along, float th, float rad, float time) { return spikeAtF(along, th, rad, time, spikeFine, 0.0); }
 // Winding up (the ball before it is let go): spikes straight out from its centre, all round it - in patches round the
 // ball (WIND_SPIKES_ROUND round, WIND_SPIKES_UP up), each its own beat, highest at its patch's middle, gone at its
 // edges (so they never tear), with no lean.
@@ -638,6 +661,7 @@ uniform mat4 world, viewProjection;
 uniform vec3 origin, aim, side, upv;
 uniform float time, disp, pan, rad, egg, grow, spike;
 uniform float eggFront; // its front drawn out this far (× its radius), unset: EGG_FRONT
+uniform float spikeForward; // its outline's spikes on its front half streaming toward the beam's end (0 … 1)
 uniform float windup; // winding up (1: its ball before it is let go): spikes straight out, all round, no lean
 uniform vec3 eye;
 // (Its noise bursting forward, toward the target — fwdNoise: where it would bulge back, toward the attacker, it bulges
@@ -685,16 +709,27 @@ void main(void) {
   // (An outline's twin: grown in its own shape by \`grow\`, its noise read as its core's — and, a clash's half, cut where its
   // core is, at the seam: never past it into the other beam's half. Unset: 1.)
   // (Its spikes as the tube's: by how far along from the egg's centre it is, and round.)
-  float sk = spike > 0.0 ? spikeAt(dot(rel, aim), vTh, rad, time) : 0.0;
+  // (A long egg's front half, streaming forward — spikeForward: its spikes finer still.)
+  float sfw = spikeForward * smoothstep(-0.05, 0.4, p0.y) * (1.0 - windup);
+  float sk = spike > 0.0 ? spikeAtF(dot(rel, aim), vTh, rad, time, spikeFine, sfw) : 0.0;
   // (Winding up: straight out from the ball's centre instead, all round it.)
   if (spike > 0.0 && windup > 0.0) sk = mix(sk, spikeRound(normalize(p), time), windup);
-  float gk = max(grow, 1.0) + spike * sk;
+  // (Its front half's outline thinner — its band, not its spikes.)
+  float gk = 1.0 + (max(grow, 1.0) - 1.0) * (1.0 - ${SPIKE_FRONT_THIN.toFixed(2)} * sfw) + spike * sk;
   float st = clamp((eggFront - 3.2) / 2.0, 0.0, 1.0) * egg;
   vec3 pg = mix(p * gk, p + p0 * (gk - 1.0), st);
+  // (The long egg's front half — spikeForward: pushed out from its axis, not from its centre, its spikes streaming on
+  // toward the beam's end; its round back as it is, a burst all round.)
+  // (Out from its axis along its sides — but forward still toward its tip, where there is no out from the axis: its end
+  // converging forward to a point, as before.)
+  // (Its sides only: over its last stretch to the tip, straight on as before — pushed forward from its centre.)
+  float side = sfw * (1.0 - smoothstep(${SPIKE_TIP_FROM.toFixed(2)}, 0.97, p0.y / max(length(p0), 1e-3)));
+  vec3 outDir = normalize(vec3(p0.x, p0.y * (1.0 - ${SPIKE_FRONT_SIDE.toFixed(2)} * side), p0.z) + vec3(0.0, 1e-4, 0.0));
+  pg = mix(pg, p + outDir * (gk - 1.0) * length(p0), side);
   /*SEAM*/
   // (Its tip leaning forward, the way the beam travels: the higher, the further.)
   // (Not while winding up: straight out, then.)
-  vec4 drawnAt = world * vec4(pg, 1.0) + vec4(aim * ${SPIKE_LEAN.toFixed(2)} * rad * sk * (1.0 - windup), 0.0);
+  vec4 drawnAt = world * vec4(pg, 1.0) + vec4(aim * (${SPIKE_LEAN.toFixed(2)} + ${SPIKE_FORWARD_LEAN.toFixed(2)} * sfw) * rad * sk * (1.0 - windup), 0.0);
   if (fwdNoise > 0.5) {
     // (How far, along the aim, its noise moved this point: back, turned forward.)
     float back = dot(mat3(world) * (position * nz), aim) * max(grow, 1.0);
@@ -927,6 +962,11 @@ export interface BeamShot {
    * the way to a broad round end at the target (EGG_BEAM_START to EGG_BEAM_END × its radius), its tip's burst there.
    */
   eggBeam?: boolean;
+  /**
+   * Beam 2: its starting egg's spiked outline spiking out wider — its spikes' rise (× its core's radius; SPIKE), its
+   * swell (OUTLINE_GROW unless given), and finer (0 … 1: closer, thin separate points).
+   */
+  eggSpike?: { spike: number; grow?: number; fine?: number; forward?: number };
   /** Whether its front strikes something now (unset: always): its end ball full then, else END_BALL_MISS × (eased between). */
   endBall?: () => boolean;
   /** How thick it is (1 = as the others): its column, eggs and puffs (not a clash's ball). */
@@ -1296,6 +1336,11 @@ class Beam implements BeamHandle {
   private get eggFront(): number { return this.shot.style === 2 ? AURA_EGG_FRONT : EGG_FRONT; }
   /** Its column's length last frame (from its egg's centre): a beam 2 striking nothing draws its egg out that far. */
   private lenNow = 0;
+  /**
+   * A beam 2 drawn as one long egg — its starting egg out the length of the beam, no shaft or end ball. Not a bolt's
+   * (Ice Beam, Psybeam): its egg stays a small one, the bolt out of it.
+   */
+  private get longEgg(): boolean { return this.shot.style === 2 && !this.shot.bolt; }
   /** One long egg: its eggBeam, out of a clash. */
   private get eggBeam(): boolean { return !!this.shot.eggBeam && !this.shot.clash; }
   constructor(private readonly fx: BeamFx, private readonly shot: BeamShot) {
@@ -1328,6 +1373,9 @@ class Beam implements BeamHandle {
         uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'twist', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
           'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi', 'fwdNoise', 'ghost'],
       });
+      // (Shown — set, never left unset: its program is shared with others', a bolt's ball drawn as its aura ghosting its
+      // own; unset, it would take that.)
+      mat.setFloat('ghost', 0);
       // (Only its own skin: a clash's streaks of the other beam keep their one colour.)
       const patchwork = !!l.dark && !!multi && l.color === col.dark;
       mat.setFloat('multi', patchwork ? 1 : 0);
@@ -1553,6 +1601,16 @@ class Beam implements BeamHandle {
       const soft = shot.outline === 'soft' ? col.main : undefined;
       for (const piece of core) if (piece) this.outlineOf(piece.mesh, piece.layer.mat, col.dark, undefined, soft);
       this.coreOverBallOutline();
+      // (Its starting egg's outline spiking out wider, in finer spikes — the long egg's, every beam 2's: EGG_SPIKE, or eggSpike.)
+      const eggOutline = this.balls[0] ? this.outlines.find((x) => x.src === this.balls[0].mesh && !x.rings) : undefined;
+      // (A bolt's small egg — Ice Beam's, Psybeam's — its own: maskBall's.)
+      if (eggOutline && (shot.eggSpike || this.longEgg)) {
+        const es = shot.eggSpike ?? EGG_SPIKE;
+        eggOutline.mat.setFloat('spike', es.spike);
+        if (es.grow !== undefined) eggOutline.mat.setFloat('grow', es.grow);
+        eggOutline.mat.setFloat('spikeFine', es.fine ?? 0);
+        eggOutline.mat.setFloat('spikeForward', es.forward ?? 0);
+      }
       if (shot.maskBall) this.maskBallIn(shot.maskBall);
     }
     // Its rings of stars, round the core's tube (RINGS).
@@ -1626,7 +1684,7 @@ class Beam implements BeamHandle {
     // (Its own define, so its own compiled effect: sharing its core's — compiled first, without \`grow\` among its uniforms —
     // its grow would never reach the shader.)
     const mat = new ShaderMaterial(`${core.name}${as?.name ?? 'Outline'}`, this.scene, path, {
-      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY', 'seamFlat'], defines: ['#define OUTLINE_TWIN'],
+      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY', 'seamFlat', 'spikeFine', 'spikeForward'], defines: ['#define OUTLINE_TWIN'],
       // (A soft outline is see-through at its edge: blended, writing no depth of its own.)
       needAlphaBlending: !!soft,
     });
@@ -1643,6 +1701,10 @@ class Beam implements BeamHandle {
     mat.setFloat('grow', as?.grow ?? OUTLINE_GROW);
     // (The outline spikes; its rings don't.)
     mat.setFloat('spike', as ? 0 : SPIKE);
+    // (Set on every twin, never left unset: their programs are shared — an egg's outline sets these, its tip's must not inherit them.)
+    mat.setFloat('ghost', 0);
+    mat.setFloat('spikeFine', 0);
+    mat.setFloat('spikeForward', 0);
     const twin = src.clone(`${src.name}${as?.name ?? 'Outline'}`, src.parent, true) as Mesh;
     twin.material = mat;
     if (src.rotationQuaternion) twin.rotationQuaternion = src.rotationQuaternion.clone();
@@ -1883,6 +1945,7 @@ class Beam implements BeamHandle {
       for (const [k, v] of Object.entries(st._vectors3)) mat.setVector3(k, v);
       for (const [k, v] of Object.entries(st._vectors2)) mat.setVector2(k, v);
       mat.setFloat('whole', 1);
+      mat.setFloat('occlOff', 0);
     }
   }
 
@@ -1915,7 +1978,8 @@ class Beam implements BeamHandle {
     const clashing = !!this.shot.clash && this.clashEndT < 0;
     const on = !clashing && !this.finished && !this.shot.bolt; // (a bolt has no tip)
     // (Its front striking nothing — endBall — a smaller end ball, eased there and back.)
-    const ballWant = this.shot.endBall && !this.shot.endBall() ? END_BALL_MISS : 1;
+    // (A beam 2: never — one long egg, no shaft, no end ball, on a target or not.)
+    const ballWant = this.longEgg || (this.shot.endBall && !this.shot.endBall()) ? END_BALL_MISS : 1;
     // (From the first frame as it should be — then eased.)
     if (this.endBallK < 0) this.endBallK = ballWant;
     this.endBallK += (ballWant - this.endBallK) * Math.min(1, this.scene.getEngine().getDeltaTime() / 1000 * END_BALL_EASE);
@@ -2151,7 +2215,7 @@ class Beam implements BeamHandle {
     // (A beam 2 striking nothing: its egg drawn out the whole length of the beam, its tip at the beam's front — eased
     // with its end ball, as its column shrinks away.)
     const R = SPHERE_R[BEAM_R.length - 1] * H * this.W * ball * swell;
-    const miss = this.shot.style === 2 && this.shot.endBall && this.endBallK >= 0 ? 1 - this.endBallK : 0;
+    const miss = this.longEgg && this.endBallK >= 0 ? 1 - this.endBallK : 0;
     // (Each layer to the beam's front: its own stretch, by its own radius r.)
     const frontAt = (r: number) => (miss > 0 && r > 1e-4 ? this.eggFront + (Math.max(this.eggFront, this.lenNow / r) - this.eggFront) * miss : this.eggFront);
     const front = frontAt(R);
@@ -2284,7 +2348,7 @@ class Beam implements BeamHandle {
       m.setFloat('twist', this.spin);
       m.setFloat('eggShape', this.eggBeam ? 1 : 0);
       // (Striking nothing: as its end ball shrinks away, its column with it — its long starting egg in its place.)
-      m.setFloat('gone', this.shot.style === 2 && this.shot.endBall && this.endBallK >= 0 ? 1 - this.endBallK : 0);
+      m.setFloat('gone', this.longEgg && this.endBallK >= 0 ? 1 - this.endBallK : 0);
       m.setFloat('split', split);
       m.setFloat('time', this.time + i * 1.7);
       const billow = this.shot.burstAlong && i === BEAM_R.length - 1 ? BILLOW_SKIN : this.shot.bolt ? BOLT_SKIN : 1;
@@ -2402,11 +2466,14 @@ class Beam implements BeamHandle {
       const path = (from as unknown as { _shaderPath: { vertex: string; fragment: string } })._shaderPath;
       const opts = (from as unknown as { _options: { attributes: string[]; uniforms: string[] } })._options;
       const mat = new ShaderMaterial(`${from.name}Mask`, this.scene, path, {
-        attributes: opts.attributes, uniforms: [...new Set([...opts.uniforms, 'grow', 'maskColor'])], defines: [...defines, '#define MASK_TWIN'],
+        attributes: opts.attributes, uniforms: [...new Set([...opts.uniforms, 'grow', 'maskColor', 'occlOff'])], defines: [...defines, '#define MASK_TWIN'],
       });
       mat.backFaceCulling = false;
       mat.setColor4('maskColor', mask.color);
       mat.setFloat('grow', 0);
+      // (Never off — set, every frame: its program is shared with the occluders' twins, which turn theirs off; unset, it
+      // would draw nothing whenever theirs were.)
+      mat.setFloat('occlOff', 0);
       return { from, mat, undo: mask.add(mesh, mat) };
     };
     // Its half of a clash's ball, and its starting egg (Ice Beam's — a bolt off the body has none), each so.

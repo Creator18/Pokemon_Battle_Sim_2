@@ -310,6 +310,22 @@
       "skip_turn_on_hit": false,
       "description": "Strikes first: a quick-step strike of ice."
     },
+    "Stone Edge": {
+      "category": "physical",
+      "base_power": 100,
+      "move_type": "Rock",
+      "is_ranged": true,
+      "requires_los": false,
+      "bypasses_los": true,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "recoil_fraction": 0.0,
+      "self_debuff": {},
+      "skip_turn_on_hit": false,
+      "description": "Pillars of sharp stone burst up out of the floor toward the target, the one under it striking; they stand a while as platforms and walls."
+    },
     "Accelerock": {
       "category": "physical",
       "base_power": 40,

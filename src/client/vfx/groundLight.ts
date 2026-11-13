@@ -18,7 +18,7 @@ import type { Vector3 } from '@babylonjs/core/Maths/math.vector';
 /** How many glows at once (more are not lit); how far up off its floor a glow still reaches (m — the grass's height and more). */
 const MAX = 16, REACH_UP = 0.35;
 /** How many quakes at once; how many cracks each radiates; how far its slabs between the cracks stand off level at most (world units). */
-const QUAKES = 4, CRACKS = 11, FAULT = 0.07;
+const QUAKES = 8, CRACKS = 11, FAULT = 0.07;
 
 /** Each glow: (x, y, z, radius) and (r, g, b, strength). */
 const where = new Float32Array(MAX * 4), tint = new Float32Array(MAX * 4);

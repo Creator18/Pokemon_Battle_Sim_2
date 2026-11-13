@@ -48,7 +48,7 @@ import type { PulseFx, PulseSpec } from '../vfx/PulseFx.ts';
 import type { WindFx } from '../vfx/WindFx.ts';
 import type { WindSpec } from '../vfx/windMoves.ts';
 import { iceBlock, shatterIce, meltIce, ICE_ALPHA, type IceBlock } from './iceBlock.ts';
-import { QuakeFx, type QuakeOptions } from '../vfx/QuakeFx.ts';
+import { QuakeFx, type QuakeOptions, type PillarOptions, type PillarHandle } from '../vfx/QuakeFx.ts';
 import { ICE_BOLT, PSY_BOLT, BLUE_BOLT, type LightningFx, type EarthOptions, type BoltColors } from '../vfx/LightningFx.ts';
 import type { SlashFx } from '../vfx/SlashFx.ts';
 import { QuickStepFx } from '../vfx/QuickStepFx.ts';
@@ -663,6 +663,11 @@ export class RecipeFactory implements UnitFactory {
     void player.play(clip, { fade: 0.08 });
     await sleep(hold);
     if (!u.down) void player.play(this.act(u, 'idle'), { fade: 0.25 });
+  }
+
+  /** A Stone Edge pillar (QuakeFx.pillar): its crack, bursting up, standing, crumbling. */
+  playPillar(o: PillarOptions): PillarHandle {
+    return (this.quakes ??= new QuakeFx(this.scene)).pillar(o);
   }
 
   /** Earthquake's wave from where it was stamped (QuakeFx): the floor heaving out round it, rocks, dust, cracks. */

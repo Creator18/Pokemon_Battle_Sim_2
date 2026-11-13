@@ -10,7 +10,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Vector3, Matrix } from '@babylonjs/core/Maths/math.vector';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
 import { ParticleSystem } from '@babylonjs/core/Particles/particleSystem';
 import '@babylonjs/core/Meshes/Builders/polyhedronBuilder';
@@ -27,6 +27,32 @@ const ROCK_DENSITY = 9, ROCK_SIZE: [number, number] = [0.12, 0.3], ROCK_NEAR = -
 /** A rock's life: bursting up (s), standing (s), sinking back (s); how far behind the front it bursts (× the band's width). */
 const ROCK_UP = 0.09, ROCK_HOLD = 0.3, ROCK_DOWN = 0.45, ROCK_BEHIND = 0.35;
 const ROCK_COLOR = new Color3(0.45, 0.36, 0.27);
+
+/**
+ * Stone Edge's pillars: how long one takes to burst up (s), how far past its height it overshoots, its stone's colour;
+ * the chips flung off it (how many, how fast — × its height a second); how long it takes to crumble (s); its crack's
+ * radius (× its width).
+ */
+const PILLAR_UP = 0.14, PILLAR_OVER = 0.12, PILLAR_COLOR = new Color3(0.6, 0.6, 0.63);
+const PILLAR_CHIPS = 7, PILLAR_CHIP_SPEED = 3.2, PILLAR_DOWN = 0.45, PILLAR_CRACK = 1.5;
+
+export interface PillarOptions {
+  /** Where it stands (on the floor: x, z; the floor's height there), how tall and how wide (world units); its user's height. */
+  x: number; z: number; floor: number; height: number; width: number; H: number;
+  /** How long its crack shows before it bursts up (s). */
+  tell: number;
+  /** Its top each frame as it rises or sinks (world y) — its platform's. */
+  onTop?: (top: number) => void;
+}
+
+export interface PillarHandle {
+  /** Resolves as it has burst up through the floor (its hit). */
+  up: Promise<void>;
+  /** Shake it, about to go (its warning), for `seconds`. */
+  warn(seconds: number): void;
+  /** Crumble it: down into the floor in pieces. Resolves once it is gone. */
+  crumble(): Promise<void>;
+}
 
 export interface QuakeOptions {
   /** Where it was stamped: on the floor, its x and z; the floor's height there. */
@@ -101,6 +127,125 @@ export class QuakeFx {
     for (let i = 0; i < n; i++) this.dustAt.push(at.add(new Vector3((Math.random() - 0.5) * 0.25 * h, 0.05, (Math.random() - 0.5) * 0.25 * h)));
     ps.manualEmitCount = Math.max(0, ps.manualEmitCount) + n;
   }
+
+  /**
+   * A Stone Edge pillar: a crack in the floor where it will come up (its tell), then it bursts up — a faceted, flat-topped
+   * column of stone, sharp shards round its foot and its rim — overshooting a little, dust and chips flung off it; it
+   * stands till crumbled (shaking first, warn), sinking back into the floor in pieces.
+   */
+  pillar(o: PillarOptions): PillarHandle {
+    const scene = this.scene, h = o.height, w = o.width;
+    const mat = (this.pillarMat ??= (() => {
+      const m = new StandardMaterial('edgePillarMat', scene);
+      m.diffuseColor = PILLAR_COLOR; m.specularColor = Color3.Black(); m.emissiveColor = PILLAR_COLOR.scale(0.3);
+      return m;
+    })());
+    // Its body: a stout column of stone — seven-sided, a little narrower at its top, its sides knocked about in rough
+    // facets (each ring of its corners pushed in or out its own way), its top flat to stand on.
+    const ROWS = 4, SIDES = 7;
+    const mesh = MeshBuilder.CreateCylinder('edgePillar', { height: h, diameterTop: w * 0.88, diameterBottom: w * 1.05, tessellation: SIDES, subdivisions: ROWS }, scene);
+    const pos = mesh.getVerticesData(VertexBuffer.PositionKind)!;
+    const bump = new Map<string, number>();
+    for (let i = 0; i < pos.length; i += 3) {
+      const x = pos[i], y = pos[i + 1], z = pos[i + 2];
+      const r = Math.hypot(x, z);
+      if (r < 1e-4) continue;
+      // (The same corner — shared by its faces — knocked the same way: keyed by where it is.)
+      const key = `${Math.round(Math.atan2(z, x) * 100)}:${Math.round(y * 100)}`;
+      let k = bump.get(key);
+      if (k === undefined) { k = 1 + (Math.random() - 0.5) * 0.16; bump.set(key, k); }
+      pos[i] = x * k; pos[i + 2] = z * k;
+    }
+    mesh.updateVerticesData(VertexBuffer.PositionKind, pos);
+    mesh.bakeTransformIntoVertices(Matrix.Translation(0, h / 2, 0));
+    mesh.rotation.y = Math.random() * Math.PI;
+    mesh.convertToFlatShadedMesh();
+    mesh.material = mat;
+    mesh.isPickable = false;
+    mesh.position.set(o.x, o.floor - h - 0.05, o.z);
+    // Its tell: the floor cracking where it will come up.
+    const crack = groundQuake();
+    const t0 = performance.now();
+    let upAt = -1, warnFrom = -1, warnFor = 0, downAt = -1, gone = false;
+    let resolveUp!: () => void, resolveDown!: () => void;
+    const up = new Promise<void>((r) => { resolveUp = r; });
+    const down = new Promise<void>((r) => { resolveDown = r; });
+    const chips: { inst: InstancedMesh; v: Vector3; spin: Vector3 }[] = [];
+    const fling = (n: number, y: number) => {
+      const bases = this.bases();
+      for (let i = 0; i < n; i++) {
+        const inst = bases[Math.floor(Math.random() * bases.length)].createInstance('edgeChip');
+        inst.isPickable = false;
+        inst.scaling.setAll(o.H * (0.06 + Math.random() * 0.08));
+        const a = Math.random() * Math.PI * 2;
+        inst.position.set(o.x + Math.cos(a) * w * 0.5, y, o.z + Math.sin(a) * w * 0.5);
+        chips.push({ inst, v: new Vector3(Math.cos(a), 1.2 + Math.random(), Math.sin(a)).scale(PILLAR_CHIP_SPEED * o.H * (0.5 + Math.random() * 0.5)),
+          spin: new Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8) });
+      }
+    };
+    const tick = scene.onBeforeRenderObservable.add(() => {
+      const t = (performance.now() - t0) / 1000;
+      const dt = Math.min(0.05, scene.getEngine().getDeltaTime() / 1000);
+      // The crack: opening through its tell, fading after.
+      const cr = t < o.tell ? t / o.tell : Math.max(0, 1 - (t - o.tell) / 1.2);
+      crack.set(o.x, o.z, w * PILLAR_CRACK, 0, w, cr, w * PILLAR_CRACK);
+      let top = o.floor;
+      if (downAt >= 0) {
+        const k = Math.min(1, (t - downAt) / PILLAR_DOWN);
+        mesh.position.y = o.floor - h * k * k - 0.05 * k;
+        mesh.scaling.set(1 - 0.25 * k, 1, 1 - 0.25 * k);
+        if (k >= 1 && !gone) { gone = true; mesh.setEnabled(false); }
+      } else if (t >= o.tell) {
+        if (upAt < 0) {
+          upAt = t;
+          this.puff(new Vector3(o.x, o.floor, o.z), 12, o.H);
+          fling(PILLAR_CHIPS, o.floor + 0.1);
+          resolveUp();
+        }
+        const k = Math.min(1, (t - upAt) / PILLAR_UP);
+        // (Up with an overshoot, settling back: easeOutBack.)
+        const c = 1 + PILLAR_OVER * 14;
+        const e = 1 + c * Math.pow(k - 1, 3) + (c - 1) * Math.pow(k - 1, 2);
+        mesh.position.y = o.floor - h + h * Math.min(e, 1 + PILLAR_OVER);
+        top = o.floor + h * Math.max(0, Math.min(1, e));
+        // (Shaking, about to go.)
+        if (warnFrom >= 0 && t - warnFrom < warnFor) {
+          const sh = 0.035 * o.H * (0.4 + 0.6 * (t - warnFrom) / warnFor);
+          mesh.position.x = o.x + Math.sin(t * 61) * sh;
+          mesh.position.z = o.z + Math.sin(t * 47 + 1) * sh * 0.5;
+          if (Math.random() < 0.15) this.puff(new Vector3(o.x, o.floor + Math.random() * h * 0.7, o.z), 1, o.H * 0.5);
+        }
+      }
+      o.onTop?.(top);
+      for (let i = chips.length - 1; i >= 0; i--) {
+        const c = chips[i];
+        c.v.y -= 9.8 * dt;
+        c.inst.position.addInPlace(c.v.scale(dt));
+        c.inst.rotation.addInPlace(c.spin.scale(dt));
+        if (c.inst.position.y < o.floor - 0.2) { c.inst.dispose(); chips.splice(i, 1); }
+      }
+      if (gone && !chips.length && cr <= 0) {
+        scene.onBeforeRenderObservable.remove(tick);
+        crack.dispose();
+        mesh.dispose();
+        resolveDown();
+      }
+    });
+    return {
+      up,
+      warn: (seconds) => { warnFrom = (performance.now() - t0) / 1000; warnFor = seconds; },
+      crumble: () => {
+        if (downAt < 0) {
+          downAt = (performance.now() - t0) / 1000;
+          if (upAt < 0) { upAt = downAt; resolveUp(); }
+          this.puff(new Vector3(o.x, o.floor, o.z), 10, o.H);
+          fling(PILLAR_CHIPS + 3, o.floor + h * 0.5);
+        }
+        return down;
+      },
+    };
+  }
+  private pillarMat: StandardMaterial | null = null;
 
   /** The quake: its wave run out to its reach each way, its rocks up and down, its dust; resolves once it has all settled. */
   quake(o: QuakeOptions): Promise<void> {

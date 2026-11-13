@@ -1,5 +1,5 @@
 // Demo: in the League stadium, Charizard's Flamethrower against Charizard's Dragon Pulse — a clash held at its
-// stand-off (meeting in the middle, pouring, for as long as it runs), the camera free: right-drag to orbit round the
+// stand-off (meeting in the middle, pouring, for as long as it runs), the camera free: drag to orbit round the
 // clash ball (kept centred on it, no panning), wheel to zoom.
 // Run in the page: (0, eval)(await (await fetch('/docs/demos/clash-persist-free.js')).text())
 // Let it go (a tie: the ball bursts, both fade): window.__clashHold.release()
@@ -31,8 +31,8 @@
   cam.setTarget(mid);
   cam.setPosition?.(mid.add(new V(0, 1.2, -11)));
   cam.attachControl(canvas, true);
-  // (Orbiting on the right button only; its menu kept off the canvas.)
-  if (cam.inputs?.attached?.pointers) cam.inputs.attached.pointers.buttons = [2];
+  // (Orbiting on the left or right button; the right's menu kept off the canvas.)
+  if (cam.inputs?.attached?.pointers) cam.inputs.attached.pointers.buttons = [0, 2];
   canvas.oncontextmenu = (e) => e.preventDefault();
   // The stand-off, held till let go.
   let release; const held = new Promise((r) => { release = r; });

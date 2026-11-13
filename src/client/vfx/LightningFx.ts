@@ -246,14 +246,26 @@ export interface StrokeOpts {
    * Unset: along this stroke's own length.
    */
   chord?: () => [Vector3, Vector3];
+  /**
+   * A tube along it — TUBE_SIDES round — in place of the ribbon square to the view: a bolt drawn as an aura (its mask
+   * its whole look), so seen end on, running toward the camera, it stays as thin as it is, not folding into a lump.
+   */
+  tube?: boolean;
 }
+
+/** A tube stroke's sides round it. */
+const TUBE_SIDES = 6;
+/** A tube stroke's radius (× its width): the ribbon's in its mask at full brightness, steady. */
+const TUBE_WIDTH = 1.45;
 
 /** One ribbon. */
 class Stroke {
   readonly mesh: Mesh;
   readonly mat: ShaderMaterial;
-  private readonly pos = new Float32Array(KNOTS * 2 * 3);
-  private readonly col = new Float32Array(KNOTS * 2 * 4);
+  /** Its vertices at each knot: 2 (a ribbon's edges), or TUBE_SIDES round (a tube's ring). */
+  private readonly ring: number;
+  private readonly pos: Float32Array;
+  private readonly col: Float32Array;
   private readonly pts: Vector3[] = Array.from({ length: KNOTS }, () => new Vector3());
   /** 0..1 how bright it is now (illum × power × its own share). */
   lit = 0;
@@ -282,9 +294,24 @@ class Stroke {
 
   constructor(scene: Scene, public o: StrokeOpts) {
     this.mesh = new Mesh('bolt', scene);
+    this.ring = o.tube ? TUBE_SIDES : 2;
+    this.pos = new Float32Array(KNOTS * this.ring * 3);
+    this.col = new Float32Array(KNOTS * this.ring * 4);
     const uvs: number[] = [], idx: number[] = [];
-    for (let i = 0; i < KNOTS; i++) { const u = i / (KNOTS - 1); uvs.push(u, 0, u, 1); }
-    for (let i = 0; i < KNOTS - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+    if (o.tube) {
+      // (A tube: every point of it at the ribbon's middle — uv.y 0.5 — its width its rings' radius.)
+      const R = this.ring;
+      for (let i = 0; i < KNOTS; i++) { const u = i / (KNOTS - 1); for (let k = 0; k < R; k++) uvs.push(u, 0.5); }
+      for (let i = 0; i < KNOTS - 1; i++) {
+        for (let k = 0; k < R; k++) {
+          const a = i * R + k, b = i * R + ((k + 1) % R), c = a + R, d = b + R;
+          idx.push(a, c, d, a, d, b);
+        }
+      }
+    } else {
+      for (let i = 0; i < KNOTS; i++) { const u = i / (KNOTS - 1); uvs.push(u, 0, u, 1); }
+      for (let i = 0; i < KNOTS - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+    }
     const vd = new VertexData();
     vd.positions = Array.from(this.pos); vd.uvs = uvs; vd.indices = idx; vd.colors = Array.from(this.col);
     vd.applyToMesh(this.mesh, true);
@@ -330,6 +357,17 @@ class Stroke {
     const ref = Math.abs(dir.y) < 0.9 ? Vector3.Up() : Vector3.Right();
     const ax = Vector3.Cross(dir, ref).normalize();
     const ay = Vector3.Cross(dir, ax).normalize();
+    // (Every bolt's zigzag flat on the screen as it is seen now: across its line on the screen — square to both its
+    // line and the view — never toward or away from the camera, so it never folds back on itself into a heap. Its line
+    // pointing at the camera, with no way across it on the screen: the screen's left and right.)
+    const camera = this.mesh.getScene().activeCamera;
+    const toCam = cam.subtract(Vector3.Lerp(from, to, 0.5)).normalize();
+    let flatAx = Vector3.Cross(toCam, dir);
+    if (flatAx.lengthSquared() < 0.04) {
+      const right = camera ? camera.getDirection(Vector3.Right()) : Vector3.Right();
+      flatAx = right.subtract(dir.scale(Vector3.Dot(right, dir)));
+    }
+    flatAx.normalize();
     const side = (o.wander ?? WANDER) * run;
     const peak = o.peak ?? 0.5;
     // Ours: corners. The source's field is smooth, which over a long bolt
@@ -347,7 +385,7 @@ class Stroke {
       const p = this.pts[i];
       p.copyFrom(from).addInPlace(chord.scale(u));
       if (o.bow) p.addInPlace(o.bow.scale(smoothstep(0, peak, u) * (1 - smoothstep(peak, 1, u))));
-      p.addInPlace(ax.scale((w0 * side + jx) * pin)).addInPlace(ay.scale((w1 * side + jy) * pin));
+      p.addInPlace(flatAx.scale(((w0 + w1) * 0.7 * side + (jx + jy) * 0.7) * pin));
     }
     // (Each point's share of the way along the whole bolt — the bolt's line, the same for every stroke of it — else along its own.)
     const ch = o.chord?.();
@@ -364,14 +402,34 @@ class Stroke {
       // A wide ribbon takes its edge direction over more knots, or its edges
       // fold into long spikes at the zigzag's corners.
       const tan = this.pts[Math.min(KNOTS - 1, i + span)].subtract(this.pts[Math.max(0, i - span)]);
-      const view = cam.subtract(p);
-      let s = Vector3.Cross(tan, view);
-      if (s.lengthSquared() < 1e-10) s = ax.clone();
-      s.normalize();
       const swell = smoothstep(GIRTH_CUT, 1, fbm1(3 * zc + GIRTH_RATE * t + 13 * o.k));
       // Thins to a point at the far end of an unpinned stroke.
       const tip = o.pinEnd ? 1 : 1 - 0.6 * smoothstep(0.85, 1, u);
       const half = o.width * HALO * (1 + swellGain * swell) * tip;
+      if (this.ring > 2) {
+        // A tube: a ring round its line, as wide as the ribbon's mask would show it here (its middle out to the edge it
+        // keeps as it dims — boltMask's wide), the same from any side.
+        // (Steady: no swellings running along it, no flicker of its brightness in its width — painted as an aura's fill,
+        // those read as the fill breathing. Only its tip thinning off, an unpinned stroke's.)
+        const hot = 1;
+        const r = o.width * TUBE_WIDTH * tip;
+        if (tan.lengthSquared() < 1e-10) tan.copyFrom(dir);
+        tan.normalize();
+        const n = Vector3.Cross(tan, Math.abs(tan.y) < 0.9 ? Vector3.Up() : Vector3.Right()).normalize();
+        const b = Vector3.Cross(tan, n);
+        const R = this.ring, at = along(p, u);
+        for (let k = 0; k < R; k++) {
+          const a = (k / R) * Math.PI * 2, ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+          const j = (i * R + k) * 3, c = (i * R + k) * 4;
+          this.pos[j] = p.x + n.x * ca + b.x * sa; this.pos[j + 1] = p.y + n.y * ca + b.y * sa; this.pos[j + 2] = p.z + n.z * ca + b.z * sa;
+          this.col[c] = hot; this.col[c + 1] = at; this.col[c + 2] = 0; this.col[c + 3] = 1;
+        }
+        continue;
+      }
+      const view = cam.subtract(p);
+      let s = Vector3.Cross(tan, view);
+      if (s.lengthSquared() < 1e-10) s = ax.clone();
+      s.normalize();
       const j = i * 6;
       this.pos[j] = p.x - s.x * half; this.pos[j + 1] = p.y - s.y * half; this.pos[j + 2] = p.z - s.z * half;
       this.pos[j + 3] = p.x + s.x * half; this.pos[j + 4] = p.y + s.y * half; this.pos[j + 5] = p.z + s.z * half;
@@ -386,7 +444,8 @@ class Stroke {
     this.mesh.updateVerticesData(VertexBuffer.PositionKind, this.pos);
     this.mesh.updateVerticesData(VertexBuffer.ColorKind, this.col);
     this.mat.setFloat('lit', this.lit);
-    this.maskMat?.setFloat('lit', this.lit);
+    // (A tube's mask steady — its flicker not in its shape — shown while it is lit at all.)
+    this.maskMat?.setFloat('lit', this.ring > 2 ? (this.lit > 0.01 ? 1 : 0) : this.lit);
   }
 
   /**
@@ -626,14 +685,16 @@ export class LightningFx {
     const base = (this.serial++ % 97) * 2.17;
     // (The whole bolt's line, for where along it each stroke's every point is: one split for all of them.)
     const chord = (): [Vector3, Vector3] => [from(), to()];
+    // (Drawn as an aura — its mask its whole look: tubes, the same from any side.)
+    const tube = !!o.mask?.wide;
     const mains = Array.from({ length: strands }, (_, i) => new Stroke(this.scene, {
-      from, to, width: o.width * (i === 0 ? 1 : 0.55), wander: (o.wander ?? WANDER) * (i === 0 ? 1 : 1.4), pinEnd: true, k: base + i, chord,
+      from, to, width: o.width * (i === 0 ? 1 : 0.55), wander: (o.wander ?? WANDER) * (i === 0 ? 1 : 1.4), pinEnd: true, k: base + i, chord, tube,
     }));
     const forkEnds = Array.from({ length: forks }, () => ({ at: 0.3, end: new Vector3(), host: 0, off: new Vector3() }));
     const forkStrokes = forkEnds.map((f, i) => new Stroke(this.scene, {
       // (Converging: its end on the target — where the target is now, jittered — and held there, not thinning off.)
       from: () => mains[f.host].at(f.at), to: o.converge ? () => to().add(f.off) : () => f.end, width: o.width * 0.35, k: base + 10 + i,
-      pinEnd: !!o.converge, chord,
+      pinEnd: !!o.converge, chord, tube,
     }));
     if (o.colors) for (const s of [...mains, ...forkStrokes]) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); s.mat.setVector3('outer', o.colors.halo); }
     if (o.mask) for (const s of o.mask.wide ? [...mains, ...forkStrokes] : mains) s.maskIn(this.scene, o.mask.color, o.mask.add, o.mask.wide);

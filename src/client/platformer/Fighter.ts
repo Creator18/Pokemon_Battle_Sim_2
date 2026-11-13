@@ -69,7 +69,14 @@ import { getMove, getTypeEffectiveness, MoveCategory } from '../../shared/index.
 import { canDoubleJump } from '../../shared/data/weights.ts';
 
 /** A platform: its left edge, its top, its width, its depth below its top (world units); `hidden`: solid but not drawn. */
-export interface Platform { x: number; top: number; w: number; h: number; hidden?: boolean }
+/**
+ * A platform: its left edge, its top, how wide, how deep (down from its top); unseen (the stadium's floor and walls).
+ * `pillar`: a Stone Edge pillar — solid, but a teleport goes through it and a Ghost type passes it.
+ */
+export interface Platform { x: number; top: number; w: number; h: number; hidden?: boolean; pillar?: boolean }
+
+/** A Stone Edge pillar standing in the arena: where it is, its platform, its user; crumbling it (at once). */
+export interface Pillar { x: number; plat: Platform; owner: Fighter; crumble(): void }
 
 /**
  * Its moves, one per role (U ranged, I close, J mobility, K control for the player). Unset: none in that slot.
@@ -123,6 +130,8 @@ export interface Arena {
   onCounter?(by: Fighter, on: Fighter, move: string, damage: number, brace?: string): void;
   /** A clash's struggle over: who won (none: a tie). */
   onClashEnd?(first: Fighter, second: Fighter, winner: Fighter | null, stops?: { you: number; rival: number; outright: boolean }): void;
+  /** Every Stone Edge pillar standing in it (Fighter.stoneEdge). */
+  pillars?: Pillar[];
   /** The camera shaken: `trauma` added (0..1; its shake the square of what it holds, dying away). */
   shake?(trauma: number): void;
   /** Two beams let go too close to clash: both burst point-blank (who, with what). */
@@ -172,6 +181,16 @@ const POKEBALL_R = (11 * 0.94) / 2;
  * camera's jolt at the stamp and its rumble each frame the wave runs (trauma, 0..1).
  */
 const QUAKE_DELAY = 0.22, QUAKE_POP = 7, QUAKE_JOLT = 0.55, QUAKE_RUMBLE = 0.02;
+/**
+ * Stone Edge: how far out its target pillar can come up (world units), none nearer it than EDGE_NEAR; a pillar's width
+ * (stout), and how much of it the wall's pillars need each (EDGE_FIT: they may just touch); the wall's heights, stepped up toward the foe (world units — a
+ * jump reaches about 2.7); the target's; how long a crack shows first (s), each next one later by EDGE_STAGGER — one,
+ * two, three; how long they
+ * stand (s), shaking EDGE_WARN s before; how hard the foe is thrown up off its pillar (world units/s).
+ */
+const EDGE_RANGE = 11, EDGE_NEAR = 1.4, EDGE_W = 2.0, EDGE_FIT = 0.95;
+const EDGE_HEIGHTS = [2.1, 2.6, 3.1], EDGE_TARGET_H = 1.6;
+const EDGE_TELL = 0.4, EDGE_STAGGER = 0.28, EDGE_LIFE = 7, EDGE_WARN = 0.9, EDGE_POP = 3.5;
 /** Earthquake: how long it holds its charging pose (s); from the air, how long it is gone between going up and coming down (s). */
 const QUAKE_POSE = 0.6, QUAKE_AIR_GAP = 0.4;
 /** Earthquake's area: its radius round the user (world units) — 10% more than the pitch's painted Pokéball's. */
@@ -238,9 +257,10 @@ export const CLOSE_REACH = 0.9;
 export const BEAM_REACH = 8;
 /**
  * Every beam's longest reach (world units): its own (BeamSpec.range — Flamethrower's 6), else by its kind — a beam 1
- * BEAM_REACH, a beam 2 (the aura beams, the great ones) BEAM2_REACH. Its line, its hit zone, its end ball, no further.
+ * BEAM_REACH, a beam 2 (the aura beams, the great ones) BEAM2_REACH — the pitch's painted Pokéball's radius. Its line,
+ * its hit zone, no further.
  */
-const BEAM2_REACH = 10;
+const BEAM2_REACH = POKEBALL_R;
 /**
  * Its ranged move as a beam: a beam move's own; a bolt (Thunderbolt) a beam of lightning straight off its body, no egg
  * (as the hex battle's clashes drew it).
@@ -434,6 +454,8 @@ export class Fighter {
   /** Whole again (a new round): its HP back, standing. */
   restore(): void {
     this.hp = this.maxHp;
+    // (Its Stone Edge pillars gone with the fight.)
+    for (const pl of [...this.pillars]) pl.crumble();
     if (this.down) { this.down = false; this.factory.revive(this.node); }
     this.beam?.play.cancel?.(); this.beam = null;
     this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null;
@@ -627,7 +649,7 @@ export class Fighter {
     const p = this.node.position;
     const wasX = p.x;
     p.x += this.vx * dt;
-    for (const s of arena.level) {
+    for (const s of this.solids(arena)) {
       if (!this.overlaps(p.x, p.y, s)) continue;
       // (Only just under its top — its feet sunk into a floor: for the fall's pass to stand it on it, not to be thrown
       // out sideways off its end.)
@@ -642,7 +664,7 @@ export class Fighter {
     const wasGrounded = this.grounded;
     this.grounded = false;
     p.y += this.vy * dt;
-    for (const s of arena.level) {
+    for (const s of this.solids(arena)) {
       if (!this.overlaps(p.x, p.y, s)) continue;
       if (this.vy <= 0) { p.y = s.top; this.grounded = true; }
       else p.y = s.top - s.h - this.H - 1e-4;
@@ -698,6 +720,29 @@ export class Fighter {
   /** Where its mouth is (x, y). */
   mouth(): [number, number] { const m = this.factory.mouthAt(this.node); return [m.x, m.y]; }
 
+  /**
+   * How far along a line (from `from`, the way `dir` — a unit — at most `range`) it first meets a Stone Edge pillar
+   * standing in `arena`, or null: a beam stopped there.
+   */
+  static pillarAlong(arena: Arena, from: [number, number], dir: [number, number], range: number): number | null {
+    let best: number | null = null;
+    for (const s of arena.level) {
+      if (!s.pillar) continue;
+      // (Its box, x across and y down from its top: where the line is inside both at once.)
+      let t0 = 0, t1 = range;
+      const slab = (o: number, d: number, lo: number, hi: number) => {
+        if (Math.abs(d) < 1e-6) { if (o < lo || o > hi) t1 = -1; return; }
+        let a = (lo - o) / d, b = (hi - o) / d;
+        if (a > b) [a, b] = [b, a];
+        t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+      };
+      slab(from[0], dir[0], s.x, s.x + s.w);
+      slab(from[1], dir[1], s.top - s.h, s.top);
+      if (t1 >= t0 && (best === null || t0 < best)) best = t0;
+    }
+    return best;
+  }
+
   /** The nearest foe its beam's line would meet (along its aim, within `range`), and how far. */
   beamTarget(arena: Arena, range: number, aim = this.aim): { f: Fighter; d: number } | null {
     const from = this.mouth(), dir = this.aimDir(aim);
@@ -712,6 +757,7 @@ export class Fighter {
   /** Its ranged move (a beam), the way it faces, level: to the nearest foe ahead in range at its mouth's height, else out to its range. */
   private fire(arena: Arena): void {
     if (!this.moves.ranged) return;
+    if (this.moves.ranged === 'Stone Edge') { this.stoneEdge(arena); return; }
     const spec = beamFor(this.moves.ranged);
     if (!spec) return;
     const name = this.moves.ranged;
@@ -733,22 +779,27 @@ export class Fighter {
       else this.clash(rival, name, spec, arena);
       return;
     }
-    const hit = this.beamTarget(arena, range);
+    // (Stopped by a Stone Edge pillar in its way: short of it, nothing beyond it struck.)
+    const wall = Fighter.pillarAlong(arena, from, dir, range);
+    const found = this.beamTarget(arena, range);
+    const hit = found && (wall === null || found.d < wall) ? found : null;
     const ahead = hit?.f ?? null;
-    const reach = hit ? hit.d : range;
+    const reach = hit ? hit.d : wall ?? range;
     const at = new Vector3(from[0] + dir[0] * Math.max(1, reach), from[1] + dir[1] * Math.max(1, reach), 0);
     this.begin(name);
     // (Its head held on its beam's line while it pours.)
     this.lineGaze = Math.atan2(dir[1], Math.abs(dir[0]));
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
-    // (A beam 2: its end ball while its front is on a foe; striking nothing, none — its starting egg drawn out the length of the beam instead.
-    // A bolt ends on the foe it connects with.)
+    // (A beam 2: one long egg — its starting egg drawn out the length of the beam, no shaft or end ball — on a foe or
+    // not. A bolt ends on the foe it connects with.)
     // (In contact from the first frame if a foe is in its line as it fires.)
     const conn = { on: !!ahead, onto: null as Fighter | null };
-    const play = this.factory.playBeam(this.node, null, at, spec.style === 2 ? { ...spec, endBall: () => conn.on }
-      : spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) } : spec);
+    // (A bolt first, whatever its style — Ice Beam's, Psybeam's are beam 2s: it ends on the foe it is on, run into its
+    // body and taken into its aura, as Thunderbolt's.)
+    const play = this.factory.playBeam(this.node, null, at, spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) }
+      : spec.style === 2 ? { ...spec, endBall: () => conn.on } : spec);
     const mine: Firing = { id: ++beamIds, play, move: name, spec, at: ahead, pressedAt: this.time, launched: false, from, dir,
-      range: hit ? hit.d + 0.3 : range, launchedAt: Infinity, pouring: true, struck: new Set(), end: at, reach: Math.max(1, range),
+      range: hit ? hit.d + 0.3 : wall ?? range, launchedAt: Infinity, pouring: true, struck: new Set(), end: at, reach: Math.max(1, range),
       get connected() { return conn.on; }, set connected(v: boolean) { conn.on = v; },
       get onto() { return conn.onto; }, set onto(v: Fighter | null) { conn.onto = v; } };
     this.beam = mine;
@@ -907,7 +958,7 @@ export class Fighter {
   private roomAlong(arena: Arena, dir: number): number {
     const p = this.node.position;
     let open = 0;
-    while (open < 200 && !arena.level.some((s) => this.overlaps(p.x + dir * (open + 0.1), p.y + 1e-3, s))) open += 0.1;
+    while (open < 200 && !arena.level.some((s) => !s.pillar && this.overlaps(p.x + dir * (open + 0.1), p.y + 1e-3, s))) open += 0.1;
     return open;
   }
 
@@ -973,15 +1024,19 @@ export class Fighter {
   private sweepBeam(arena: Arena): void {
     const b = this.beam;
     if (!b || !b.launched || !b.pouring) return;
+    // (A Stone Edge pillar in its line — standing there from the first, or come up since: it goes no further, nothing
+    // past it struck.)
+    const wall = Fighter.pillarAlong(arena, b.from, b.dir, b.reach);
+    const full = wall === null ? b.reach : Math.min(b.reach, wall);
     const k = Math.min(1, Math.max(0, (this.time - b.launchedAt) / FRONT_TIME));
-    const reach = b.range * (1 - (1 - k) * (1 - k) * (1 - k));
+    const reach = Math.min(full, b.range * (1 - (1 - k) * (1 - k) * (1 - k)));
     if (reach < 0.2) return;
     // (A foe braced to counter in its line: set off just before the front reaches it — the beam never lands.)
     const ka = Math.min(1, Math.max(0, (this.time + COUNTER_SENSE - b.launchedAt) / FRONT_TIME));
     const reachSoon = b.range * (1 - (1 - ka) * (1 - ka) * (1 - ka));
     for (const f of this.foes(arena)) {
       if (!f.countering || f.down || f.invulnerable || b.struck.has(f) || !f.setsOff(b.move)) continue;
-      const d = Fighter.lineMeets(b.from, b.dir, Math.min(reachSoon, b.reach + 0.3), f);
+      const d = Fighter.lineMeets(b.from, b.dir, Math.min(reachSoon, full + 0.3), f);
       if (d === null) continue;
       b.struck.add(f);
       f.takeHit(this, b.move, b.play.contactEnds, arena);
@@ -991,14 +1046,14 @@ export class Fighter {
     for (const f of this.foes(arena)) {
       // (Its end — where its front is going — on the nearest foe in its line within its full reach, from the first: so
       // its front runs to that one and stops on it, never on past it and back.)
-      if (!f.down) { const da = Fighter.lineMeets(b.from, b.dir, b.reach, f); if (da !== null && da < aimAt) aimAt = da; }
+      if (!f.down) { const da = Fighter.lineMeets(b.from, b.dir, full, f); if (da !== null && da < aimAt) aimAt = da; }
       // (Its look — contact or not — by whether a foe is in its line at all, within its full reach: so a beam on its
       // way to one already looks as it will on it, and one it struck still counts down. Its blows still wait for its front.)
-      if ((!f.down || b.struck.has(f)) && Fighter.lineMeets(b.from, b.dir, b.reach, f, true) !== null) inLine = true;
+      if ((!f.down || b.struck.has(f)) && Fighter.lineMeets(b.from, b.dir, full, f, true) !== null) inLine = true;
       if (f.down) continue;
       // (Its front out — or this one already struck by it — its line runs to its full reach: pushed back, it is still in it.)
       const held = k >= 1 || b.struck.has(f);
-      const d = Fighter.lineMeets(b.from, b.dir, held ? b.reach : Math.min(reach, b.reach + 0.3), f);
+      const d = Fighter.lineMeets(b.from, b.dir, held ? full : Math.min(reach, full + 0.3), f);
       if (d === null) continue;
       // (The beam stops on the nearest in its line — struck now, or held in it since.)
       if (d < nearest) { nearest = d; onto = held ? f : d <= reach + 0.05 ? f : null; }
@@ -1009,7 +1064,7 @@ export class Fighter {
     // Its end on that one (its end ball on it) — or, none in its line, out to its full reach again (a beam 2's end ball smaller).
     b.connected = inLine;
     b.onto = onto;
-    const to = Math.max(1, Math.min(b.reach, nearest, aimAt));
+    const to = Math.max(Math.min(1, full), Math.min(full, nearest, aimAt));
     b.end.set(b.from[0] + b.dir[0] * to, b.from[1] + b.dir[1] * to, 0);
   }
 
@@ -1179,6 +1234,84 @@ export class Fighter {
     return Math.max(0, y);
   }
 
+  /**
+   * Stone Edge: pillars of stone burst up out of the floor in a row from just ahead of it out to its foe (EDGE_RANGE at
+   * most) — four, room allowing — one after another, each after its crack shows (EDGE_TELL s, the nearer first): the one
+   * under the foe struck it and threw it up onto its top; the ones between, a wall — stepped up toward the foe
+   * (EDGE_HEIGHTS), too tall to jump from the floor at their top. They stand EDGE_LIFE s as platforms (shaking EDGE_WARN s
+   * before they go), then crumble; a beam stops at them. One set at a time: a new one crumbles the old. Earthquake
+   * shatters them; a teleport goes through them, a Ghost type passes them.
+   */
+  private stoneEdge(arena: Arena): void {
+    const name = this.moves.ranged!;
+    const foe = this.foes(arena).filter((f) => !f.down).sort((a, b) => Math.abs(a.x - this.x) - Math.abs(b.x - this.x))[0];
+    const dir = foe ? Math.sign(foe.x - this.x) || this.facing : this.facing;
+    this.face(dir, true);
+    const reach = Math.min(EDGE_RANGE, foe ? Math.abs(foe.x - this.x) : EDGE_RANGE, this.roomAlong(arena, dir) - EDGE_W);
+    if (reach < EDGE_NEAR) return;
+    this.begin(name);
+    this.vx = 0;
+    const k = this.startRun(name);
+    // (Its old set gone first.)
+    for (const old of [...this.pillars]) old.crumble();
+    const floor = this.grounded ? this.y : 0;
+    // Where they come up: under its foe (its target), and the wall between — none within EDGE_NEAR of it.
+    // (As many of the wall's as there is room for between — EDGE_HEIGHTS.length at most — side by side, each its own.)
+    const room = reach - EDGE_W / 2 - EDGE_NEAR;
+    const between = Math.max(0, Math.min(EDGE_HEIGHTS.length, Math.floor(room / (EDGE_W * EDGE_FIT))));
+    const spots: { x: number; h: number; hit: boolean }[] = [];
+    for (let i = 0; i < between; i++) {
+      const d = EDGE_NEAR + (room * (i + 0.5)) / between;
+      spots.push({ x: this.x + dir * d, h: EDGE_HEIGHTS[EDGE_HEIGHTS.length - between + i], hit: false });
+    }
+    spots.push({ x: this.x + dir * reach, h: EDGE_TARGET_H, hit: true });
+    void this.factory.playAttackLunge(this.node, new Vector3(this.x + dir * reach, floor, 0)).then(() => { if (this.using === name) this.end(); });
+    const struck = new Set<Fighter>();
+    const list = (arena.pillars ??= []);
+    spots.forEach((at, i) => {
+      const plat: Platform = { x: at.x - EDGE_W / 2, top: floor, w: EDGE_W, h: 0, hidden: true, pillar: true };
+      let added = false, done = false;
+      // (A foe it bursts up under rides its top up — carried, not pushed out its side — and is thrown up off it once it
+      // is all the way up.)
+      const riding = new Set<Fighter>();
+      const handle = this.factory.playPillar({ x: at.x, z: 0, floor, height: at.h, width: EDGE_W, H: this.H, tell: EDGE_TELL + i * EDGE_STAGGER,
+        onTop: (top) => {
+          plat.top = top; plat.h = top - floor;
+          if (!added && top > floor + 0.05 && !done) { added = true; arena.level.push(plat); }
+          // (Held on its middle — the blow's shove cancelled — so it comes back down on its top.)
+          for (const f of riding) {
+            f.node.position.x = at.x; f.node.position.y = Math.max(f.y, top); f.vy = Math.max(f.vy, 0); f.vx = 0; f.knockT = 0;
+            if (top >= floor + at.h - 1e-3) { riding.delete(f); f.vy = EDGE_POP; f.grounded = false; }
+          }
+        } });
+      const pillar: Pillar = { x: at.x, plat, owner: this, crumble: () => {
+        if (done) return;
+        done = true;
+        const li = arena.level.indexOf(plat); if (li >= 0) arena.level.splice(li, 1);
+        const pi = list.indexOf(pillar); if (pi >= 0) list.splice(pi, 1);
+        const mi = this.pillars.indexOf(pillar); if (mi >= 0) this.pillars.splice(mi, 1);
+        void handle.crumble();
+      } };
+      list.push(pillar); this.pillars.push(pillar);
+      void handle.up.then(() => {
+        if (done) return;
+        // Bursting up under a foe: struck, and thrown up onto its top.
+        for (const f of this.foes(arena)) {
+          if (struck.has(f) || f.down || f.invulnerable) continue;
+          if (Math.abs(f.x - at.x) > EDGE_W / 2 + f.W / 2 || f.y > floor + at.h) continue;
+          struck.add(f);
+          // (Onto its middle, to ride it up.)
+          if (f.takeHit(this, name, () => this.factory.playHitReact(f.node), arena)) { f.node.position.x = at.x; riding.add(f); }
+        }
+        if (i === spots.length - 1) this.finishRun(k);
+      });
+      setTimeout(() => handle.warn(EDGE_WARN), (EDGE_TELL + i * EDGE_STAGGER + EDGE_LIFE - EDGE_WARN) * 1000);
+      setTimeout(() => pillar.crumble(), (EDGE_TELL + i * EDGE_STAGGER + EDGE_LIFE) * 1000);
+    });
+  }
+  /** Its Stone Edge pillars standing now. */
+  private pillars: Pillar[] = [];
+
   /** Earthquake's stamp where it stands, on the ground: its charging pose, its wave let go from it. */
   private stamp(arena: Arena, name: string): void {
     const k = this.startRun(name);
@@ -1192,6 +1325,8 @@ export class Fighter {
       void this.factory.playQuake({ x: x0, z: 0, floor: this.y, height: this.H, radius,
         onFront: (front) => {
           arena.shake?.(QUAKE_RUMBLE);
+          // (Its wave shatters any Stone Edge pillar it reaches.)
+          for (const pl of [...(arena.pillars ?? [])]) if (Math.abs(pl.x - x0) <= Math.min(front, radius)) pl.crumble();
           for (const f of this.foes(arena)) {
             // (Its area: within its radius, as its ring reaches it.)
             if (passed.has(f) || Math.abs(f.x - x0) > Math.min(front, radius)) continue;
@@ -1371,7 +1506,8 @@ export class Fighter {
       });
     // (Through bodies, never through a wall: no further than the level lets it go along the way — the ground below
     // aside, as an aim down along it would graze it.)
-    const wallAt = (d: number) => arena.level.some((s) => this.overlaps(p.x + ux * d, Math.max(0, p.y + uy * d) + 1e-3, s));
+    // (Through a Stone Edge pillar too: a teleport crosses nothing between.)
+    const wallAt = (d: number) => arena.level.some((s) => !s.pillar && this.overlaps(p.x + ux * d, Math.max(0, p.y + uy * d) + 1e-3, s));
     let open = 0;
     const reach = TELEPORT_DIST * (o.dist ?? 1) * this.H;
     while (open < reach * TELEPORT_PAST && !wallAt(open + 0.1)) open += 0.1;
@@ -1510,12 +1646,17 @@ export class Fighter {
   /** Moving sideways from `from` to `to` where it stands: as far as it gets before a wall's face (its body against the level). */
   private wallStop(arena: Arena, from: number, to: number): number {
     const y = this.y + 1e-3, hw = this.W / 2;
-    for (const s of arena.level) {
+    for (const s of this.solids(arena)) {
       if (!(y + this.H > s.top - s.h && y < s.top)) continue;
       if (to > from && from + hw <= s.x + 1e-3 && to + hw > s.x) to = s.x - hw - 1e-4;
       else if (to < from && from - hw >= s.x + s.w - 1e-3 && to - hw < s.x + s.w) to = s.x + s.w + hw + 1e-4;
     }
     return to;
+  }
+
+  /** What it can't pass: the level — but not a Stone Edge pillar, for a Ghost type (it passes through). */
+  private solids(arena: Arena): Platform[] {
+    return this.types.includes('Ghost') ? arena.level.filter((s) => !s.pillar) : arena.level;
   }
 
   private overlaps(x: number, y: number, s: Platform): boolean {

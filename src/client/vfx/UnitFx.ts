@@ -56,6 +56,8 @@ const WAVES = 1.0;
 const RATE = 0.55; //        crest speed, heights per second
 const SOFT = 0.34; //        rising front smear
 const SWELL = 0.45;
+/** How much of the pulse's swell the outline shows — its breathing (1: the doc's; 0: held steady). */
+const BREATHE = 0;
 const GROUND_BOW = 0.55;
 /** On the ground, how deep the bottom curve dips under the body, × the standoff. */
 const CURVE = 0.6;
@@ -439,7 +441,8 @@ bool ringAt(int i, vec2 q, vec2 uv, out float off, out float lineAt, out float h
   vec2 mid = vec2(0.5 * (b.x + b.z), b.y + 0.5 * H);
   float theta = atan(q.y - mid.y, q.x - mid.x);
   float lick = flags[i].x > 0.5 ? tongues(theta, hgt, time) : 1.0;
-  float standHere = sh.y * (1.0 + ${SWELL.toFixed(2)} * (beat - 1.0)) * up * lick;
+  // (Its breathing — the pulse's swell running up it — BREATHE of it: none now, the outline held steady at its mean.)
+  float standHere = sh.y * (1.0 + ${(SWELL * BREATHE).toFixed(3)} * (beat - 1.0)) * up * lick;
   if (flags[i].y > 0.5)
     standHere = max(standHere + shiverAt(i, theta) * ${FLICKER.toFixed(2)} * sh.z * up, 0.5 * standHere);
   // A coat on a hand hugs it closer than an aura round a body.
@@ -465,7 +468,8 @@ bool ringAt(int i, vec2 q, vec2 uv, out float off, out float lineAt, out float h
     float sole = b.y - ${AIR_SOLE.toFixed(2)} * reachMax - ${GROUND_BOW.toFixed(2)} * reachMax * (1.0 - u * u);
     if (q.y < sole) return false;
   }
-  float here = sh.z * beat * up * (foc ? ${FOCUS_BAND.toFixed(2)} : 1.0) * drawn;
+  // (Its band's thickness with the pulse too — BREATHE of it: none now, held steady.)
+  float here = sh.z * (1.0 + ${BREATHE.toFixed(2)} * (beat - 1.0)) * up * (foc ? ${FOCUS_BAND.toFixed(2)} : 1.0) * drawn;
   lineAt = standHere - 0.5 * here;
   halfW = max(0.5 * here, 1.0);
   if (extra[i].z > 0.5) {
