@@ -29,6 +29,8 @@ import type { Platform } from '../platformer/Fighter.ts';
 import { grassFur } from '../render/arenas/grassFur.ts';
 import { softGrass } from '../render/arenas/softGrass.ts';
 import { lowPolyTree, treeMaterial } from '../render/lowPolyTrees.ts';
+import { route1, ROUTE_GRASS } from './route1.ts';
+import { tallGrassPatch } from '../render/tallGrass.ts';
 import { bevelBox, bookParts } from '../render/lowPolyKit.ts';
 import { curtain, drape, fabric, fringe, pillow } from '../render/clothKit.ts';
 import type { TreeKind } from '../render/lowPolyTrees.ts';
@@ -45,7 +47,16 @@ const STEPS_X = 1.5, STEPS = 3, STEP_W = 0.9;
 /** A doorway in a side wall (a Pokéball, or a Pokémon, rolls through); the walls' and the roofs' thickness. */
 const DOOR = 1.9, WALL = 0.4, ROOF = 0.5;
 /** Route 1's tall grass: as tall as the Pokéball you are is across (its height × 0.7, a small species' height ≈ 0.78). */
-const TALL_GRASS = 0.55;
+const TALL_GRASS = ROUTE_GRASS;
+/** The three starters, left to right on Prof. Oak's table (FireRed's order); how far back on it their balls sit. */
+export const STARTERS = ['Bulbasaur', 'Squirtle', 'Charmander'];
+const STARTER_Z = 0.5;
+/** The table they're on: its top. */
+export const STARTER_TABLE = { x0: -18.6, x1: -15.4, top: 0.95 };
+/** How far back the land runs (z), and the forest's further rows on it — hiding the ground's far edge. */
+const FAR_BACK = 46, FAR_TREES = [13.5, 18, 23.5, 30];
+/** The trees' size (× a tree's own, about 4–5 tall). */
+export const TREE_SCALE = 1.5;
 /** How fast a front wall fades away, or back (per s). */
 const FACADE_EASE = 7;
 /** The buildings: [left, right, floor, roof's underside]; your house's upstairs; its balcony. */
@@ -71,6 +82,11 @@ export interface PalletTown {
   root: TransformNode;
   /** Its two gates' doors (meshes), for palletStory to open and close: the lab's (its right-hand doorway), Route 1's. */
   doors: { lab: Mesh; route: Mesh };
+  /** Route 1's tall grass, where wild Pokémon roam (x from, x to, the ground's height); its far end. */
+  grass: { x0: number; x1: number; y: number }[];
+  routeEnd: number;
+  /** The three starters' Poké Balls on Prof. Oak's table: each one's mesh, its species, where it sits along it. */
+  starters: { mesh: Mesh; species: string; x: number }[];
   /** Each frame, where you are: a building's front wall fades away while you are in it, and back up when you leave. */
   update(x: number, y: number, dt: number): void;
   dispose(): void;
@@ -102,9 +118,8 @@ export function palletTown(scene: Scene): PalletTown {
     { x: SHORE, top: SOUTH_Y, w: STEPS_X - SHORE, h: 6, hidden: true },
     ...steps,
     { x: STEPS_X + STEPS * STEP_W, top: NORTH_Y, w: NORTH - (STEPS_X + STEPS * STEP_W), h: 6 + NORTH_Y, hidden: true },
-    // Its ends: the sea's edge (Surf, later) and Route 1's far end (later): too high to jump.
+    // Its south end: the sea's edge (Surf, later): too high to jump. (Its north runs on into Route 1: route1.ts.)
     { x: SHORE - 1.5, top: 14, w: 1.5, h: 20, hidden: true },
-    { x: NORTH, top: 14, w: 2, h: 20, hidden: true },
 
     // Prof. Oak's Lab: its tables, low enough to hop onto (the middle one, the three Poké Balls), and from them up onto
     // the loft along its bookshelves.
@@ -246,7 +261,7 @@ export function palletTown(scene: Scene): PalletTown {
   // (The earth under it: the south tier, the north, the stone wall where the north rises from the south.)
   const northX = STEPS_X + STEPS * STEP_W;
   box('southEarth', SHORE, northX, -6, SOUTH_Y, FRONT_EDGE, BACK, C.earth);
-  box('northEarth', northX, NORTH + 2, -6, NORTH_Y, FRONT_EDGE, BACK, C.earth);
+  box('northEarth', northX, NORTH, -6, NORTH_Y, FRONT_EDGE, BACK, C.earth);
   box('tierWall', northX - 0.25, northX, SOUTH_Y, NORTH_Y, FRONT_EDGE, BACK, C.stone);
   // (The steps run the tier's whole depth, under the walk and back to the trees.)
   for (const [i, s] of steps.entries()) box(`step${i}`, s.x, s.x + s.w, SOUTH_Y, s.top, FRONT_EDGE, BACK, C.stone);
@@ -263,16 +278,17 @@ export function palletTown(scene: Scene): PalletTown {
   lawn('lawnFrontLab', L.x0, L.x1, SOUTH_Y, FRONT_EDGE, FRONT, 14);
   lawn('lawnFrontHome', H.x0, H.x1, NORTH_Y, FRONT_EDGE, FRONT, 15);
   lawn('lawnFrontRival', RV.x0, RV.x1, NORTH_Y, FRONT_EDGE, FRONT, 16);
-  // (Route 1's tall grass: the same fur, longer, clumped, a deeper green.)
+  // (Route 1's tall grass, past the gate: tufts of thick strands over a soft lawn, all of it tall.)
   const tallMat = new StandardMaterial('pallet_tallGrass', scene);
   tallMat.diffuseColor = new Color3(0.26, 0.56, 0.22);
   tallMat.specularColor = Color3.Black();
   owned.push(tallMat, softGrass(scene, tallMat, 14, 20, 21));
   {
-    const x0 = GRASS_FROM, x1 = NORTH + 2, g = MeshBuilder.CreateGround('route1Grass', { width: x1 - x0, height: BACK - FRONT_EDGE, subdivisions: 2 }, scene);
+    const x0 = GRASS_FROM, x1 = NORTH, g = MeshBuilder.CreateGround('route1Grass', { width: x1 - x0, height: BACK - FRONT_EDGE, subdivisions: 2 }, scene);
     g.position.set((x0 + x1) / 2, NORTH_Y + 0.001, (FRONT_EDGE + BACK) / 2);
     place(g, tallMat);
-    owned.push(grassFur(scene, g, tallMat, x1 - x0, BACK - FRONT_EDGE, 1, 13, { height: TALL_GRASS, clump: 0.15, tile: 1.4 }));
+    const t = tallGrassPatch(scene, x0, x1, NORTH_Y, FRONT_EDGE, BACK, TALL_GRASS, 13);
+    t.parent = root; t.receiveShadows = true;
   }
   // A sandy path along the walk, the beach, the sea and its foam.
   box('pathSouth', PATH_FROM, northX, SOUTH_Y - 0.05, SOUTH_Y + 0.004, -0.9, 0.9, C.path);
@@ -617,11 +633,14 @@ export function palletTown(scene: Scene): PalletTown {
   table('labTable1', -22.6, -20.2, L.y, 0.9, C.white, C.metal);
   table('labTable2', -18.6, -15.4, L.y, 0.95, C.white, C.metal);
   table('labTable3', -14.0, -11.8, L.y, 0.9, C.white, C.metal);
+  const starterBalls: { mesh: Mesh; species: string; x: number }[] = [];
   for (const [k, x] of [-17.8, -17.0, -16.2].entries()) {
     // (The three Poké Balls — Bulbasaur's, Squirtle's, Charmander's: each one yours in small, its button to the front.)
     const pb = pokeballMesh(scene, 0.34);
-    pb.name = `labBall${k}`; pb.parent = root; pb.position.set(x, L.y + 0.95 + 0.17, 0); pb.rotation.y = (k - 1) * 0.25;
+    // (Set back on the table, behind the line you roll along: you roll up in front of each, not through it.)
+    pb.name = `labBall${k}`; pb.parent = root; pb.position.set(x, L.y + 0.95 + 0.17, STARTER_Z); pb.rotation.y = (k - 1) * 0.25;
     pb.receiveShadows = true; shadowGen?.addShadowCaster(pb);
+    starterBalls.push({ mesh: pb, species: STARTERS[k], x });
   }
   // (Its machine: a cabinet of panels, its screen, its lights and dials.)
   box('labMachine', -13.8, -11.4, L.y, L.y + 2.4, BACK_WALL - 1.0, BACK_WALL, C.machine, true);
@@ -844,21 +863,43 @@ export function palletTown(scene: Scene): PalletTown {
     t.position.set(x, y, z);
     place(t, treeMat, true);
   };
-  for (const [row, z] of TREES_Z.entries()) for (let x = SHORE + 1 + row * 1.1; x < NORTH + 4; x += 2.2) {
+  for (const [row, z] of TREES_Z.entries()) for (let x = SHORE + 1 + row * 1.1; x < NORTH; x += 2.2) {
     if (x > ROUTE_GATE - 1 && x < ROUTE_GATE + 7 && row === 0) continue;
     const y = x < northX ? SOUTH_Y : NORTH_Y;
     const r = rand();
-    tree(x, y, z + ((x * 7) % 1.4) - 0.7, 0.95 + rand() * 0.3, r < 0.5 ? 'round' : r < 0.82 ? 'pine' : 'poplar');
+    tree(x, y, z + ((x * 7) % 1.4) - 0.7, TREE_SCALE * (0.95 + rand() * 0.3), r < 0.5 ? 'round' : r < 0.82 ? 'pine' : 'poplar');
+  }
+  // (The ground's far edge never seen: the land runs on back past the trees, and the forest goes on, deeper and taller
+  // row on row, closing off the view behind before the painted hills — the beach's end open to the sea.)
+  box('southEarthFar', L.x0 - 6, northX, -6, SOUTH_Y, BACK, FAR_BACK, C.earth);
+  box('northEarthFar', northX, NORTH, -6, NORTH_Y, BACK, FAR_BACK, C.earth);
+  for (const [x0, x1, y] of [[L.x0 - 6, northX, SOUTH_Y], [northX, NORTH, NORTH_Y]] as const) {
+    const g = MeshBuilder.CreateGround('lawnFar', { width: x1 - x0, height: FAR_BACK - BACK, subdivisions: 2 }, scene);
+    g.position.set((x0 + x1) / 2, y + 0.001, (BACK + FAR_BACK) / 2);
+    place(g, lawnMat);
+  }
+  for (const [row, z] of FAR_TREES.entries()) for (let x = L.x0 - 5 + row * 1.3; x < NORTH; x += 2.6 + row * 0.5) {
+    const y = x < northX ? SOUTH_Y : NORTH_Y;
+    const r = rand();
+    tree(x, y, z + ((x * 5) % 2) - 1, TREE_SCALE * (1.15 + row * 0.22 + rand() * 0.35), r < 0.45 ? 'round' : r < 0.85 ? 'pine' : 'poplar');
   }
 
   // The sky.
   scene.clearColor = new Color4(0.62, 0.82, 0.97, 1);
 
+  // ── Route 1, on north from here ──
+  const route = route1(scene, root, NORTH, NORTH_Y);
+  level.push(...route.level);
+
   return {
     level,
+    // (Where wild Pokémon roam: Route 1's tall grass — its start, here past the gate, and its patches on.)
+    grass: [{ x0: GRASS_FROM + 0.5, x1: NORTH - 0.5, y: NORTH_Y }, ...route.grass],
+    routeEnd: route.end,
     start: { x: 13.0, y: H.up },
     root,
     doors: { lab: labDoor, route: routeDoor },
+    starters: starterBalls,
     update: (x: number, y: number, dt: number) => {
       // (In a building — between its walls, from its floor to its roof: its front wall faded away; out: up again.)
       const k = 1 - Math.exp(-dt * FACADE_EASE);
@@ -871,35 +912,41 @@ export function palletTown(scene: Scene): PalletTown {
         f.mesh.visibility = f.vis; f.mesh.isVisible = f.vis > 0.02;
       }
     },
-    dispose: () => { for (const o of owned) o.dispose(); root.dispose(false, true); facadeRoot.dispose(false, true); for (const m of mats.values()) m.dispose(); },
+    dispose: () => { route.dispose(); for (const o of owned) o.dispose(); root.dispose(false, true); facadeRoot.dispose(false, true); for (const m of mats.values()) m.dispose(); },
   };
 }
 
-/** The Pokéball you are until you have a Pokémon: red over white, a black band round it, its button. */
+/**
+ * The Pokéball you are until you have a Pokémon: red over white, a black band round it, its button — each its own piece
+ * (a white sphere, a red cap over its top half, the band a ring round its middle, the button's black rim and white
+ * face, a fine black line round the face), so every line between them is crisp, not blended across a row of the
+ * sphere's triangles.
+ */
 export function pokeballMesh(scene: Scene, diameter: number): Mesh {
-  const b = MeshBuilder.CreateSphere('pokeball', { diameter, segments: 24 }, scene);
-  const pos = b.getVerticesData('position')!;
-  const colors: number[] = [];
-  const band = diameter * 0.045;
-  for (let i = 0; i < pos.length; i += 3) {
-    const y = pos[i + 1];
-    const c = Math.abs(y) < band ? [0.08, 0.08, 0.1] : y > 0 ? [0.9, 0.12, 0.12] : [0.97, 0.97, 0.97];
-    colors.push(c[0], c[1], c[2], 1);
-  }
-  b.setVerticesData('color', colors);
-  const m = new StandardMaterial('pokeballMat', scene);
-  m.diffuseColor = new Color3(1, 1, 1);
-  m.emissiveColor = new Color3(0.35, 0.35, 0.35);
-  m.specularColor = new Color3(0.4, 0.4, 0.4);
-  b.material = m;
-  // Its button, on the band at its front.
-  const ring = MeshBuilder.CreateCylinder('pokeballRing', { height: diameter * 0.06, diameter: diameter * 0.32, tessellation: 20 }, scene);
-  ring.rotation.x = Math.PI / 2; ring.position.set(0, 0, -diameter * 0.49); ring.parent = b;
-  const rm = new StandardMaterial('pokeballRingMat', scene); rm.diffuseColor = new Color3(0.08, 0.08, 0.1); rm.emissiveColor = new Color3(0.02, 0.02, 0.02); ring.material = rm;
-  const button = MeshBuilder.CreateCylinder('pokeballButton', { height: diameter * 0.08, diameter: diameter * 0.2, tessellation: 20 }, scene);
-  button.rotation.x = Math.PI / 2; button.position.set(0, 0, -diameter * 0.51); button.parent = b;
-  const bm = new StandardMaterial('pokeballButtonMat', scene); bm.diffuseColor = new Color3(0.97, 0.97, 0.97); bm.emissiveColor = new Color3(0.4, 0.4, 0.4); button.material = bm;
-  for (const p of [b, ring, button]) p.isPickable = false;
+  const d = diameter, seg = 40;
+  const material = (name: string, c: [number, number, number], glow: number, spec = 0.4) => {
+    const m = new StandardMaterial(name, scene);
+    m.diffuseColor = new Color3(...c); m.emissiveColor = new Color3(...c).scale(glow);
+    m.specularColor = new Color3(spec, spec, spec); m.specularPower = 48;
+    return m;
+  };
+  const red = material('pokeballRed', [0.9, 0.1, 0.1], 0.35), white = material('pokeballWhite', [0.97, 0.97, 0.97], 0.38);
+  const black = material('pokeballBlack', [0.06, 0.06, 0.07], 0.1, 0.15);
+  const b = MeshBuilder.CreateSphere('pokeball', { diameter: d, segments: seg }, scene);
+  b.material = white;
+  const cap = MeshBuilder.CreateSphere('pokeballCap', { diameter: d * 1.004, segments: seg, slice: 0.5 }, scene);
+  cap.material = red; cap.parent = b;
+  // (The band: a ring round its middle, a little proud of the shell, its edges square.)
+  const band = MeshBuilder.CreateCylinder('pokeballBand', { height: d * 0.085, diameter: d * 1.012, tessellation: 64 }, scene);
+  band.material = black; band.parent = b;
+  // Its button, on the band at its front: a black rim, a white face, a fine black line round the face.
+  const ring = MeshBuilder.CreateCylinder('pokeballRing', { height: d * 0.06, diameter: d * 0.36, tessellation: 40 }, scene);
+  ring.rotation.x = Math.PI / 2; ring.position.set(0, 0, -d * 0.49); ring.parent = b; ring.material = black;
+  const button = MeshBuilder.CreateCylinder('pokeballButton', { height: d * 0.08, diameter: d * 0.22, tessellation: 40 }, scene);
+  button.rotation.x = Math.PI / 2; button.position.set(0, 0, -d * 0.51); button.parent = b; button.material = white;
+  const line = MeshBuilder.CreateTorus('pokeballButtonLine', { diameter: d * 0.16, thickness: d * 0.012, tessellation: 40 }, scene);
+  line.rotation.x = Math.PI / 2; line.position.set(0, 0, -d * 0.552); line.parent = b; line.material = black;
+  for (const p of [b, cap, band, ring, button, line]) p.isPickable = false;
   b.position = new Vector3();
   return b;
 }

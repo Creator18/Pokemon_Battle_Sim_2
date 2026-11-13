@@ -13,6 +13,7 @@
  * faints. Falling into a pit: back to the start. Nothing hides the fighters: scenery between the camera and them fades.
  */
 import type { Scene } from '@babylonjs/core/scene';
+import * as MorphFx from '../vfx/MorphFx.ts';
 import { pokeballMesh } from '../metroidverse/palletTown.ts';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
@@ -26,8 +27,11 @@ import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
 import type { Camera } from '@babylonjs/core/Cameras/camera';
 import type { RecipeFactory } from '../render/RecipeFactory.ts';
 import type { SpeciesDefinition } from '../../shared/index.ts';
-import { Fighter, DEFAULT_KIT, IDLE, hpStat } from './Fighter.ts';
+import { getMove } from '../../shared/index.ts';
+import { Fighter, DEFAULT_KIT, IDLE, hpStat, BODY_W } from './Fighter.ts';
 import { Hud } from './Hud.ts';
+import { TeamHud } from './TeamHud.ts';
+import { kitFor } from './speciesMoves.ts';
 import { typeColor } from '../theme.ts';
 import type { Arena, Intent, MoveKit, Platform } from './Fighter.ts';
 import { BossAI } from './BossAI.ts';
@@ -38,6 +42,13 @@ export type { Platform, MoveKit } from './Fighter.ts';
 export { DEFAULT_KIT } from './Fighter.ts';
 
 /** Camera shake: how far at most it jolts (world units, at full trauma), how fast trauma dies away (a second). */
+/** How long the foe's circles stay after a fight's won or lost (s), before they slide away. */
+/**
+ * Floors — never faded to show a fighter: ground and earth, paths, lawns (and their grass), building floors, steps and
+ * the stone faces between rises, the beach (by their meshes' names).
+ */
+const FLOORS = /earth|face|step|path|lawn|floor|beach|tier|seam|grass|ground|rug|mat\b/i;
+const ENCOUNTER_LINGER = 1.6;
 const SHAKE_MAX = 0.45, SHAKE_DECAY = 1.6;
 /** The camera: how far off the plane, how high above the body, how far it leads the way it faces, how quickly it follows. */
 const CAM_DIST = 15, CAM_UP = 2.2, CAM_LEAD = 2.5, CAM_EASE = 5;
@@ -102,6 +113,26 @@ export interface PlatformerOptions {
   scenery?: TransformNode;
   /** You a Pokéball (before your first Pokémon): your species' body hidden, a Pokéball rolling in its place (Fighter.ball). */
   ball?: boolean;
+  /** The rest of your party (after `species`, who leads it), in order — up to six in all. */
+  team?: SpeciesDefinition[];
+  /**
+   * Where you may attack (an attack move — any move that deals damage); elsewhere (a town) it's stopped, and
+   * `onNoAttack` told. Everywhere, if not given.
+   */
+  attacksAllowed?: (x: number, y: number) => boolean;
+  onNoAttack?: () => void;
+  /**
+   * A long level (a town and its route): its scenery drawn only within this far of the camera, along the level (world
+   * units) — the rest hidden: not drawn, not culled, not cast into the shadow map. Its scenery static: its transforms
+   * frozen. Off (everything drawn), if not given.
+   */
+  cullRange?: number;
+  /**
+   * The switch to your Pokémon (X) locked till you have one — your starter (unlockForm); `onFormLocked` told when X is
+   * pressed while it is.
+   */
+  formLocked?: boolean;
+  onFormLocked?: () => void;
 }
 
 /** Something that happened in a fight (s from its start). */
@@ -156,14 +187,25 @@ export class Platformer {
     this.spots = o.enemies ?? [];
     this.scenery = o.scenery ?? null;
     this.level = o.level ?? FIRST_ROOM;
+    this.canBall = !!o.ball; this.formLocked = !!o.formLocked; this.onFormLocked = o.onFormLocked;
+    this.attacksAllowed = o.attacksAllowed ?? null; this.onNoAttack = o.onNoAttack ?? null;
+    if (o.cullRange && o.scenery) this.setUpCulling(o.scenery, o.cullRange);
+    // (Your team, top left: you its first, unless you're a Pokéball still — no Pokémon yet: its circles empty.)
+    this.team = new TeamHud();
+    if (!o.ball) { this.addMember(o.species); for (const sp of o.team ?? []) this.addMember(sp); }
     this.start = o.start ?? { x: 0, y: 0 };
     const bossAt = this.spots.findIndex((s) => s.boss);
     this.boss = bossAt >= 0 ? foes[bossAt] : null;
+    // (Faced with a foe — the boss here: its team's circles slide in, top right.)
+    const bossOf = o.enemies?.find((e) => e.boss);
+    if (bossOf && this.boss) this.encounter([{ species: bossOf.species, fighter: this.boss }]);
+    this.bossSpecies = bossOf?.species ?? null;
     this.ai = this.boss ? new BossAI(this.boss, player) : null;
     this.arena = {
       level: this.level, fighters: this.fighters,
       shake: (t) => { this.trauma = Math.min(1, this.trauma + t); },
       onHit: (by, on, move, dmg) => {
+        for (const h of this.hitHooks) h(by, on, move, dmg);
         this.note(`${by.name} ${move} → ${on.name} −${dmg} (${on.hp}/${on.maxHp})`);
         this.hud?.hit(by, on, move);
         if (on.hp <= 0) { this.note(`${on.name} fainted`); this.hud?.call('K.O.!', '#f43f5e'); }
@@ -220,6 +262,8 @@ export class Platformer {
     // (Its fighters gone with it: a new level brings its own — a beam one was charging or pouring, gone too.)
     for (const f of this.fighters) { f.beam?.play.cancel?.(true); f.beam = null; this.factory.remove(f.node); }
     this.hud?.dispose();
+    this.team.dispose();
+    this.foeTeam?.dispose();
   }
 
   private note(text: string): void { this.events.push({ t: +this.clock.toFixed(2), text }); }
@@ -236,6 +280,8 @@ export class Platformer {
     this.placeAll();
     this.result = null; this.endedAt = null;
     this.events.length = 0; this.clock = 0;
+    // (Fought again: faced with the boss again.)
+    if (this.boss && this.bossSpecies && !this.foeTeam) this.encounter([{ species: this.bossSpecies, fighter: this.boss }]);
     if (this.ai) this.ai.log.length = 0;
     this.note('fight!');
   }
@@ -288,16 +334,23 @@ export class Platformer {
 
   private updateHud(dt: number): void {
     this.hud?.update(dt, this.time, this.result);
+    this.team.update(dt);
+    this.foeTeam?.update(dt);
   }
 
   // ── input ──────────────────────────────
   private key(e: KeyboardEvent): void {
     const k = e.key.toLowerCase();
     const down = e.type === 'keydown';
-    if (['a', 'd', 'w', 's', ' ', 'u', 'i', 'j', 'k', 'l', 'r', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault();
+    if (['a', 'd', 'w', 's', ' ', 'u', 'i', 'j', 'k', 'l', 'r', 'q', 'e', 'x', 'arrowleft', 'arrowright', 'arrowup', 'arrowdown'].includes(k)) e.preventDefault();
     if (down && !this.keys.has(k)) {
       this.pressed.add(k);
       if (k === 'r' && this.result) this.restart();
+      // (Q / E: the previous / next of your party picked, round and round; X: to it — or, it the one out already,
+      // and no fight on, into your Pokéball and back.)
+      if (k === 'q') this.pick(-1);
+      if (k === 'e') this.pick(1);
+      if (k === 'x') this.pressX();
     }
     if (down) this.keys.add(k); else this.keys.delete(k);
   }
@@ -340,29 +393,338 @@ export class Platformer {
     this.ballLastX = p.x;
   }
 
+  // ── Pokéball and Pokémon (X) ──────────────────────────────
+  /** You may turn Pokéball and back (PlatformerOptions.ball); mid-turn (its light playing: you hold still till it's done). */
+  private canBall = false;
+  /** Your team's circles, top left (TeamHud): each its Pokémon's sprite, its HP a ring round it. */
+  readonly team: TeamHud;
+  /** The foe's team's circles, top right — only while you face a trainer or a wild Pokémon (encounter … endEncounter). */
+  private foeTeam: TeamHud | null = null;
+  private bossSpecies: SpeciesDefinition | null = null;
+  /**
+   * Faced with a foe — a trainer (its team, in order) or a wild Pokémon (just it): its circles slide in, top right, each
+   * with its HP ring (from its fighter, if it's out; else full).
+   */
+  encounter(team: { species: SpeciesDefinition; fighter?: Fighter }[]): void {
+    this.foeTeam?.dispose();
+    const hud = this.foeTeam = new TeamHud('right', true);
+    for (const m of team) {
+      const f = m.fighter;
+      hud.add(m.species.name, m.species.spriteId, f ? () => f.hp / f.maxHp : () => 1, m.species.types);
+    }
+  }
+  /** The encounter over (won, lost, fled): the foe's circles slide away. */
+  endEncounter(): void { this.foeTeam?.leave(); this.foeTeam = null; }
+  /**
+   * The camera held on a point (`at`, `dist` back) — the starter's choosing: close on your Pokéball — not following.
+   */
+  focus: { at: Vector3; dist: number } | null = null;
+  /**
+   * Your starter: its body yours from now on (`species` — made, hidden in your Pokéball), its stats, and the switch to
+   * it (X) unlocked.
+   */
+  async giveStarter(species: SpeciesDefinition): Promise<void> {
+    const p = this.player, old = p.node;
+    const node = await this.factory.createPokemon(species, 1);
+    const sh = this.shadows();
+    if (p.ball) for (const m of node.getChildMeshes()) { m.isVisible = false; sh?.removeShadowCaster(m); }
+    p.takeBody(node, `${species.name} (you)`, species.types, hpStat(species.hp));
+    p.attack = species.attack; p.spAtk = species.spAtk; p.speed = species.speed;
+    p.defense = species.defense; p.spDef = species.spDef;
+    p.setMoves(kitFor(species.name));
+    this.factory.remove(old);
+    this.unlockForm();
+    this.activeIdx = this.addMember(species);
+    this.team.setActive(this.activeIdx); this.selIdx = this.activeIdx; this.team.select(this.selIdx);
+  }
+  // ── foes that come and go (wild Pokémon), each with its own mind ──────────────────────────────
+  /** Each foe's own mind (a wild one's: wandering, or fighting back), by its fighter. */
+  private readonly brains = new Map<Fighter, () => Intent>();
+  /** Told of every blow landed (who, on whom, with what, how much). */
+  readonly hitHooks: ((by: Fighter, on: Fighter, move: string, dmg: number) => void)[] = [];
+  /** A foe into the level (a wild Pokémon), its intent each frame from `brain`. */
+  addFoe(f: Fighter, brain: () => Intent): void { this.fighters.push(f); this.brains.set(f, brain); }
+  /** A foe gone from the level (caught, or its body despawned). */
+  removeFoe(f: Fighter): void {
+    const i = this.fighters.indexOf(f);
+    if (i > 0) this.fighters.splice(i, 1);
+    this.brains.delete(f);
+    f.beam?.play.cancel?.(true); f.beam = null;
+    this.factory.remove(f.node);
+  }
+  get foes(): readonly Fighter[] { return this.fighters.slice(1); }
+  /** Where the camera looks (its target, before any shake). */
+  get focusPoint(): Vector3 { return this.camAt; }
+  /** The arena its fighters fight in (for a foe's own AI). */
+  get fightArena(): Arena { return this.arena; }
+  /** The scene and factory (for what's built round the level: its wild Pokémon). */
+  get world(): { scene: Scene; factory: RecipeFactory } { return { scene: this.scene, factory: this.factory }; }
+
+  // ── drawing only what's near ──────────────────────────────
+  /** The scenery culled by range: each mesh, its span along the level, whether it's shown now. */
+  private culled: { m: AbstractMesh; x0: number; x1: number; on: boolean }[] = [];
+  private cullRange = 0;
+  private setUpCulling(root: TransformNode, range: number): void {
+    this.cullRange = range;
+    for (const m of root.getChildMeshes(false)) {
+      // (Only what's shown to begin with — never showing what was hidden on purpose.)
+      if (!m.isVisible) continue;
+      m.computeWorldMatrix(true);
+      const bb = m.getBoundingInfo().boundingBox;
+      this.culled.push({ m, x0: bb.minimumWorld.x, x1: bb.maximumWorld.x, on: true });
+      // (Static: its transform worked out once, never again.)
+      m.freezeWorldMatrix();
+    }
+  }
+  /** Each frame: the scenery within range of the camera shown, the rest hidden. */
+  private cull(): void {
+    if (!this.culled.length) return;
+    const cx = this.camAt.x, r = this.cullRange;
+    for (const c of this.culled) {
+      const on = c.x1 > cx - r && c.x0 < cx + r;
+      if (on !== c.on) { c.on = on; c.m.isVisible = on; }
+    }
+  }
+
+  // ── where you may attack ──────────────────────────────
+  private attacksAllowed: ((x: number, y: number) => boolean) | null = null;
+  private onNoAttack: (() => void) | null = null;
+  /** A move that deals damage (an attack): stopped where attacks aren't allowed. */
+  private static isAttack(move: string | undefined): boolean {
+    if (!move) return false;
+    if (move === 'Thunderbolt') return true;
+    return (getMove(move)?.basePower ?? 0) > 0;
+  }
+  /** Its attack buttons let go where attacks aren't allowed (a town) — and Prof. Oak's word on it. */
+  private stopAttacks(i: Intent): Intent {
+    if (!this.attacksAllowed || this.attacksAllowed(this.player.x, this.player.y)) return i;
+    const k = this.player.moves;
+    const out = { ...i };
+    let stopped = false;
+    if (i.ranged && Platformer.isAttack(k.ranged)) { out.ranged = false; stopped = true; }
+    if (i.close && Platformer.isAttack(k.close)) { out.close = false; stopped = true; }
+    if (i.mobility && Platformer.isAttack(k.mobility)) { out.mobility = false; stopped = true; }
+    if (i.control && Platformer.isAttack(k.control)) { out.control = false; stopped = true; }
+    if (stopped) this.onNoAttack?.();
+    return out;
+  }
+
+  // ── your party ──────────────────────────────
+  /** Your party, in order: each one's species and its HP (kept while it's not out — the one out's is the fighter's). */
+  private party: { species: SpeciesDefinition; hp: number; maxHp: number }[] = [];
+  /** The one out (you, now), and the one picked (Q / E). */
+  private activeIdx = 0; private selIdx = 0;
+  /** One more in your party: its circle filled (its HP ring the fighter's while it's out). Its place, or -1 (full). */
+  private addMember(species: SpeciesDefinition): number {
+    if (this.party.length >= 6) return -1;
+    const max = hpStat(species.hp), m = { species, hp: max, maxHp: max };
+    this.party.push(m);
+    const i = this.party.length - 1;
+    this.team.add(species.name, species.spriteId, () => (i === this.activeIdx ? this.player.hp / this.player.maxHp : m.hp / m.maxHp), species.types);
+    return i;
+  }
+  /** Give you another Pokémon (into your party's next place). */
+  addToTeam(species: SpeciesDefinition): number { return this.addMember(species); }
+  /** In a fight: faced with a trainer or a wild Pokémon (its circles up), not yet won or lost. */
+  get inBattle(): boolean { return !!this.foeTeam && !this.result; }
+  /** Q / E: the previous / next one picked, round the party. */
+  private pick(step: number): void {
+    const n = this.party.length;
+    if (n < 2 || this.morphing) return;
+    this.selIdx = (this.selIdx + step + n) % n;
+    this.team.select(this.selIdx);
+  }
+  /**
+   * X: the one picked sent out in place of the one out (recalled, red, into its ball; the other out of it, white) — or,
+   * the one picked the one out already, and no fight on: into your Pokéball, or out of it.
+   */
+  private pressX(): void {
+    if (this.morphing) return;
+    if (this.formLocked) { this.onFormLocked?.(); return; }
+    if (!this.party.length) return;
+    if (this.selIdx !== this.activeIdx) { void this.swapTo(this.selIdx); return; }
+    if (this.canBall && !this.inBattle) this.toggleForm();
+  }
+  /** Send out party member `i` in place of the one out. */
+  private async swapTo(i: number): Promise<void> {
+    const p = this.player, scene = this.scene, cur = this.party[this.activeIdx], next = this.party[i];
+    this.morphing = true;
+    const node = await this.factory.createPokemon(next.species, 1);
+    const sh = this.shadows();
+    const fresh = node.getChildMeshes();
+    for (const m of fresh) { m.isVisible = false; sh?.removeShadowCaster(m); }
+    const H = this.factory.heightOf(node), W = H * BODY_W;
+    const wasBall = p.ball;
+    // (No room for it where you are — under a low tread: it stays in its ball.)
+    if (!wasBall && !p.fitsBody(this.arena, H, W)) {
+      this.factory.remove(node); this.morphing = false;
+      MorphFx.flash(scene, this.heart(), p.H * 0.5, 'recall');
+      return;
+    }
+    cur.hp = p.hp; cur.maxHp = p.maxHp;
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+    const backOut = (t: number) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+    const run = (secs: number, f: (u: number) => void) => new Promise<void>((done) => {
+      let t = 0;
+      const obs = scene.onBeforeRenderObservable.add(() => {
+        t += scene.getEngine().getDeltaTime() / 1000;
+        const u = Math.min(1, t / secs); f(u);
+        if (u >= 1) { scene.onBeforeRenderObservable.remove(obs); done(); }
+      });
+    });
+    const old = p.node, oldBase = old.scaling.clone();
+    if (!wasBall) {
+      // The one out recalled: washed red, the light drawing it in, shrinking away.
+      const meshes = this.bodyMeshes();
+      MorphFx.gather(scene, this.heart(), p.H * 1.1, 0.4, 'recall');
+      for (const m of meshes) { m.renderOverlay = true; m.overlayColor = new Color3(1, 0.22, 0.2); m.overlayAlpha = 0; }
+      await run(0.25, (u) => { for (const m of meshes) m.overlayAlpha = ease(u); });
+      await run(0.22, (u) => old.scaling.copyFrom(oldBase.scale(Math.max(0.02, 1 - ease(u)))));
+      MorphFx.flash(scene, this.heart(), p.H * 0.5, 'recall');
+    }
+    // Its body yours: its HP as it was left, its stats.
+    p.takeBody(node, `${next.species.name} (you)`, next.species.types, next.maxHp);
+    p.hp = next.hp;
+    p.attack = next.species.attack; p.spAtk = next.species.spAtk; p.speed = next.species.speed;
+    p.defense = next.species.defense; p.spDef = next.species.spDef;
+    p.setMoves(kitFor(next.species.name));
+    this.factory.remove(old);
+    this.activeIdx = i; this.team.setActive(i);
+    if (wasBall) {
+      // (Out of your Pokéball as it, the usual way.)
+      this.morphing = false;
+      this.toggleForm();
+      return;
+    }
+    // The one picked sent out: a white burst, it there white with the light, growing to its size as the light fades.
+    const base = node.scaling.clone(), at = () => this.heart(H);
+    MorphFx.flash(scene, at(), H * 0.9, 'open');
+    for (const m of fresh) { m.isVisible = true; sh?.addShadowCaster(m); m.renderOverlay = true; m.overlayColor = new Color3(1, 1, 1); m.overlayAlpha = 1; }
+    node.scaling.copyFrom(base.scale(0.15));
+    MorphFx.glow(scene, at, H * 0.6, 0.6, 'open');
+    await run(0.5, (u) => { node.scaling.copyFrom(base.scale(0.15 + 0.85 * backOut(u))); for (const m of fresh) m.overlayAlpha = 1 - ease(u); });
+    node.scaling.copyFrom(base);
+    for (const m of fresh) { m.renderOverlay = false; m.overlayAlpha = 0; }
+    this.morphing = false;
+  }
+
+  /** No Pokémon yet (your starter not chosen): X does nothing but say so. */
+  private formLocked = false;
+  private onFormLocked?: () => void;
+  /** Your starter chosen: X turns you Pokéball ↔ Pokémon from now on. */
+  unlockForm(): void { this.formLocked = false; }
+  get formUnlocked(): boolean { return this.canBall && !this.formLocked; }
+  private morphing = false;
+  /** Your Pokémon's meshes: shown, hidden, washed in light (their overlay) as it comes out or goes back. */
+  private bodyMeshes(): AbstractMesh[] { return this.player.node.getChildMeshes(); }
+  private shadows(): { removeShadowCaster(m: AbstractMesh): void; addShadowCaster(m: AbstractMesh): void } | undefined {
+    return (this.scene.metadata as { shadowGen?: { removeShadowCaster(m: AbstractMesh): void; addShadowCaster(m: AbstractMesh): void } } | undefined)?.shadowGen;
+  }
+  /** Where the light is: the middle of you as you are now. */
+  private heart(h = this.player.H): Vector3 { const p = this.player.node.position; return new Vector3(p.x, p.y + h / 2, p.z); }
+
+  /**
+   * Pokéball to Pokémon, or back (X). Out: the ball shakes and glows, light gathering into it — it bursts open in a
+   * flash, your Pokémon there in its place, white with the light, growing to its size as the light fades off it.
+   * Back: your Pokémon washes red, the light drawing it in, it shrinks away into the ball — closing with a flash. (No
+   * room to stand where the ball is — under a low tread: it only fizzles.)
+   */
+  private toggleForm(): void {
+    if (this.morphing || !this.pokeball) return;
+    const p = this.player, scene = this.scene;
+    const node = p.node, base = node.scaling.clone();
+    const ease = (t: number) => 1 - Math.pow(1 - t, 3);
+    const backOut = (t: number) => { const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+    const run = (secs: number, f: (u: number) => void) => new Promise<void>((done) => {
+      let t = 0;
+      const obs = scene.onBeforeRenderObservable.add(() => {
+        t += scene.getEngine().getDeltaTime() / 1000;
+        const u = Math.min(1, t / secs); f(u);
+        if (u >= 1) { scene.onBeforeRenderObservable.remove(obs); done(); }
+      });
+    });
+    const ball = this.pokeball, ballD = p.H;
+    if (p.ball) {
+      if (!p.unBall(this.arena)) { MorphFx.flash(scene, this.heart(), ballD * 0.5, 'recall'); return; }
+      // (Its body back already — its collision the Pokémon's — though you see the ball a moment yet.)
+      this.morphing = true;
+      const h = p.H, at = () => this.heart(h);
+      p.ball = true; // (held a ball for the light's sake: no flight, no dash, till it's out)
+      MorphFx.gather(scene, this.heart(ballD), ballD * 1.6, 0.4, 'open');
+      // (All its pieces' materials — shell, cap, band, button — glowing white together.)
+      const mats = [...new Set([ball, ...ball.getChildMeshes()].map((m) => m.material as StandardMaterial).filter((m) => !!m?.emissiveColor))];
+      const glow0 = mats.map((m) => m.emissiveColor.clone());
+      void run(0.4, (u) => {
+        // (It shakes, swelling a little, glowing white.)
+        ball.rotation.x = Math.sin(u * 40) * 0.18 * u;
+        ball.scaling.setAll(1 + 0.18 * u * u);
+        for (const [k, m] of mats.entries()) m.emissiveColor = Color3.Lerp(glow0[k], Color3.White(), u);
+      }).then(() => {
+        MorphFx.flash(scene, at(), h * 0.9, 'open');
+        ball.setEnabled(false); ball.scaling.setAll(1); ball.rotation.x = 0; for (const [k, m] of mats.entries()) m.emissiveColor = glow0[k];
+        const meshes = this.bodyMeshes(), sh = this.shadows();
+        for (const m of meshes) { m.isVisible = true; sh?.addShadowCaster(m); m.renderOverlay = true; m.overlayColor = new Color3(1, 1, 1); m.overlayAlpha = 1; }
+        node.scaling.copyFrom(base.scale(0.15));
+        MorphFx.glow(scene, at, h * 0.6, 0.7, 'open');
+        return run(0.55, (u) => {
+          node.scaling.copyFrom(base.scale(0.15 + 0.85 * backOut(u)));
+          for (const m of meshes) m.overlayAlpha = 1 - ease(u);
+        });
+      }).then(() => {
+        node.scaling.copyFrom(base);
+        for (const m of this.bodyMeshes()) { m.renderOverlay = false; m.overlayAlpha = 0; }
+        p.ball = false; this.morphing = false;
+      });
+    } else {
+      this.morphing = true;
+      const h = p.H, meshes = this.bodyMeshes(), sh = this.shadows();
+      const d = (p as unknown as { form?: { H: number } }).form?.H ?? h;
+      MorphFx.gather(scene, this.heart(h), h * 1.1, 0.45, 'recall');
+      for (const m of meshes) { m.renderOverlay = true; m.overlayColor = new Color3(1, 0.22, 0.2); m.overlayAlpha = 0; }
+      void run(0.3, (u) => { for (const m of meshes) m.overlayAlpha = ease(u); })
+        .then(() => run(0.25, (u) => { node.scaling.copyFrom(base.scale(Math.max(0.02, 1 - ease(u)))); }))
+        .then(() => {
+          for (const m of meshes) { m.isVisible = false; m.renderOverlay = false; sh?.removeShadowCaster(m); }
+          node.scaling.copyFrom(base);
+          p.makeBall(d * BALL_SIZE);
+          this.ballLastX = NaN; this.rollPokeball();
+          ball.setEnabled(true); ball.scaling.setAll(0.3);
+          MorphFx.flash(scene, this.heart(), p.H * 0.6, 'recall');
+          return run(0.25, (u) => ball.scaling.setAll(0.3 + 0.7 * backOut(u)));
+        })
+        .then(() => { ball.scaling.setAll(1); this.morphing = false; });
+    }
+  }
+
   private step(dt: number): void {
     if (dt <= 0) return;
     this.clock += dt;
     const over = !!this.result;
-    this.player.step(dt, over ? IDLE : this.playerIntent(), this.arena);
-    if (over) this.pressed.clear();
+    // (Mid-turn — Pokéball to Pokémon or back: held still till its light is done.)
+    this.player.step(dt, over || this.morphing ? IDLE : this.stopAttacks(this.playerIntent()), this.arena);
+    if (over || this.morphing) this.pressed.clear();
     for (const f of this.fighters.slice(1)) {
       // A boss thinks; a practice target turns to watch the player.
-      const intent = f === this.boss && this.ai ? (over ? IDLE : this.ai.think()) : { ...IDLE, face: Math.sign(this.player.x - f.x) || f.facing };
+      const brain = this.brains.get(f);
+      const intent = brain ? brain() : f === this.boss && this.ai ? (over ? IDLE : this.ai.think()) : { ...IDLE, face: Math.sign(this.player.x - f.x) || f.facing };
       f.step(dt, intent, this.arena);
     }
     for (const f of this.fighters) {
       if (!f.fellOut(KILL_Y)) continue;
       if (f === this.player) f.place(this.start.x, this.start.y, 1);
-      else { const s = this.spots[this.fighters.indexOf(f) - 1]; f.place(s.x, s.y, -1); }
+      else { const s = this.spots[this.fighters.indexOf(f) - 1]; if (s) f.place(s.x, s.y, -1); else f.place(f.x, 4, f.facing); }
     }
     if (this.boss && !this.result) {
       if (this.boss.down) { this.result = 'won'; this.endedAt = this.clock; this.note('you win'); }
       else if (this.player.down) { this.result = 'lost'; this.endedAt = this.clock; this.note('you lose'); }
+      // (The fight over: the foe's circles slide away a moment after.)
+      if (this.result) { const hud = this.foeTeam; setTimeout(() => { if (this.foeTeam === hud) this.endEncounter(); }, ENCOUNTER_LINGER * 1000); }
     }
     this.updateHud(dt);
-    if (this.player.ball) { if (!this.pokeball) this.makePokeball(); this.rollPokeball(); }
+    if (this.player.ball && !this.pokeball) this.makePokeball();
+    if (this.pokeball?.isEnabled()) this.rollPokeball();
     this.follow(dt);
+    this.cull();
   }
 
   /** The camera off to the side, level with the player, leading the way it faces — or, in a boss fight, framing both. */
@@ -376,6 +738,8 @@ export class Platformer {
       const cam = this.camera as unknown as { fov?: number };
       const tanH = Math.tan((cam.fov ?? 0.8) / 2) * this.scene.getEngine().getAspectRatio(this.camera);
       dist = Math.max(CAM_DIST, (Math.abs(p.x - b.x) / 2 + CAM_MARGIN) / Math.max(tanH, 0.1));
+    } else if (this.focus) {
+      goal = this.focus.at.clone(); dist = this.focus.dist;
     } else {
       goal = new Vector3(p.x + this.player.facing * CAM_LEAD, p.y + CAM_UP, 0);
     }
@@ -404,7 +768,7 @@ export class Platformer {
     const own = new Set<AbstractMesh>(this.meshes);
     // (Nor the Pokéball you are: it is a fighter's body, though it is one of the level's own meshes.)
     const ball = this.pokeball;
-    const scenery = (m: AbstractMesh) => this.standIns.has(m) || (m !== ball && !(ball && m.isDescendantOf(ball)) && m.isEnabled() && m.isVisible
+    const scenery = (m: AbstractMesh) => this.standIns.has(m) || (m !== ball && !(ball && m.isDescendantOf(ball)) && !(m.metadata as { noOcclude?: boolean } | null)?.noOcclude && !FLOORS.test(m.name) && m.isEnabled() && m.isVisible
       && (own.has(m) || (!!this.scenery && m.isDescendantOf(this.scenery))) && m.getBoundingInfo().boundingBox.maximumWorld.y > 0.05);
     for (const f of this.fighters) {
       for (const k of OCCLUDE_AT) {

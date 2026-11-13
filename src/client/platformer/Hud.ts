@@ -13,6 +13,7 @@
  *   bottom-right the controls, as key caps.
  */
 import { getMove, getTypeEffectiveness } from '../../shared/index.ts';
+import { RingGauge } from '../ui/RingGauge.ts';
 import { typeColor } from '../theme.ts';
 import type { Fighter } from './Fighter.ts';
 import { METER_MAX } from './Fighter.ts';
@@ -101,6 +102,9 @@ const CSS = `
 .mvh-num { min-width: 3.2ch; text-align: right; font: 700 76px/0.8 Teko, sans-serif; font-variant-numeric: tabular-nums; -webkit-text-stroke: 2px #0b1020; paint-order: stroke fill;
   text-shadow: 0 4px 0 #0b1020, 0 0 22px rgba(250,204,21,.6); }
 .mvh-num small { display: block; font: 700 22px/1 Rajdhani, sans-serif; -webkit-text-stroke: 0; letter-spacing: 1px; color: #fde68a; margin-top: 6px; }
+.mvh-ring { color: #fff; filter: drop-shadow(0 6px 14px rgba(0,0,0,.55)); }
+.mvh-ring text { font-family: Teko, Rajdhani, sans-serif; paint-order: stroke; stroke: #0b1020; stroke-width: 1.2px; }
+.mvh-ring::before { content: ''; position: absolute; inset: 8%; border-radius: 50%; background: radial-gradient(circle, rgba(15,20,40,.82), rgba(9,11,24,.6)); }
 .mvh-note { font: 700 18px/1 Rajdhani, sans-serif; letter-spacing: 2px; text-transform: uppercase; text-shadow: 0 2px 3px #000; }
 .mvh-stamp { animation: mvh-stamp .35s cubic-bezier(.2, 1.6, .4, 1); }
 @keyframes mvh-stamp { from { transform: scale(1.8) rotate(-6deg); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -138,6 +142,9 @@ export function keyLegend(items: [string[], string][]): HTMLDivElement {
   return el;
 }
 
+/** The clash stopper's ring: its colour by how high it's stopped — red low, amber, gold, white-gold near the top. */
+const CLASH_COLORS = (p: number) => (p >= 90 ? '#fef08a' : p >= 60 ? '#facc15' : p >= 30 ? '#f59e0b' : '#dc2626');
+
 interface Side { root: HTMLDivElement; fill: HTMLDivElement; trail: HTMLDivElement; hp: HTMLDivElement; shown: number; trailK: number; holdUntil: number; hitUntil: number }
 interface Slot { el: HTMLDivElement; sweep: HTMLDivElement; secs: HTMLDivElement; pips: HTMLElement[]; move: string; wasReady: boolean }
 
@@ -151,7 +158,7 @@ export class Hud {
   private sides: Side[] = [];
   private slots: Slot[] = [];
   private clock: HTMLDivElement;
-  private clash: HTMLDivElement; private say: HTMLDivElement; private needle: HTMLDivElement; private note: HTMLDivElement; private num: HTMLDivElement;
+  private clash: HTMLDivElement; private say: HTMLDivElement; private note: HTMLDivElement; private num: HTMLDivElement; private ring!: RingGauge;
   private calls: HTMLDivElement;
   private band: HTMLDivElement;
   private lastGrade = ''; private lastResult: string | null = null;
@@ -165,6 +172,10 @@ export class Hud {
     top.className = 'mvh-top';
     const left = this.side(player, false), right = this.side(boss, true);
     this.clock = document.createElement('div'); this.clock.className = 'mvh-clock'; this.clock.textContent = '0:00';
+    // (Your own HP: the team's rings, top left (TeamHud) — your bar's place kept, empty, the clock still centred.)
+    left.root.style.visibility = 'hidden';
+    // (The boss's too: its team's rings, top right.)
+    right.root.style.visibility = 'hidden';
     top.append(left.root, this.clock, right.root);
     this.sides = [left, right];
     // The move bar.
@@ -176,10 +187,14 @@ export class Hud {
     }
     // The clash's stopper.
     this.clash = document.createElement('div'); this.clash.className = 'mvh-clash';
-    this.clash.innerHTML = `<div class="mvh-say">STOP U!</div><div class="mvh-meter"><div class="mvh-gauge"><div class="mvh-fill2"></div><div class="mvh-ticks2"></div></div>`
-      + `<div class="mvh-num">0<small>×1.00</small></div></div><div class="mvh-note"></div>`;
-    this.say = this.clash.querySelector('.mvh-say')!; this.needle = this.clash.querySelector('.mvh-fill2')!; this.note = this.clash.querySelector('.mvh-note')!;
-    this.num = this.clash.querySelector('.mvh-num')!;
+    this.clash.innerHTML = `<div class="mvh-say">STOP U!</div><div class="mvh-meter"></div><div class="mvh-note"></div>`;
+    this.say = this.clash.querySelector('.mvh-say')!; this.note = this.clash.querySelector('.mvh-note')!;
+    // (Its stopper a ring gauge: the number running round it, ticks inside, the number and its multiplier in its middle.)
+    this.ring = new RingGauge({ size: 190, stroke: 10, gap: 3, ticks: true, glow: true, gradient: true, showValue: true, color: CLASH_COLORS,
+      rest: () => 'rgba(255,255,255,.14)' });
+    this.num = this.ring.el;
+    this.num.classList.add('mvh-ring');
+    this.clash.querySelector('.mvh-meter')!.append(this.ring.el);
     this.calls = document.createElement('div'); this.calls.className = 'mvh-calls';
     this.band = document.createElement('div'); this.band.className = 'mvh-band';
     root.append(top, moves, this.clash, this.calls, this.band);
@@ -295,8 +310,7 @@ export class Hud {
     if (!c || !on) { this.lastGrade = ''; return; }
     // (Its number running up and down — the gauge filled as high — then held where it stopped.)
     const stop = c.stopped(), shown = stop ?? v ?? 0;
-    this.needle.style.height = `${(shown / METER_MAX) * 100}%`;
-    this.num.innerHTML = `${shown}<small>×${(1 + shown / METER_MAX).toFixed(2)}</small>`;
+    this.ring.set((shown / METER_MAX) * 100, String(shown), `×${(1 + shown / METER_MAX).toFixed(2)}`);
     const o = c.outcome();
     const say = o === null ? (stop === null ? 'STOP U!' : `${stop}!`)
       : o > 0 ? (c.outright() ? 'Overpowered them!' : 'Clash won!') : o < 0 ? (c.outright() ? 'Overpowered!' : 'Clash lost') : 'Even — it bursts!';

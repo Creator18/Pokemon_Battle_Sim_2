@@ -22,6 +22,12 @@ import type { LeagueStadium } from '../render/arenas/leagueStadium.ts';
 import type { BackdropName } from '../render/arenas/backdrops.ts';
 import { palletTown } from './palletTown.ts';
 import { palletStory } from './palletStory.ts';
+import { starterSelect } from './starterSelect.ts';
+import { wildPokemon } from './wild.ts';
+import { pushAside } from '../render/tallGrass.ts';
+import { followShadows } from '../render/followShadows.ts';
+import { ROUTE_GATE, SHORE } from './palletTown.ts';
+import { backdrop as paintedBackdrop } from '../render/arenas/backdrops.ts';
 
 export interface ZoneDeps { scene: Scene; factory: RecipeFactory; camera: Camera }
 
@@ -38,6 +44,8 @@ export interface Zone { pf: Platformer; arena: Arena | null; dispose(): void }
 export interface BossZoneOptions {
   species?: string; boss?: string; moves?: MoveKit; bossMoves?: MoveKit;
   look?: 'league' | 'colosseum' | 'stadium'; halfW?: number;
+  /** The rest of your party (after `species`). */
+  team?: string[];
 }
 
 /** The camera as a zone needs it: no limits on how near or far it comes, its own controls off (the zone moves it). */
@@ -72,7 +80,7 @@ export async function startBossZone(d: ZoneDeps, o: BossZoneOptions = {}): Promi
   scene.clearColor = new Color4(arena.air.fog.r, arena.air.fog.g, arena.air.fog.b, 1);
   const halfW = o.halfW ?? Math.min(11, arena.bounds.halfW - 1);
   const pf = await Platformer.start(scene, factory, camera, {
-    species: species(o.species ?? 'Charizard'), moves: o.moves, backdrop: false, scenery: arena.root,
+    species: species(o.species ?? 'Charizard'), moves: o.moves, backdrop: false, scenery: arena.root, team: (o.team ?? []).map(species),
     level: bossRoom(halfW), start: { x: -7, y: 0 },
     enemies: [{ species: species(o.boss ?? 'Charizard'), x: 7, y: 0, boss: true,
       moves: o.bossMoves ?? { ranged: 'Dragon Pulse', close: 'Dragon Claw', mobility: 'Quick Attack' } }],
@@ -103,8 +111,20 @@ export async function startPalletTown(d: ZoneDeps, o: { body?: string } = {}): P
   readyCamera(camera);
   scene.fogMode = 0;
   const town = palletTown(scene);
+  let story: ReturnType<typeof palletStory> | null = null;
+  let oakSaid = 0;
   const pf = await Platformer.start(scene, factory, camera, {
     species: species(o.body ?? 'Pichu'), moves: {}, level: town.level, start: town.start, backdrop: false, scenery: town.root, ball: true,
+    // (Your Pokémon form locked till your starter is yours.)
+    formLocked: true, onFormLocked: () => story?.say('You have no Pokémon yet.'),
+    // (Only the scenery within reach of the camera drawn: the town and its route are long.)
+    cullRange: 36,
+    // (No attacking in town: Prof. Oak's word on it. Route 1, past its gate, is fair game.)
+    attacksAllowed: (x) => x > ROUTE_GATE + 0.3,
+    onNoAttack: () => {
+      const now = performance.now();
+      if (now - oakSaid > 2600) { oakSaid = now; story?.oak("There's a time and place for everything! But not now."); }
+    },
   });
   document.querySelector('[data-pf-help]')?.remove();
   const box = document.createElement('div');
@@ -112,11 +132,36 @@ export async function startPalletTown(d: ZoneDeps, o: { body?: string } = {}): P
   box.append(keyLegend([[['A', 'D'], 'roll'], [['Space'], 'jump'], [['R'], 'restart']]));
   document.body.append(box);
   // (Its story's gates: the lab locked, Route 1 open — till Prof. Oak stops you in the tall grass.)
-  const story = palletStory(scene, pf, town);
+  story = palletStory(scene, pf, town);
+  // (Your starter's choosing, on Prof. Oak's table: once chosen, X calls it out — and the legend says so.)
+  const legend = (withX: boolean) => {
+    box.replaceChildren(keyLegend(withX
+      ? [[['A', 'D'], 'roll'], [['Space'], 'jump'], [['Q', 'E'], 'pick'], [['X'], 'send out / Poké Ball'], [['R'], 'restart']]
+      : [[['A', 'D'], 'roll'], [['Space'], 'jump'], [['R'], 'restart']]));
+  };
+  const pick = starterSelect(scene, factory, pf, town, {
+    active: () => story?.stage === 'lab', say: (t, secs) => story?.say(t, secs), onChosen: () => { legend(true); story?.starterChosen(); },
+  });
+  (window as unknown as { __starter?: unknown }).__starter = pick;
+  // (Behind it all: Kanto's country — sky, clouds, three ranges of mountains, hills — the painted layers' parallax.)
+  const country = paintedBackdrop(scene, 'kanto', SHORE - 40, town.routeEnd + 40);
+  // (Route 1's wild Pokémon, in its tall grass: every species ever found on Route 1 that there's a model for — Pidgey
+  // and its line, Spinarak, Bellsprout commonest; Charizard and Dragonite, overhead in Let's Go, very rare.)
+  const wild = wildPokemon(pf, {
+    grass: town.grass, say: (t, secs) => story?.say(t, secs),
+    table: [{ species: 'Pidgey', weight: 40 }, { species: 'Bellsprout', weight: 20 }, { species: 'Spinarak', weight: 14 },
+      { species: 'Pidgeotto', weight: 12 }, { species: 'Pidgeot', weight: 3 }, { species: 'Charizard', weight: 1.2 }, { species: 'Dragonite', weight: 0.8 }],
+  });
+  (window as unknown as { __wild?: unknown }).__wild = wild;
+  // (The sun's shadows kept sharp all along the town and its route: its shadow box a window round the camera, moving
+  // with it — not stretched over the whole long level, too coarse to see, and short of its far end.)
+  const unshadow = followShadows(scene, () => pf.focusPoint);
+  // (The tall grass pushed aside round you, as you go through it.)
+  const unsee = pushAside(scene, () => ({ at: pf.player.node.position.clone(), h: pf.player.H }));
   // (The buildings' front walls: faded away while you are inside one.)
   const walls = scene.onBeforeRenderObservable.add(() => town.update(pf.player.x, pf.player.y, scene.getEngine().getDeltaTime() / 1000));
   (window as unknown as { __pallet?: unknown }).__pallet = story;
-  return { pf, arena: null, dispose: () => { scene.onBeforeRenderObservable.remove(walls); story.dispose(); box.remove(); pf.dispose(); town.dispose(); } };
+  return { pf, arena: null, dispose: () => { scene.onBeforeRenderObservable.remove(walls); unshadow(); country.dispose(); unsee(); wild.dispose(); pick.dispose(); story.dispose(); box.remove(); pf.dispose(); town.dispose(); } };
 }
 
 /** The first room: platforms, a pit, a ledge; a practice target ahead (it stands again after fainting). */

@@ -15,12 +15,18 @@ import type { Platform } from '../platformer/Fighter.ts';
 import type { PalletTown } from './palletTown.ts';
 import { LAB, ROUTE_GATE, GRASS_FROM, HOME } from './palletTown.ts';
 
-export type PalletStage = 'home' | 'lab';
+export type PalletStage = 'home' | 'lab' | 'starter';
 
 export interface PalletStory {
   readonly stage: PalletStage;
   /** Jump to a stage (for testing): its gates set, you put where it begins. */
   set(stage: PalletStage): void;
+  /** A line in the text box (no speaker: a thought, a sign). */
+  say(text: string, secs?: number): void;
+  /** Prof. Oak's line in the text box. */
+  oak(text: string, secs?: number): void;
+  /** Your starter chosen: Route 1 open to you. */
+  starterChosen(): void;
   dispose(): void;
 }
 
@@ -58,7 +64,7 @@ export function palletStory(scene: Scene, pf: Platformer, town: PalletTown): Pal
   const enter = (s: PalletStage) => {
     stage = s;
     gate(LAB_DOOR, s === 'home');
-    gate(ROUTE_DOOR, s === 'lab');
+    gate(ROUTE_DOOR, s === 'lab');  // (After your starter, open again.)
     town.doors.lab.setEnabled(s === 'home');
     town.doors.route.setEnabled(s === 'lab');
   };
@@ -105,6 +111,9 @@ export function palletStory(scene: Scene, pf: Platformer, town: PalletTown): Pal
   const obs: Observer<Scene> = scene.onBeforeRenderObservable.add(tick)!;
   return {
     get stage() { return stage; },
+    say(text, secs = 2.4) { speak(null, text, secs); },
+    oak(text, secs = 2.6) { speak('PROF. OAK', text, secs); },
+    starterChosen() { if (stage === 'lab') enter('starter'); },
     set(s) {
       run++; busy = false; held = null; fade.style.opacity = '0'; say.style.display = 'none';
       enter(s);

@@ -22,7 +22,7 @@ import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 
 export type RGB = [number, number, number];
 type Ctx = CanvasRenderingContext2D;
-export type BackdropName = 'forest' | 'volcano' | 'snowfield';
+export type BackdropName = 'forest' | 'volcano' | 'snowfield' | 'kanto';
 
 /** A painted layer: how far back (z), from what height to what (y), how often its pattern repeats along it (world units), how it is painted, whether it is see-through, and how it drifts (tiles per second, across and up). */
 interface Layer { name: string; z: number; y0: number; y1: number; tile: number; paint: (c: Ctx, w: number, h: number) => void; alpha: boolean; drift?: [number, number]; vTile?: number }
@@ -219,6 +219,43 @@ function forest(): { layers: Layer[]; platform: { top: RGB; body: RGB }; clear: 
   };
 }
 
+/**
+ * Kanto's country (behind Pallet Town and Route 1, whose trees are their own): a clear morning sky, clouds drifting,
+ * three ranges of mountains one behind another (the further, the bluer and paler in the haze; snow on the furthest's
+ * peaks), green hills rolling in front of them.
+ */
+function kanto(): { layers: Layer[]; platform: { top: RGB; body: RGB }; clear: RGB } {
+  const haze = hex('#dbe8ee');
+  return {
+    clear: hex('#b9d8ec'), platform: { top: hex('#5aa838'), body: hex('#6b4a2e') },
+    layers: [
+      { name: 'kantoSky', z: 220, y0: -30, y1: 170, tile: 420, alpha: false, paint: (c, w, h) => {
+        sky(c, w, h, [[0, hex('#5f9fd8')], [0.5, hex('#a9d0ec')], [0.82, hex('#e3eee6')], [1, haze]]);
+        glow(c, w * 0.3, h * 0.38, h * 0.28, hex('#fff6d6'), 0.7); glow(c, w * 0.3, h * 0.38, h * 0.05, hex('#ffffff'), 1);
+      } },
+      { name: 'kantoClouds', z: 200, y0: 24, y1: 95, tile: 320, alpha: true, drift: [0.003, 0], paint: (c, w, h) => clouds(c, w, h, 8, 0.2, 0.7, hex('#ffffff'), 0.85, 11) },
+      { name: 'kantoRangeFar', z: 170, y0: GROUND, y1: 62, tile: 260, alpha: true, paint: (c, w, h) => {
+        const at = ridgeAt(w, h, 0.3, 0.36, 5, 1.3);
+        ridge(c, w, h, at, mix(hex('#7d9cc0'), haze, 0.6));
+        // (Snow on its peaks: the ridge again, paler, kept to its tops.)
+        c.save(); c.beginPath(); c.rect(0, 0, w, h * 0.3); c.clip();
+        ridge(c, w, h, at, mix(hex('#ffffff'), haze, 0.35));
+        c.restore();
+      } },
+      { name: 'kantoRangeMid', z: 135, y0: GROUND, y1: 46, tile: 210, alpha: true, paint: (c, w, h) => {
+        ridge(c, w, h, ridgeAt(w, h, 0.42, 0.3, 17, 1.2), mix(hex('#5f82a8'), haze, 0.45), mix(hex('#8fb0cc'), haze, 0.4), 3);
+      } },
+      { name: 'kantoRangeNear', z: 105, y0: GROUND, y1: 32, tile: 160, alpha: true, paint: (c, w, h) => {
+        ridge(c, w, h, ridgeAt(w, h, 0.5, 0.28, 29, 1.0), mix(hex('#4f7290'), haze, 0.32), mix(hex('#7c9eb4'), haze, 0.3), 3);
+      } },
+      { name: 'kantoHills', z: 70, y0: GROUND, y1: 18, tile: 110, alpha: true, paint: (c, w, h) => {
+        ridge(c, w, h, ridgeAt(w, h, 0.45, 0.32, 41, 0.6), mix(hex('#5a9446'), haze, 0.3), mix(hex('#8cc062'), haze, 0.25), 4);
+        ridge(c, w, h, ridgeAt(w, h, 0.68, 0.2, 53, 0.5), mix(hex('#4c8a3e'), haze, 0.2), mix(hex('#7fb65a'), haze, 0.2), 4);
+      } },
+    ],
+  };
+}
+
 function volcano(): { layers: Layer[]; platform: { top: RGB; body: RGB }; clear: RGB } {
   const haze = hex('#6a2f2a');
   return {
@@ -304,7 +341,7 @@ function snowfield(): { layers: Layer[]; platform: { top: RGB; body: RGB }; clea
   };
 }
 
-const THEMES: Record<BackdropName, () => { layers: Layer[]; platform: { top: RGB; body: RGB }; clear: RGB }> = { forest, volcano, snowfield };
+const THEMES: Record<BackdropName, () => { layers: Layer[]; platform: { top: RGB; body: RGB }; clear: RGB }> = { forest, volcano, snowfield, kanto };
 export const BACKDROPS = Object.keys(THEMES) as BackdropName[];
 
 /**

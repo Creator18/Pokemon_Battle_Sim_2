@@ -422,7 +422,7 @@ let beamIds = 0;
 
 export class Fighter {
   H: number; W: number;
-  readonly moves: MoveKit;
+  moves: MoveKit;
   hp: number; down = false;
   vx = 0; vy = 0; grounded = false; facing = 1; flying = false;
   /** Its aim now (up +1, level 0, down −1). */
@@ -434,9 +434,9 @@ export class Fighter {
   time = 0;
   private sinceGround = 0; private sinceJumpPress = Infinity; private jumpHeld = false;
   private clip = ''; private landing = 0;
-  readonly canFly: boolean;
+  canFly: boolean;
   /** Light enough to double jump (a flier's second jump takes it into flight instead). */
-  readonly doubleJumps: boolean;
+  doubleJumps: boolean;
   /** Its air jump used (till it lands). */
   private airJumped = false;
   /** Can take off again from this (its own clock): out of the sky, FLY_RELOCK s after it lands (Infinity till it has). */
@@ -508,8 +508,8 @@ export class Fighter {
   /** In a clash: its stopper (its ranged key stops its needle). */
   clashing: ClashMeter | null = null;
 
-  constructor(readonly node: TransformNode, private readonly factory: RecipeFactory, readonly team: number,
-    readonly maxHp: number, moves: MoveKit, readonly name: string, readonly types: readonly string[],
+  constructor(public node: TransformNode, private readonly factory: RecipeFactory, readonly team: number,
+    public maxHp: number, moves: MoveKit, public name: string, public types: readonly string[],
     readonly respawn: { x: number; y: number } | null = null) {
     this.moves = oneMobility(moves);
     this.hp = maxHp;
@@ -2083,10 +2083,57 @@ export class Fighter {
    * across, its reach its radius — not the hidden species' under it; so it fits wherever it looks as if it fits.
    */
   makeBall(d: number): void {
+    // (Its Pokémon's body kept, to be given back: unBall.)
+    if (!this.ball) this.form = { H: this.H, W: this.W };
     this.ball = true;
     this.H = d; this.W = d;
     this.reach = { front: d / 2, back: d / 2 };
     this.measured = BODY_SETTLE + BODY_FRAMES;
+  }
+
+  /**
+   * A new Pokémon's body for it (`node` — your starter, given you as a Pokéball): its size, its flight and double jump,
+   * its name, types and HP; its reach measured afresh. A Pokéball still, it stays one — the new body kept for unBall.
+   */
+  takeBody(node: TransformNode, name: string, types: readonly string[], maxHp: number): void {
+    const at = this.node.position.clone();
+    this.node = node;
+    node.position.copyFrom(at);
+    const H = this.factory.heightOf(node), W = H * BODY_W;
+    if (this.ball) this.form = { H, W }; else { this.H = H; this.W = W; this.reach = null; this.measured = 0; }
+    this.canFly = !!this.factory.playerOf(node)?.has('airIdle');
+    this.doubleJumps = canDoubleJump(name.replace(/ \((you|boss)\)$/, ''), this.factory.restVolume(node) ?? Infinity);
+    this.name = name; this.types = types; this.maxHp = maxHp; this.hp = maxHp;
+    this.clip = '';
+    this.face(this.facing, true);
+  }
+
+  /** Its moves now `kit` (its one mobility move kept to one). */
+  setMoves(kit: MoveKit): void { this.moves = oneMobility(kit); }
+
+  /** Would a body `H` tall, `W` wide stand where it is, clear of every solid? */
+  fitsBody(arena: Arena, H: number, W: number): boolean {
+    const was = { H: this.H, W: this.W };
+    this.H = H; this.W = W;
+    const ok = !this.solids(arena).some((s) => this.overlaps(this.x, this.y + 1e-3, s));
+    this.H = was.H; this.W = was.W;
+    return ok;
+  }
+
+  /** Its Pokémon's own body, kept while it is a Pokéball. */
+  private form: { H: number; W: number } | null = null;
+  /**
+   * Back from a Pokéball to its Pokémon (its body its own again, its reach measured afresh), if there is room for it
+   * where the ball is — under a low tread, say, there is not: then it stays a ball (false).
+   */
+  unBall(arena: Arena): boolean {
+    if (!this.ball || !this.form) return false;
+    const ball = { H: this.H, W: this.W };
+    this.H = this.form.H; this.W = this.form.W;
+    if (this.solids(arena).some((s) => this.overlaps(this.x, this.y + 1e-3, s))) { this.H = ball.H; this.W = ball.W; return false; }
+    this.ball = false;
+    this.reach = null; this.measured = 0;
+    return true;
   }
 
   private measure(): void {
