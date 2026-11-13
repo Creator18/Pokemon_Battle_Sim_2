@@ -27,7 +27,8 @@ const MAX_WILD = 7, SPAWN_EVERY: [number, number] = [2.5, 6], SPAWN_CLEAR = 7;
 /** Its fighting (BossAI's style): quick to answer, a touch wary. */
 const WILD_STYLE = { think: [0.22, 0.4] as [number, number], wary: 0.5, dodge: 0.5, detect: 0.4 };
 
-export interface WildArea { x0: number; x1: number; y: number }
+/** A patch of tall grass: its span, its ground; who lives in it, if only one kind (else the route's table). */
+export interface WildArea { x0: number; x1: number; y: number; only?: string }
 export interface WildOptions {
   /** Where they roam: the tall grass. */
   grass: WildArea[];
@@ -72,7 +73,7 @@ export function wildPokemon(pf: Platformer, o: WildOptions): { dispose(): void; 
       if (Math.abs(cx - p.x) > SPAWN_CLEAR) { area = a; x = cx; }
     }
     if (!area) return;
-    const sp = pickSpecies();
+    const sp = (area.only && getSpecies(area.only)) || pickSpecies();
     const node = await factory.createPokemon(sp, 2);
     const max = hpStat(sp.hp);
     const f = new Fighter(node, factory, 2, max, kitFor(sp.name), sp.name, sp.types);

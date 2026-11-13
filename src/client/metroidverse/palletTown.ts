@@ -83,8 +83,11 @@ export interface PalletTown {
   /** Its two gates' doors (meshes), for palletStory to open and close: the lab's (its right-hand doorway), Route 1's. */
   doors: { lab: Mesh; route: Mesh };
   /** Route 1's tall grass, where wild Pokémon roam (x from, x to, the ground's height); its far end. */
-  grass: { x0: number; x1: number; y: number }[];
+  grass: { x0: number; x1: number; y: number; only?: string }[];
   routeEnd: number;
+  /** Route 1's signs (where, what they say); the Old Tree's hidden nook. */
+  signs: { x: number; y: number; text: string }[];
+  secret: { x: number; y: number };
   /** The three starters' Poké Balls on Prof. Oak's table: each one's mesh, its species, where it sits along it. */
   starters: { mesh: Mesh; species: string; x: number }[];
   /** Each frame, where you are: a building's front wall fades away while you are in it, and back up when you leave. */
@@ -896,6 +899,7 @@ export function palletTown(scene: Scene): PalletTown {
     // (Where wild Pokémon roam: Route 1's tall grass — its start, here past the gate, and its patches on.)
     grass: [{ x0: GRASS_FROM + 0.5, x1: NORTH - 0.5, y: NORTH_Y }, ...route.grass],
     routeEnd: route.end,
+    signs: route.signs, secret: route.secret,
     start: { x: 13.0, y: H.up },
     root,
     doors: { lab: labDoor, route: routeDoor },

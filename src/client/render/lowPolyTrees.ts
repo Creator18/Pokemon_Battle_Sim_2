@@ -251,3 +251,19 @@ export function lowPolyTree(scene: Scene, kind: TreeKind, s: number, seed: numbe
   tree.rotation.y = rand() * Math.PI * 2;
   return tree;
 }
+
+/**
+ * A bark tube along `path` (a trunk, a root, a limb): `r(t)` its radius from its foot (t 0) to its tip (1), bark
+ * coloured, darker at its foot.
+ */
+export function barkTube(scene: Scene, path: Vector3[], r: (t: number) => number, sides = 10): Mesh {
+  return limb(scene, path, r, sides);
+}
+
+/**
+ * A clump of leaves (a faceted ball, `r` across-ish, at `c`) shaded as part of a crown round `crown` (`radii`): soft
+ * and round as one mass, its outline faceted. Its green `green`.
+ */
+export function leafClump(scene: Scene, c: Vector3, r: number, crown: Vector3, radii: Vector3, green: [number, number, number], seed: number): Mesh {
+  return clump(scene, c, r, crown, radii, green, seeded(seed), 1);
+}

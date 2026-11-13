@@ -44,10 +44,11 @@ export { DEFAULT_KIT } from './Fighter.ts';
 /** Camera shake: how far at most it jolts (world units, at full trauma), how fast trauma dies away (a second). */
 /** How long the foe's circles stay after a fight's won or lost (s), before they slide away. */
 /**
- * Floors — never faded to show a fighter: ground and earth, paths, lawns (and their grass), building floors, steps and
- * the stone faces between rises, the beach (by their meshes' names).
+ * Floors — ground and earth, paths, lawns (and their grass), building floors, steps and the stone faces between
+ * rises, the beach (by their meshes' names): never faded for a foe, nor when they only partly cover you; faded whole
+ * only when you are properly hidden behind them (occlude).
  */
-const FLOORS = /earth|face|step|path|lawn|floor|beach|tier|seam|grass|ground|rug|mat\b/i;
+export const FLOORS = /earth|face|step|path|lawn|floor|beach|tier|seam|grass|ground|rug|mat\b/i;
 const ENCOUNTER_LINGER = 1.6;
 const SHAKE_MAX = 0.45, SHAKE_DECAY = 1.6;
 /** The camera: how far off the plane, how high above the body, how far it leads the way it faces, how quickly it follows. */
@@ -58,6 +59,11 @@ const CAM_MARGIN = 3;
 const DEPTH = 4, GRASS = 0.18;
 /** The Pokéball you are (PlatformerOptions.ball): its size (× your species' height). */
 const BALL_SIZE = 0.7;
+/**
+ * A Poké Ball's size (world units): the same whoever is in it (it was BALL_SIZE × the first species' — Pichu's — height;
+ * a Charmander's ball came out bigger, too big for a burrow built for a Poké Ball).
+ */
+export const BALL_DIAMETER = 0.55;
 /** Below this, it has fallen: back to the start. */
 const KILL_Y = -12;
 /** How much of their own colour the platforms show unlit. */
@@ -238,8 +244,8 @@ export class Platformer {
     const player = new Fighter(node, factory, 1, hpStat(o.species.hp), o.moves ?? DEFAULT_KIT, `${o.species.name} (you)`, o.species.types);
     player.attack = o.species.attack; player.spAtk = o.species.spAtk; player.speed = o.species.speed;
     player.defense = o.species.defense; player.spDef = o.species.spDef;
-    // (A Pokéball: its body the ball's — BALL_SIZE × its species' height across.)
-    if (o.ball) player.makeBall(player.H * BALL_SIZE);
+    // (A Pokéball: its body the ball's — BALL_DIAMETER across, whoever is in it.)
+    if (o.ball) player.makeBall(BALL_DIAMETER);
     const foes: Fighter[] = [];
     for (const e of o.enemies ?? []) {
       const n = await factory.createPokemon(e.species, 2);
@@ -686,7 +692,7 @@ export class Platformer {
         .then(() => {
           for (const m of meshes) { m.isVisible = false; m.renderOverlay = false; sh?.removeShadowCaster(m); }
           node.scaling.copyFrom(base);
-          p.makeBall(d * BALL_SIZE);
+          p.makeBall(BALL_DIAMETER);
           this.ballLastX = NaN; this.rollPokeball();
           ball.setEnabled(true); ball.scaling.setAll(0.3);
           MorphFx.flash(scene, this.heart(), p.H * 0.6, 'recall');
@@ -778,6 +784,22 @@ export class Platformer {
         for (const h of hits) if (h.pickedMesh) inWay.add(this.standIns.get(h.pickedMesh) ?? h.pickedMesh);
       }
     }
+    // Floors: faded whole too — but only for you (never for a foe), and only when you're properly hidden: every point
+    // sampled across your body (low, middle, high; either side) blocked by floor.
+    const floor = (m: AbstractMesh) => FLOORS.test(m.name) && m !== ball && !(ball && m.isDescendantOf(ball)) && m.isEnabled() && m.isVisible
+      && (own.has(m) || (!!this.scenery && m.isDescendantOf(this.scenery)));
+    const p = this.player, hw = p.W * 0.35;
+    const samples = [...OCCLUDE_AT.map((h) => [0, h]), [-hw, 0.6], [hw, 0.6]] as [number, number][];
+    const hidden = new Set<AbstractMesh>();
+    let all = true;
+    for (const [dx, h] of samples) {
+      const to = p.node.position.add(new Vector3(dx, p.H * h, 0));
+      const d = to.subtract(eye), len = d.length();
+      const hits = (this.scene.multiPickWithRay(new Ray(eye, d.scale(1 / len), len - 0.05), floor) ?? []).filter((x) => x.pickedMesh);
+      if (!hits.length) { all = false; break; }
+      for (const x of hits) hidden.add(this.standIns.get(x.pickedMesh!) ?? x.pickedMesh!);
+    }
+    if (all) for (const m of hidden) inWay.add(m);
     const k = 1 - Math.exp(-dt * OCCLUDE_EASE);
     for (const m of inWay) if (!this.faded.has(m)) this.faded.set(m, { own: m.visibility, shown: this.standInFor(m) });
     for (const [m, f] of this.faded) {

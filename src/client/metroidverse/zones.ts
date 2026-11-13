@@ -149,19 +149,29 @@ export async function startPalletTown(d: ZoneDeps, o: { body?: string } = {}): P
   // and its line, Spinarak, Bellsprout commonest; Charizard and Dragonite, overhead in Let's Go, very rare.)
   const wild = wildPokemon(pf, {
     grass: town.grass, say: (t, secs) => story?.say(t, secs),
-    table: [{ species: 'Pidgey', weight: 40 }, { species: 'Bellsprout', weight: 20 }, { species: 'Spinarak', weight: 14 },
+    table: [{ species: 'Pidgey', weight: 40 }, { species: 'Bellsprout', weight: 20 }, { species: 'Spinarak', weight: 4 },
       { species: 'Pidgeotto', weight: 12 }, { species: 'Pidgeot', weight: 3 }, { species: 'Charizard', weight: 1.2 }, { species: 'Dragonite', weight: 0.8 }],
   });
   (window as unknown as { __wild?: unknown }).__wild = wild;
   // (The sun's shadows kept sharp all along the town and its route: its shadow box a window round the camera, moving
   // with it — not stretched over the whole long level, too coarse to see, and short of its far end.)
   const unshadow = followShadows(scene, () => pf.focusPoint);
+  // (Route 1's signs read as you pass them: each once, till you've gone on and come back.)
+  const read = new Set<number>();
+  const signs = scene.onBeforeRenderObservable.add(() => {
+    const p = pf.player;
+    for (const [i, s] of town.signs.entries()) {
+      const near = Math.abs(p.x - s.x) < 1.3 && Math.abs(p.y - s.y) < 1.5;
+      if (near && !read.has(i)) { read.add(i); story?.say(s.text, 3.2); }
+      if (!near && Math.abs(p.x - s.x) > 4) read.delete(i);
+    }
+  });
   // (The tall grass pushed aside round you, as you go through it.)
   const unsee = pushAside(scene, () => ({ at: pf.player.node.position.clone(), h: pf.player.H }));
   // (The buildings' front walls: faded away while you are inside one.)
   const walls = scene.onBeforeRenderObservable.add(() => town.update(pf.player.x, pf.player.y, scene.getEngine().getDeltaTime() / 1000));
   (window as unknown as { __pallet?: unknown }).__pallet = story;
-  return { pf, arena: null, dispose: () => { scene.onBeforeRenderObservable.remove(walls); unshadow(); country.dispose(); unsee(); wild.dispose(); pick.dispose(); story.dispose(); box.remove(); pf.dispose(); town.dispose(); } };
+  return { pf, arena: null, dispose: () => { scene.onBeforeRenderObservable.remove(walls); scene.onBeforeRenderObservable.remove(signs); unshadow(); country.dispose(); unsee(); wild.dispose(); pick.dispose(); story.dispose(); box.remove(); pf.dispose(); town.dispose(); } };
 }
 
 /** The first room: platforms, a pit, a ledge; a practice target ahead (it stands again after fainting). */
