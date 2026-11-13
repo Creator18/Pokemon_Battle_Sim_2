@@ -125,6 +125,11 @@ export interface AuraOptions {
   /** Pokémon type whose palette to use. */
   element: string;
   /**
+   * Its element already the colour it is to be (another's: a zap in its striker's lightning — Pikachu's yellow on Zeraora,
+   * Zeraora's blue on Pikachu): not turned into the wearer's own species' colour of it.
+   */
+  hued?: boolean;
+  /**
    * 'tongues': a charge's aura — the edge shivers, and a fire aura licks.
    * 'smooth':  a calm outline (beams, claws, a status move).
    */
@@ -1143,7 +1148,7 @@ export class UnitFx {
     const opts: Required<AuraOptions> = { edge: 'tongues', reach: 'body', ignite: IGNITE, die: DIE,
       // Every aura is a filled shape: the outline in the type's colour, a
       // lighter shade inside it (auraGlow).
-      fill: true, shiver: (options.edge ?? 'tongues') === 'tongues', strike: false as boolean | string, blade: false, focus: '', region: null, charging: false, effectsOnly: false, noiseBurst: false, wind: true, noiseElement: '', ...options };
+      fill: true, shiver: (options.edge ?? 'tongues') === 'tongues', strike: false as boolean | string, blade: false, focus: '', region: null, charging: false, effectsOnly: false, noiseBurst: false, wind: true, noiseElement: '', hued: false, ...options };
     const pal = auraPalette(opts.element);
     let onLit = () => {};
     let onGone = () => {};

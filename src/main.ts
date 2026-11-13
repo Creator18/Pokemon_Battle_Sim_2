@@ -26,7 +26,7 @@ import { WindFx } from './client/vfx/WindFx.ts';
 import { LightningFx } from './client/vfx/LightningFx.ts';
 import { SlashFx } from './client/vfx/SlashFx.ts';
 import { BattleCamera } from './client/camera/BattleCamera.ts';
-import { startBossZone, startFirstRoom } from './client/metroidverse/zones.ts';
+import { startBossZone, startFirstRoom, startPalletTown } from './client/metroidverse/zones.ts';
 import type { Zone } from './client/metroidverse/zones.ts';
 
 async function boot(): Promise<void> {
@@ -70,12 +70,13 @@ async function boot(): Promise<void> {
   const deps = { scene, factory, camera: camera.camera };
   if (import.meta.env.DEV) {
     (window as unknown as { __pbw?: unknown }).__pbw = { scene, camera, factory, vfx, fx, beams, dash, pulses, wind, lightning, slashes, field,
-      startBossZone: (o?: Parameters<typeof startBossZone>[1]) => startBossZone(deps, o), startFirstRoom: (o?: Parameters<typeof startFirstRoom>[1]) => startFirstRoom(deps, o) };
+      startBossZone: (o?: Parameters<typeof startBossZone>[1]) => startBossZone(deps, o), startFirstRoom: (o?: Parameters<typeof startFirstRoom>[1]) => startFirstRoom(deps, o),
+      startPalletTown: (o?: Parameters<typeof startPalletTown>[1]) => startPalletTown(deps, o) };
   }
 
   // Into the game.
   const which = new URLSearchParams(location.search).get('zone');
-  const zone: Zone = which === 'room' ? await startFirstRoom(deps) : await startBossZone(deps);
+  const zone: Zone = which === 'room' ? await startFirstRoom(deps) : which === 'pallet' ? await startPalletTown(deps) : await startBossZone(deps);
   if (import.meta.env.DEV) {
     const w = window as unknown as { __zone?: Zone; __pf?: unknown; __arena?: unknown };
     w.__zone = zone; w.__pf = zone.pf; w.__arena = zone.arena;

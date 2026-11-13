@@ -29,7 +29,7 @@
   // Zapped from the moment the bolts reach it till they let go.
   let aura = null;
   void play.launched?.then(() => new Promise((r) => setTimeout(r, 450))).then(() => {
-    aura = f.aura(b.node, { element: f.hueOf(a.node, 'Electric'), edge: 'smooth', reach: 'tight', fill: true, ignite: 0.08, die: 0.35, shiver: true });
+    aura = f.aura(b.node, { element: f.hueOf(a.node, 'Electric'), hued: true, edge: 'smooth', reach: 'tight', fill: true, ignite: 0.08, die: 0.35, shiver: true });
     f.holdHitReact?.(b.node, held);
   });
   // (The camera free: right-drag to orbit round the middle of the bolt, wheel to zoom; no panning.)

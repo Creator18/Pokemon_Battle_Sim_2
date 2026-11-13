@@ -13,6 +13,7 @@
  * faints. Falling into a pit: back to the start. Nothing hides the fighters: scenery between the camera and them fades.
  */
 import type { Scene } from '@babylonjs/core/scene';
+import { pokeballMesh } from '../metroidverse/palletTown.ts';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
@@ -44,6 +45,8 @@ const CAM_DIST = 15, CAM_UP = 2.2, CAM_LEAD = 2.5, CAM_EASE = 5;
 const CAM_MARGIN = 3;
 /** The platforms' depth (across the view) and their grass top's thickness. */
 const DEPTH = 4, GRASS = 0.18;
+/** The Pokéball you are (PlatformerOptions.ball): its size (× your species' height). */
+const BALL_SIZE = 0.7;
 /** Below this, it has fallen: back to the start. */
 const KILL_Y = -12;
 /** How much of their own colour the platforms show unlit. */
@@ -97,6 +100,8 @@ export interface PlatformerOptions {
   backdrop?: boolean | BackdropName;
   /** The backdrop's meshes, faded when they come between the camera and a fighter (its own platforms and hills always are). */
   scenery?: TransformNode;
+  /** You a Pokéball (before your first Pokémon): your species' body hidden, a Pokéball rolling in its place (Fighter.ball). */
+  ball?: boolean;
 }
 
 /** Something that happened in a fight (s from its start). */
@@ -191,6 +196,8 @@ export class Platformer {
     const player = new Fighter(node, factory, 1, hpStat(o.species.hp), o.moves ?? DEFAULT_KIT, `${o.species.name} (you)`, o.species.types);
     player.attack = o.species.attack; player.spAtk = o.species.spAtk; player.speed = o.species.speed;
     player.defense = o.species.defense; player.spDef = o.species.spDef;
+    // (A Pokéball: its body the ball's — BALL_SIZE × its species' height across.)
+    if (o.ball) player.makeBall(player.H * BALL_SIZE);
     const foes: Fighter[] = [];
     for (const e of o.enemies ?? []) {
       const n = await factory.createPokemon(e.species, 2);
@@ -311,6 +318,28 @@ export class Platformer {
   }
 
   // ── a frame ──────────────────────────────
+  /** You as a Pokéball (PlatformerOptions.ball): its body (your species' hidden), where it last was (it rolls by how far it went). */
+  private pokeball: Mesh | null = null;
+  private ballLastX = NaN;
+  private makePokeball(): void {
+    const node = this.player.node;
+    // (Your species' body hidden, and casting no shadow: the Pokéball in its place.)
+    const shadowGen = (this.scene.metadata as { shadowGen?: { removeShadowCaster(m: AbstractMesh): void; addShadowCaster(m: AbstractMesh): void } } | undefined)?.shadowGen;
+    for (const m of node.getChildMeshes()) { m.isVisible = false; shadowGen?.removeShadowCaster(m); }
+    const d = this.player.H;
+    this.pokeball = pokeballMesh(this.scene, d);
+    shadowGen?.addShadowCaster(this.pokeball);
+    this.meshes.push(this.pokeball);
+  }
+  /** The Pokéball where you are, rolled by how far you went (its surface not slipping on the ground), its button toward the camera. */
+  private rollPokeball(): void {
+    const b = this.pokeball!, p = this.player.node.position, r = this.player.H / 2;
+    // (A hair above where it stands: resting on the floor, never into it.)
+    b.position.set(p.x, p.y + r + 0.005, p.z);
+    if (!Number.isNaN(this.ballLastX)) b.rotation.z -= (p.x - this.ballLastX) / r;
+    this.ballLastX = p.x;
+  }
+
   private step(dt: number): void {
     if (dt <= 0) return;
     this.clock += dt;
@@ -332,6 +361,7 @@ export class Platformer {
       else if (this.player.down) { this.result = 'lost'; this.endedAt = this.clock; this.note('you lose'); }
     }
     this.updateHud(dt);
+    if (this.player.ball) { if (!this.pokeball) this.makePokeball(); this.rollPokeball(); }
     this.follow(dt);
   }
 
@@ -372,7 +402,9 @@ export class Platformer {
     // (Scenery only — its own platforms and hills, the backdrop's meshes — never a fighter or an effect; and not the
     // ground the fighters stand on, which a ray to their feet would graze.)
     const own = new Set<AbstractMesh>(this.meshes);
-    const scenery = (m: AbstractMesh) => this.standIns.has(m) || (m.isEnabled() && m.isVisible
+    // (Nor the Pokéball you are: it is a fighter's body, though it is one of the level's own meshes.)
+    const ball = this.pokeball;
+    const scenery = (m: AbstractMesh) => this.standIns.has(m) || (m !== ball && !(ball && m.isDescendantOf(ball)) && m.isEnabled() && m.isVisible
       && (own.has(m) || (!!this.scenery && m.isDescendantOf(this.scenery))) && m.getBoundingInfo().boundingBox.maximumWorld.y > 0.05);
     for (const f of this.fighters) {
       for (const k of OCCLUDE_AT) {

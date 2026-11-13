@@ -20,6 +20,8 @@ import { colosseum } from '../render/arenas/colosseum.ts';
 import { leagueStadium } from '../render/arenas/leagueStadium.ts';
 import type { LeagueStadium } from '../render/arenas/leagueStadium.ts';
 import type { BackdropName } from '../render/arenas/backdrops.ts';
+import { palletTown } from './palletTown.ts';
+import { palletStory } from './palletStory.ts';
 
 export interface ZoneDeps { scene: Scene; factory: RecipeFactory; camera: Camera }
 
@@ -90,6 +92,31 @@ export async function startBossZone(d: ZoneDeps, o: BossZoneOptions = {}): Promi
   }
   const help = helpLine(pf.moves);
   return { pf, arena, dispose: () => { clearInterval(tick); help.remove(); pf.dispose(); arena.dispose(); } };
+}
+
+/**
+ * Pallet Town (palletTown.ts): FireRed's town side-on, south to the left — you a Pokéball until your first Pokémon,
+ * rolling and hopping, waking in your bedroom upstairs. (Your Pokéball's body a small species' — its height its size.)
+ */
+export async function startPalletTown(d: ZoneDeps, o: { body?: string } = {}): Promise<Zone> {
+  const { scene, factory, camera } = d;
+  readyCamera(camera);
+  scene.fogMode = 0;
+  const town = palletTown(scene);
+  const pf = await Platformer.start(scene, factory, camera, {
+    species: species(o.body ?? 'Pichu'), moves: {}, level: town.level, start: town.start, backdrop: false, scenery: town.root, ball: true,
+  });
+  document.querySelector('[data-pf-help]')?.remove();
+  const box = document.createElement('div');
+  box.className = 'mvh'; box.dataset.pfHelp = '';
+  box.append(keyLegend([[['A', 'D'], 'roll'], [['Space'], 'jump'], [['R'], 'restart']]));
+  document.body.append(box);
+  // (Its story's gates: the lab locked, Route 1 open — till Prof. Oak stops you in the tall grass.)
+  const story = palletStory(scene, pf, town);
+  // (The buildings' front walls: faded away while you are inside one.)
+  const walls = scene.onBeforeRenderObservable.add(() => town.update(pf.player.x, pf.player.y, scene.getEngine().getDeltaTime() / 1000));
+  (window as unknown as { __pallet?: unknown }).__pallet = story;
+  return { pf, arena: null, dispose: () => { scene.onBeforeRenderObservable.remove(walls); story.dispose(); box.remove(); pf.dispose(); town.dispose(); } };
 }
 
 /** The first room: platforms, a pit, a ledge; a practice target ahead (it stands again after fainting). */

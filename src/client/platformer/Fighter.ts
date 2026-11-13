@@ -145,6 +145,11 @@ export interface Arena {
 
 /** Movement (world units, seconds): run speed and how fast it is reached, jump, gravity, fastest fall. */
 const RUN_SPEED = 7, RUN_ACCEL = 40, AIR_ACCEL = 22, JUMP_SPEED = 13.5, GRAVITY = 34, FALL_MAX = 24;
+/**
+ * A Pokéball (you, before your first Pokémon: Fighter.ball): its jump × this (a hop about half a Pokémon's — where its
+ * reach allows); no second jump, no flight, no dash.
+ */
+const BALL_JUMP = 0.72;
 /** A jump let go early: its rise cut to this much. Grace after a ledge, and a press remembered before landing (s). */
 const JUMP_CUT = 0.45, COYOTE = 0.1, BUFFER = 0.12;
 /** Its box against the level: its width (× its height). */
@@ -359,10 +364,12 @@ const STAT_REF = 100;
 const BEAM_CHARGE = 1.1, FRONT_TIME = 0.6;
 /**
  * Nearer than CLASH_MIN (world units, the two of them centre to centre): no clash — a burst in both their faces. As
- * far apart as the Pokéball painted on the League stadium's pitch is across (its outer ring: 0.94 of its 11-unit
- * square), each at its edge: from there, a clash.
+ * far apart as 0.6 of the radius of the Pokéball painted on the League stadium's pitch (its outer ring: 0.94 of its
+ * 11-unit square): from there, a clash. Well inside a beam 2's reach (that radius whole), so a beam 2 can clash at
+ * all. (The Pokéball's whole width, once: the fighters, mostly nearer than that, all but never clashed — 385
+ * point-blank bursts to 92 clashes over a tournament.)
  */
-const CLASH_MIN = POKEBALL_R * 2;
+const CLASH_MIN = POKEBALL_R * 0.6;
 /**
  * A clash's stopper: its number runs up from 0 to METER_MAX and back down, steadily, in METER_PERIOD s (each side from
  * its own point in the run); stopped on N, its multiplier is 1 + N / METER_MAX (×1 … ×2); not stopped by METER_TIME s
@@ -414,7 +421,7 @@ interface Firing { id: number; play: BeamPlay; move: string; spec: BeamSpec; at:
 let beamIds = 0;
 
 export class Fighter {
-  readonly H: number; readonly W: number;
+  H: number; W: number;
   readonly moves: MoveKit;
   hp: number; down = false;
   vx = 0; vy = 0; grounded = false; facing = 1; flying = false;
@@ -438,6 +445,8 @@ export class Fighter {
   private reach: Reach | null = null; private measured = 0;
   /** Its beam out now (charging or pouring), if any. */
   beam: Firing | null = null;
+  /** A Pokéball — you, before your first Pokémon: it rolls and hops (BALL_JUMP), no second jump, flight or dash. */
+  ball = false;
   /** Its balls out (charging, or flying on their own). */
   balls: Thrown[] = [];
   /** Its ram under way: lit and running (`go`), how far it has run, its coat. */
@@ -734,11 +743,12 @@ export class Fighter {
       // Its second jump, pressed in the air (past its grace off a ledge): a flier takes off — once it may again (out
       // of the sky, not for FLY_RELOCK s after it lands); else a light one jumps again, once till it lands.
       if (!this.grounded && this.sinceGround > COYOTE && this.sinceJumpPress <= dt + 1e-6) {
-        if (this.mayFly) { this.flying = true; this.sinceJumpPress = Infinity; this.vy = Math.max(this.vy, 0); }
+        if (this.ball) { /* (A Pokéball: no second jump, no flight.) */ }
+        else if (this.mayFly) { this.flying = true; this.sinceJumpPress = Infinity; this.vy = Math.max(this.vy, 0); }
         else if (this.doubleJumps && !this.airJumped) { this.airJumped = true; this.vy = JUMP_SPEED * AIR_JUMP; this.sinceJumpPress = Infinity; }
       }
       if (this.sinceJumpPress <= BUFFER && this.sinceGround <= COYOTE) {
-        this.vy = JUMP_SPEED; this.grounded = false; this.sinceGround = Infinity; this.sinceJumpPress = Infinity;
+        this.vy = JUMP_SPEED * (this.ball ? BALL_JUMP : 1); this.grounded = false; this.sinceGround = Infinity; this.sinceJumpPress = Infinity;
       }
       if (!this.flying) {
         if (!this.jumpHeld && this.vy > 0) this.vy *= Math.pow(JUMP_CUT, dt * 12);
@@ -999,7 +1009,8 @@ export class Fighter {
     const element = this.factory.hueOf(this.node, plain);
     // (As tight to the body as its firer's: the bolt's far half, taken into its silhouette, then wears the same band
     // as its near half — both ends joined alike — not a body-wide aura swelling over the whole of it.)
-    const aura = this.factory.aura(on.node, { element, edge: 'smooth', reach: 'tight', fill: true, ignite: 0.08, die: 0.35, shiver: true });
+    // (Its striker's colours, kept: not turned into the struck one's own — a yellow bolt zaps Zeraora yellow.)
+    const aura = this.factory.aura(on.node, { element, hued: true, edge: 'smooth', reach: 'tight', fill: true, ignite: 0.08, die: 0.35, shiver: true });
     void until.then(() => aura.release());
   }
 
@@ -1139,7 +1150,7 @@ export class Fighter {
         const close = Math.min(Math.abs(l - mr), Math.abs(ml - r)) < this.H * 0.6 && this.y < t && this.y + this.H > b;
         if (foe.down || foe.invulnerable || !close) return false;
         return foe.takeHit(this, 'Counter', () => this.factory.playHitReact(foe.node), arena, damage);
-      }, { lead: COUNTER_LEAD }).then(() => this.end());
+      }, { lead: COUNTER_LEAD, crescent: true }).then(() => this.end());
     };
     void this.factory.playTeleport(this.node, to, {
       look: 'lines', element: 'Fighting', face: side < 0 ? Math.PI / 2 : -Math.PI / 2,
@@ -1347,11 +1358,12 @@ export class Fighter {
     this.begin(name);
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
     const k = this.startRun(name);
-    void this.factory.playCrossSlash(this.node, at, type, () => {
+    // (The crescent cut, following its striking part: CrescentFx.)
+    void this.factory.playCrescentSlash(this.node, at, type, () => {
       // (Asked as the blow falls: still there?)
       if (!near || !inReach(near)) return false;
       return near.takeHit(this, name, () => this.factory.playHitReact(near.node), arena);
-    }, true).then(() => { this.finishRun(k); this.end(); });
+    }).then(() => { this.finishRun(k); this.end(); });
   }
 
   /**
@@ -1603,8 +1615,8 @@ export class Fighter {
     const strike = () => {
       this.begin(move);
       const play = plain
-        ? (onBlow: () => boolean) => this.factory.playStrike(this.node, foe.node.position.clone(), type, onBlow)
-        : (onBlow: () => boolean) => this.factory.playCrossSlash(this.node, foe.node.position.clone(), type, onBlow, true);
+        ? (onBlow: () => boolean) => this.factory.playStrike(this.node, foe.node.position.clone(), type, onBlow, { crescent: true })
+        : (onBlow: () => boolean) => this.factory.playCrescentSlash(this.node, foe.node.position.clone(), type, onBlow);
       void play(() => {
         const [l, r, b, t] = foe.box(), [ml, mr] = this.span();
         const close = Math.min(Math.abs(l - mr), Math.abs(ml - r)) < this.H * 0.6 && this.y < t && this.y + this.H > b;
@@ -1678,6 +1690,8 @@ export class Fighter {
    * back dash (under Agility ZIP_GAIN × as far).
    */
   private dashButton(arena: Arena, want: number): void {
+    // (A Pokéball: it only rolls and hops.)
+    if (this.ball) return;
     if (!want) { this.backDash(arena); return; }
     if (!this.ready('Dash')) return;
     if (want !== this.facing) this.face(want, true);
@@ -2064,6 +2078,17 @@ export class Fighter {
   }
 
   // ── its body ──────────────────────────────
+  /**
+   * A Pokéball `d` across (you, before your first Pokémon): its body the ball's own — as tall and as wide as it is
+   * across, its reach its radius — not the hidden species' under it; so it fits wherever it looks as if it fits.
+   */
+  makeBall(d: number): void {
+    this.ball = true;
+    this.H = d; this.W = d;
+    this.reach = { front: d / 2, back: d / 2 };
+    this.measured = BODY_SETTLE + BODY_FRAMES;
+  }
+
   private measure(): void {
     if (this.measured >= BODY_SETTLE + BODY_FRAMES) return;
     if (++this.measured <= BODY_SETTLE) return;

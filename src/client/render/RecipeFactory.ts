@@ -53,6 +53,7 @@ import { QuakeFx, type QuakeOptions, type PillarOptions, type PillarHandle } fro
 import { ICE_BOLT, PSY_BOLT, BLUE_BOLT, type LightningFx, type EarthOptions, type BoltColors } from '../vfx/LightningFx.ts';
 import type { SlashFx } from '../vfx/SlashFx.ts';
 import { QuickStepFx } from '../vfx/QuickStepFx.ts';
+import { CrescentFx } from '../vfx/CrescentFx.ts';
 import { gaitSpeed } from './gait.ts';
 import { flurryStrikes, buildFlurry, flurryShape, type FlurryStrike } from './flurry.ts';
 import { toClip, bakeHandAttack, retarget, mirrorClip, type Rig } from './handAttacks.ts';
@@ -1574,7 +1575,7 @@ export class RecipeFactory implements UnitFactory {
    */
   async playStrike(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: () => boolean | void,
     /** Already under way (Counter, opening out of its teleport mid-swing): its clip begun this many s short of its blow, no blend in. */
-    o: { lead?: number } = {}): Promise<void> {
+    o: { lead?: number; crescent?: boolean } = {}): Promise<void> {
     const u = this.units.get(node);
     if (!u) { onBlow?.(); return; }
     const H = this.heightOf(node);
@@ -1587,6 +1588,11 @@ export class RecipeFactory implements UnitFactory {
       const p = u.model.player as unknown as { time: number; fade: number };
       p.time = hitAt - o.lead; p.fade = 1;
       hitAt = o.lead;
+    }
+    // (Its blow a crescent cut too, following its striking part from CROSS_ATTACK_LEAD s before it lands.)
+    if (o.crescent) {
+      const tone = this.hueOf(node, element);
+      void sleep(Math.max(0, hitAt - CROSS_ATTACK_LEAD)).then(() => { if (!u.down) this.crescentOn(node, 'attack', tone, targetPos); });
     }
     await sleep(hitAt);
     if (onBlow?.() === false) { await sleep(rest); return; }
@@ -1820,6 +1826,71 @@ export class RecipeFactory implements UnitFactory {
     await sleep(SWIPE_HIT + CROSS_SECOND_HIT / CROSS_SPEED);
     blow(1);
   }
+
+  /**
+   * The crescent cut (CrescentFx): its swipe played as a slash plays it, and from its strike's start the crescent
+   * following its striking part — its head on the part, its tail where the swing began, its rim through it — then held
+   * a beat and eroded. `onBlow` asked as its head crosses in front (false: missed). Resolves at the blow.
+   */
+  async playCrescentSlash(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: () => boolean | void): Promise<void> {
+    const u = this.units.get(node);
+    if (!u) { await this.playAttackLunge(node, targetPos, true); onBlow?.(); return; }
+    const player = u.model.player;
+    const onAttack = this.strikeKey(u, true) !== 'swipe';
+    const H = this.heightOf(node), hue = this.hueOf(node, element);
+    const struck = this.playAttackLunge(node, targetPos, true);
+    // From its strike's start: its swipe's strike begun — or, on its plain attack, CROSS_ATTACK_LEAD s before its blow.
+    const end = this.act(u, 'swipeEnd');
+    if (onAttack) {
+      const hitAt = Math.min(HIT_CAP, (player.clips.get(this.act(u, 'attack'))?.duration ?? 0.6) * HIT_AT);
+      await sleep(Math.max(0, hitAt - CROSS_ATTACK_LEAD));
+    } else {
+      await new Promise<void>((res) => {
+        const o = this.scene.onBeforeRenderObservable.add(() => { if (player.active?.action === end || u.down) { this.scene.onBeforeRenderObservable.remove(o); res(); } });
+      });
+    }
+    const play = this.crescentOn(node, onAttack ? 'attack' : 'swipe', hue, targetPos);
+    await Promise.race([play.hit, struck]);
+    // (Its burst on the target only if the blow lands.)
+    if (onBlow?.() === false) return;
+    const way = targetPos.subtract(node.position); way.y = 0;
+    if (way.lengthSquared() > 1e-6 && this.beams) this.beams.hemiBurst(targetPos.add(new Vector3(0, H * 0.5, 0)), way.normalize().scale(-1), H * CROSS_BURST, hue, false);
+  }
+
+  /**
+   * The crescent cut (CrescentFx) following `node`'s striking part through the strike under way now (its `key` clip's:
+   * its swipe's, its attack's) — its head on the part, round a sphere about its middle, pushed out toward `targetPos`.
+   * `hue` its colours, already its own.
+   */
+  private crescentOn(node: TransformNode, key: 'attack' | 'swipe', hue: string, targetPos: Vector3) {
+    const u = this.units.get(node)!;
+    const part = this.impactPart(node, key) ?? 'right_hand';
+    const H = this.heightOf(node);
+    const skinned = u.model.meshes.find((m) => m.skeleton) ?? u.model.meshes[0];
+    // Its part's bone — or, none by that name, that side's like bones, locked after a few frames to whichever moves most.
+    const bones = u.model.skeleton.bones;
+    const exact = bones.find((b) => b.name === part);
+    const [, side, rest] = /^(left|right)_(.+)$/.exec(part) ?? [];
+    const like = exact ? [exact] : side ? bones.filter((b) => new RegExp(`^${side}_([a-z]_)?${rest}(_[a-z])?$`).test(b.name)) : [];
+    const moved = like.map(() => 0), lastAt: (Vector3 | null)[] = like.map(() => null);
+    let frames = 0, bone = like.length === 1 ? like[0] : null;
+    const sample = () => {
+      if (!bone && like.length) {
+        like.forEach((b, i) => { const q = b.getAbsolutePosition(skinned).clone(); if (lastAt[i]) moved[i] += q.subtract(lastAt[i]!).length(); lastAt[i] = q; });
+        const lead = like[moved.indexOf(Math.max(...moved))];
+        if (++frames >= CROSS_PICK) bone = lead;
+        return lead.getAbsolutePosition(skinned).clone();
+      }
+      return bone ? bone.getAbsolutePosition(skinned).clone() : null;
+    };
+    const fx = (this.crescents ??= new CrescentFx(this.scene, this.scene.activeCamera!));
+    const facing = () => (Math.sin(node.rotation.y) >= 0 ? 1 : -1);
+    return fx.cut({ element: hue, height: H, centre: () => node.position.add(new Vector3(0, H * 0.5, 0)), facing, tilt: 0.25,
+      sample, trace: CROSS_TRACE,
+      // (Pushing out toward what it strikes as it forms.)
+      toward: () => targetPos.add(new Vector3(0, H * 0.5, 0)) });
+  }
+  private crescents: CrescentFx | null = null;
 
   /** Keep it from turning to watch what it looks at (true), or let it again (false): its facing is then the caller's. */
   holdLook(node: TransformNode, on: boolean): void {
@@ -3572,7 +3643,8 @@ export class RecipeFactory implements UnitFactory {
     // (An aura on its effects alone — effectsOnly, a bolt's out of an egg — is none: no coat, sphere or tornado on the body.)
     const whole = !options.strike && !options.blade && !options.focus && !options.region && !options.fill && !options.effectsOnly;
     const fire = options.element === 'Fire' && whole;
-    options = { ...options, element: this.hueOf(node, options.element), noiseBurst: options.noiseBurst ?? fire };
+    // (Its element in the wearer's own colours of it — unless already settled: a zap wears its striker's.)
+    options = { ...options, element: options.hued ? options.element : this.hueOf(node, options.element), noiseBurst: options.noiseBurst ?? fire };
     // A slash or claw from a species with a blade of its own: only the blade is coated.
     const blade = options.blade ? this.bladeOf(node) : null;
     if (blade) options = { ...options, strike: false, focus: blade.bone, region: blade.region };
@@ -3784,7 +3856,7 @@ export class RecipeFactory implements UnitFactory {
     let zap: { release(): void } | null = null;
     const zapAt = sleep(delay).then(() => {
       // (In its caster's lightning's colours — Zeraora's blue — not the struck one's own.)
-      zap = this.aura(target, { element, edge: 'smooth', reach: 'tight', fill: true, ignite: 0.05, die: 0.35, shiver: true });
+      zap = this.aura(target, { element, hued: true, edge: 'smooth', reach: 'tight', fill: true, ignite: 0.05, die: 0.35, shiver: true });
     });
     const asAura = () => {
       const fx = this.fx!;

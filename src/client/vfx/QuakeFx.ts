@@ -8,6 +8,7 @@ import type { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
+import type { ShadowGenerator } from '@babylonjs/core/Lights/Shadows/shadowGenerator';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Vector3, Matrix } from '@babylonjs/core/Maths/math.vector';
@@ -167,6 +168,10 @@ export class QuakeFx {
     mesh.material = mat;
     mesh.isPickable = false;
     mesh.position.set(o.x, o.floor - h - 0.05, o.z);
+    // Its shadow: cast as the Pokémon's are (the scene's shadow generator, RecipeFactory's), and others' falling on it.
+    const shadowGen = (scene.metadata as { shadowGen?: ShadowGenerator } | undefined)?.shadowGen ?? null;
+    shadowGen?.addShadowCaster(mesh);
+    mesh.receiveShadows = true;
     // Its tell: the floor cracking where it will come up.
     const crack = groundQuake();
     const t0 = performance.now();
@@ -231,6 +236,7 @@ export class QuakeFx {
       if (gone && !chips.length && cr <= 0) {
         scene.onBeforeRenderObservable.remove(tick);
         crack.dispose();
+        shadowGen?.removeShadowCaster(mesh);
         mesh.dispose();
         resolveDown();
       }
