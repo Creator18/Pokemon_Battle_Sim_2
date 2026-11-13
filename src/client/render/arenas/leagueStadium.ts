@@ -15,6 +15,7 @@
  *   the roof           ROOF_Z     its canopy's steel trusses, a row of floodlights blazing
  *   the city, the sky  CITY_Z, SKY_Z   a skyline of towers, windows lit; an evening sky
  */
+import { groundLit } from '../../vfx/groundLight.ts';
 import type { Scene } from '@babylonjs/core/scene';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
@@ -293,6 +294,7 @@ export function leagueStadium(scene: Scene): LeagueStadium {
   const ballMat = new StandardMaterial('lgPitchBallMat', scene);
   ballMat.diffuseTexture = ballTex; ballMat.useAlphaFromDiffuseTexture = true; ballMat.specularColor = new Color3(0, 0, 0);
   ballMat.zOffset = -2;
+  groundLit(ballMat);
   const ball = MeshBuilder.CreateGround('lgPitchBall', { width: 11, height: 11 }, scene);
   ball.position.set(0, 0.015, 0); ball.material = ballMat; ball.parent = root; ball.isPickable = false;
 

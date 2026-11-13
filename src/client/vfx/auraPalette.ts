@@ -106,6 +106,8 @@ const OUTLINE_FILL: Record<string, [RGB, RGB]> = {
 const BLUE_FLAMES = new Set(['Mega Charizard X']);
 /** …and those whose flames are blue only when shiny. */
 const SHINY_BLUE_FLAMES = new Set(['Emboar']);
+/** Pokémon whose lightning is blue (Zeraora's plasma): their Electric wears BlueElectric's colours. */
+const BLUE_LIGHTNING = new Set(['Zeraora', 'Mega Zeraora']);
 /** Pokémon whose flames are ghostly (violet, as on their bodies): their Fire wears GhostFire's colours. */
 const GHOST_FLAMES = new Set(['Litwick', 'Lampent', 'Chandelure', 'Mega Chandelure', 'Ceruledge']);
 
@@ -114,10 +116,16 @@ const GHOST_FLAMES = new Set(['Litwick', 'Lampent', 'Chandelure', 'Mega Chandelu
  * it has its own (Mega Charizard X's Fire is blue flame, deeper than Water).
  */
 export function elementFor(element: string, species?: string | null, shiny = false): string {
+  if (element === 'Electric' && species && BLUE_LIGHTNING.has(species)) return 'BlueElectric';
   if (element !== 'Fire' || !species) return element;
   if (GHOST_FLAMES.has(species)) return 'GhostFire';
   const blue = BLUE_FLAMES.has(species) || (shiny && SHINY_BLUE_FLAMES.has(species));
   return blue ? 'BlueFire' : element;
+}
+
+/** Lightning of any colour (Electric, or a Pokémon's own: BlueElectric) — its aura's outline zigzags, it earths off the body. */
+export function isElectric(element: string): boolean {
+  return element === 'Electric' || element === 'BlueElectric';
 }
 
 /** Fire of any colour (for the effects drawn as flame: a licking aura edge). */
@@ -132,6 +140,8 @@ export function isFire(element: string): boolean {
  */
 const GLOWS: Record<string, [RGB, RGB, RGB, RGB]> = {
   Electric: [[1.0, 0.56, 0.02], [1.0, 0.88, 0.25], [1.0, 1.0, 0.93], [1.0, 1.0, 0.93]],
+  // Blue lightning (Zeraora's): a deep blue glow round a cyan one, an ice-white line, filled ice-white.
+  BlueElectric: [[0.06, 0.3, 1.0], [0.3, 0.78, 1.0], [0.88, 0.97, 1.0], [0.88, 0.97, 1.0]],
   // Evolving: all white, a faint blue in the outer glow.
   Evolution: [[0.82, 0.9, 1.0], [0.95, 0.98, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0, 1.0]],
 };

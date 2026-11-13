@@ -27,6 +27,7 @@
  *   ground round it (Thunder).
  */
 
+import { groundLight, type GroundLight } from './groundLight.ts';
 import type { Scene } from '@babylonjs/core/scene';
 import type { Camera } from '@babylonjs/core/Cameras/camera';
 import type { Observer } from '@babylonjs/core/Misc/observable';
@@ -58,6 +59,13 @@ const GIRTH_CUT = 0.52, GIRTH_RATE = 2.6;
  * in behind the bolt as a muddy amber band over the grass; they were for the hex board's tiles, seen from above).
  */
 const POOL_R = 0.3, POOL_GAIN = 0;
+/**
+ * Where an earthing stroke meets the ground: a slight glow, in the stroke's own colour, laid on as light (added — it
+ * brightens what is there, never darkens it to mud): EARTH_GLOW_R × the body's height across, EARTH_GLOW strong — lit
+ * in the floor's own shading (groundLight), so the grass there glows too and feet standing in it stay in front of it.
+ */
+const POOL_MAX = 4;
+const EARTH_GLOW = 2.2, EARTH_GLOW_R = 0.22;
 /** How fast the field drifts (the source's tCur is seconds; lightning writhes faster). */
 const WRITHE = 1.6;
 
@@ -75,6 +83,8 @@ const HALO = 4;
  * each strikes somewhere new (s), and how high (and how far off upright) the
  * sky they fall from is (× TILE_SCALE).
  */
+/** Converging forks (bolt o.converge): their ends spread round the target by the bolt's length, no longer than this counts (world units). */
+const CONVERGE_SPAN = 7;
 const THUNDER_BOLTS = 7, THUNDER_STAGGER = 0.07, THUNDER_RESEAT = 0.3;
 /** On a hit, how many of Thunder's bolts strike the target. */
 const THUNDER_ON_TARGET = 3;
@@ -105,7 +115,11 @@ varying vec2 vUV;
 varying vec4 vHot;
 uniform float lit;
 uniform vec3 arc, halo, outer;
+// (Its shape an aura's — in a silhouette, wide: the aura's fill and outline its whole look — drawn nothing itself, or its
+// edges would show through as faint lines inside the fill.)
+uniform float ghost;
 void main(void) {
+  if (ghost > 0.5) discard;
   // across: 0 down the middle, 1 at the halo's edge; the core is the inner 1/HALO.
   float a = abs(vUV.y * 2.0 - 1.0);
   float x = a * ${HALO.toFixed(1)};
@@ -129,18 +143,30 @@ void main(void) {
   gl_FragColor = vec4(rgb * alpha, alpha);
 }`;
 
-// A stroke in a unit's silhouette mask (UnitFx.addToMask): its core only (so
-// the aura's outline wraps the bolt itself, not its halo), in the unit's mask colour.
+// A stroke in a unit's silhouette mask (UnitFx.addToMask), in the unit's mask colour: its core only (so the aura's
+// outline wraps the bolt itself, not its halo) — or, `wide`, the whole ribbon as it is drawn (its edge, thinning as
+// it dims): the aura's outline then wraps all of it, the ribbon filling it in.
 Effect.ShadersStore.boltMaskFragmentShader = /* glsl */ `
 precision highp float;
 varying vec2 vUV;
 varying vec4 vHot;
 uniform float lit;
+uniform float wide;
 uniform vec4 maskColor;
+// (Its last stretch — from from2 of the way along on — in a second silhouette instead, maskColor2 (its target's: the
+// bolt let go by its firer's aura and taken in by its target's, each end one aura's alone), both a little either side
+// of from2 so no gap opens between them. None: all zero, the whole of it its own.)
+uniform vec4 maskColor2;
+uniform float from2;
 void main(void) {
   float x = abs(vUV.y * 2.0 - 1.0) * ${HALO.toFixed(1)};
-  if (x > 1.0 || vHot.x * lit < 0.05) discard;
-  gl_FragColor = maskColor;
+  float hot = vHot.x * lit;
+  // (Wide: the ribbon as it is drawn — out to its edge, thinning as it dims — the aura round it and filling it.)
+  float lim = wide > 0.5 ? 1.45 * clamp(hot * 1.4, 0.2, 1.0) : 1.0;
+  if (x > lim || hot < 0.05) discard;
+  // (Where along the whole bolt it is — the same for every strand of it, forks too — so the halves part in one place.)
+  float u = vHot.y;
+  gl_FragColor = u < from2 - 0.03 ? maskColor : u < from2 + 0.03 ? max(maskColor, maskColor2) : maskColor2;
 }`;
 
 Effect.ShadersStore.boltPoolVertexShader = /* glsl */ `
@@ -161,13 +187,14 @@ Effect.ShadersStore.boltPoolFragmentShader = /* glsl */ `
 precision highp float;
 varying vec2 vUV;
 uniform float pool;
+uniform vec3 tint;
 void main(void) {
   float r2 = dot(vUV, vUV);
   float a = pool * max(0.0, 1.0 - r2) * (1.0 - r2);
   if (a < 0.01) discard;
-  // The amber pool (1.0, 0.82, 0.30), hotter at the middle.
-  vec3 rgb = mix(vec3(1.0, 0.82, 0.30), vec3(1.0, 0.96, 0.75), max(0.0, 1.0 - 4.0 * r2));
-  gl_FragColor = vec4(rgb * 1.6, a);
+  // Its colour (the stroke's own), hotter — whiter — at the middle; added on as light.
+  vec3 rgb = mix(tint, vec3(1.0), 0.6 * max(0.0, 1.0 - 4.0 * r2));
+  gl_FragColor = vec4(rgb * a, a);
 }`;
 
 /** The arc's colour (the source's (0.9, 0.9, 0.6), brightened) and the amber halo round it. */
@@ -184,6 +211,12 @@ export const PSY_BOLT: BoltColors = {
   arc: new Vector3(1.0, 0.86, 0.98),
   halo: new Vector3(0.92, 0.2, 0.78),
   light: new Color3(1.0, 0.55, 0.9),
+};
+/** Blue lightning (Zeraora's): an ice-white core in a deep blue-cyan halo. */
+export const BLUE_BOLT: BoltColors = {
+  arc: new Vector3(0.88, 0.97, 1.0),
+  halo: new Vector3(0.18, 0.6, 1.0),
+  light: new Color3(0.5, 0.78, 1.0),
 };
 export const ICE_BOLT: BoltColors = {
   arc: new Vector3(0.86, 0.97, 1.0),
@@ -207,6 +240,12 @@ export interface StrokeOpts {
   pinEnd?: boolean;
   /** Field key (which stroke of the source). */
   k: number;
+  /**
+   * The whole bolt's line (its first stroke's ends), for where along it each point of this stroke is — the same for every
+   * stroke of it, its forks too (each point's share of the way from the one end to the other, in its colour's green).
+   * Unset: along this stroke's own length.
+   */
+  chord?: () => [Vector3, Vector3];
 }
 
 /** One ribbon. */
@@ -226,13 +265,18 @@ class Stroke {
    * Put the stroke in a unit's silhouette (its aura's outline then wraps the
    * bolt with the body, as one shape): `add` is UnitFx.addToMask for the unit.
    */
-  maskIn(scene: Scene, color: Color4, add: (mesh: Mesh, mat: ShaderMaterial) => () => void): void {
+  maskIn(scene: Scene, color: Color4, add: (mesh: Mesh, mat: ShaderMaterial) => () => void, wide = false): void {
     this.maskMat = new ShaderMaterial('boltMaskMat', scene, { vertex: 'bolt', fragment: 'boltMask' }, {
       attributes: ['position', 'uv', 'color'],
-      uniforms: ['viewProjection', 'lit', 'maskColor'],
+      uniforms: ['viewProjection', 'lit', 'wide', 'maskColor', 'maskColor2', 'from2'],
     });
     this.maskMat.backFaceCulling = false;
     this.maskMat.setColor4('maskColor', color);
+    this.maskMat.setFloat('wide', wide ? 1 : 0);
+    // (Wide: the aura's fill and outline are the whole of it — the ribbon itself drawn nothing.)
+    this.mat.setFloat('ghost', wide ? 1 : 0);
+    this.maskMat.setColor4('maskColor2', new Color4(0, 0, 0, 0));
+    this.maskMat.setFloat('from2', 2);
     this.unmask = add(this.mesh, this.maskMat);
   }
 
@@ -246,10 +290,13 @@ class Stroke {
     vd.applyToMesh(this.mesh, true);
     this.mat = new ShaderMaterial('boltMat', scene, { vertex: 'bolt', fragment: 'bolt' }, {
       attributes: ['position', 'uv', 'color'],
-      uniforms: ['viewProjection', 'lit', 'arc', 'halo', 'outer'],
+      uniforms: ['viewProjection', 'lit', 'arc', 'halo', 'outer', 'ghost'],
       needAlphaBlending: true,
     });
     this.mat.backFaceCulling = false;
+    // (Drawn — set here, not left unset: every stroke shares one shader program, which keeps a uniform's last value, so
+    // a stroke that never set it drew nothing after one drawn as an aura's had.)
+    this.mat.setFloat('ghost', 0);
     this.mat.disableDepthWrite = true;
     this.mat.alphaMode = Constants.ALPHA_PREMULTIPLIED_PORTERDUFF;
     this.mat.setVector3('arc', ARC);
@@ -302,6 +349,10 @@ class Stroke {
       if (o.bow) p.addInPlace(o.bow.scale(smoothstep(0, peak, u) * (1 - smoothstep(peak, 1, u))));
       p.addInPlace(ax.scale((w0 * side + jx) * pin)).addInPlace(ay.scale((w1 * side + jy) * pin));
     }
+    // (Each point's share of the way along the whole bolt — the bolt's line, the same for every stroke of it — else along its own.)
+    const ch = o.chord?.();
+    const ab = ch ? ch[1].subtract(ch[0]) : null, ab2 = ab ? Math.max(1e-8, ab.lengthSquared()) : 1;
+    const along = (q: Vector3, u: number) => (ch && ab ? Math.min(1, Math.max(0, Vector3.Dot(q.subtract(ch[0]), ab) / ab2)) : u);
     // The ribbon, square to the view at every knot; swellings fatten the thread
     // (a thick column only a little: it is already all glow).
     const thick = Math.min(1, o.width / (HAIR * 8));
@@ -328,6 +379,8 @@ class Stroke {
       const hot = Math.min(1, Math.max(0, 2 * (0.1 + 0.9 * this.lit) * (1 - 0.3 * fbm1(5 * zc + o.k)) - 0.2)) + 0.4 * swell;
       const c = i * 8;
       this.col[c] = hot; this.col[c + 4] = hot;
+      // (Where along the whole bolt this point is: its share of the way from its first end to its last.)
+      this.col[c + 1] = this.col[c + 5] = along(p, u);
       this.col[c + 3] = 1; this.col[c + 7] = 1;
     }
     this.mesh.updateVerticesData(VertexBuffer.PositionKind, this.pos);
@@ -342,6 +395,12 @@ class Stroke {
    */
   overAuras(add: (mesh: Mesh) => () => void): void { this.unover = add(this.mesh); }
   private unover: (() => void) | null = null;
+
+  /** Its last stretch (from `from` of the way along) in a second silhouette instead — `color` (null: none, all its own). */
+  maskAlso(color: Color4 | null, from: number): void {
+    this.maskMat?.setColor4('maskColor2', color ?? new Color4(0, 0, 0, 0));
+    this.maskMat?.setFloat('from2', color ? from : 2);
+  }
 
   dispose(): void { this.unmask?.(); this.unover?.(); this.maskMat?.dispose(); this.mat.dispose(); this.mesh.dispose(); }
 }
@@ -359,21 +418,28 @@ class Pool {
     vd.applyToMesh(this.mesh);
     this.mat = new ShaderMaterial('boltPoolMat', scene, { vertex: 'boltPool', fragment: 'boltPool' }, {
       attributes: ['position', 'uv'],
-      uniforms: ['viewProjection', 'center', 'radius', 'pool'],
+      uniforms: ['viewProjection', 'center', 'radius', 'pool', 'tint'],
       needAlphaBlending: true,
     });
     this.mat.backFaceCulling = false;
     this.mat.disableDepthWrite = true;
+    // (Added on as light: it brightens the ground and grass under it, never laid over them as paint.)
+    // (One plus one: its colour comes out already scaled by its strength — ALPHA_ADD would scale it by that again.)
+    this.mat.alphaMode = Constants.ALPHA_ONEONE;
+    this.mat.setVector3('tint', new Vector3(1.0, 0.82, 0.3));
     this.mesh.material = this.mat;
     this.mesh.isPickable = false;
     this.mesh.alwaysSelectAsActiveMesh = true;
     this.mesh.doNotSyncBoundingInfo = true;
   }
+  /** Its own centre: the material keeps the vector it is given, not a copy — one shared by many pools put them all in one place. */
+  private readonly center = new Vector3();
   set(center: Vector3, radius: number, pool: number): void {
     this.mesh.isVisible = pool > 0.05;
-    this.mat.setVector3('center', center);
+    this.mat.setVector3('center', this.center.copyFrom(center));
     this.mat.setFloat('radius', radius);
-    this.mat.setFloat('pool', Math.min(1, pool));
+    // (Over 1 allowed: light added on, through the tone mapping, needs it to read.)
+    this.mat.setFloat('pool', Math.min(POOL_MAX, pool));
   }
   dispose(): void { this.mat.dispose(); this.mesh.dispose(); }
 }
@@ -438,13 +504,22 @@ export class LightningFx {
    * The earthing discharge: strokes from points on `body` down to the floor,
    * for as long as the handle is not stopped.
    */
+  /**
+   * A glow of light laid on the ground (added on, so the ground and the grass tips there brighten in `tint`): placed
+   * and dimmed each frame by its owner — the glow under a Pokémon wearing lightning (an Electric aura, or zapped).
+   */
+  groundGlow(tint: Vector3): { set(center: Vector3, radius: number, strength: number): void; dispose(): void } {
+    const g = groundLight(), col = tint.clone();
+    return { set: (c, r, k) => g.set(c, r, col, k), dispose: () => g.dispose() };
+  }
+
   earth(body: EarthBody, o: EarthOptions): { stop(): void } {
     const n = o.bolts ?? BOLTS;
     const h = body.height;
     // Earthing strokes are finer than the bolts (asked for: thinner).
     // In proportion to the body (a big Pokémon's strokes as thick, for its size, as a small one's).
     const width = HAIR * EARTH_THIN * (o.thick ?? 1) * Math.min(EARTH_SIZE_MAX, Math.max(EARTH_SIZE_MIN, h / 1.3));
-    const slots: { s: Stroke; pool: Pool; idx: number; head: Vector3; foot: Vector3; born: number; share: number; undoOver?: () => void }[] = [];
+    const slots: { s: Stroke; pool: GroundLight; idx: number; head: Vector3; foot: Vector3; born: number; share: number; undoOver?: () => void }[] = [];
     let last = body.root().clone(), vel = new Vector3();
     let stopped = false, fade = 1;
     const born = this.time;
@@ -492,7 +567,9 @@ export class LightningFx {
       });
       if (o.colors) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); s.mat.setVector3('outer', o.colors.halo); }
       const undoOver = body.overAura?.(s.mesh);
-      slots.push({ s, pool: new Pool(this.scene), idx: 0, head, foot, born: -1, share: 1, undoOver });
+      const pool = groundLight();
+      // (Its glow in the stroke's own colour: its halo's — yellow, or Zeraora's blue.)
+      slots.push({ s, pool, idx: 0, head, foot, born: -1, share: 1, undoOver });
       // Stagger the first ones so they do not all go out together.
       seat(k, this.time - hash(k * 17.1) * LIFE);
     }
@@ -509,7 +586,8 @@ export class LightningFx {
         const age = (t - slot.born) / LIFE;
         slot.s.lit = power * flicker * slot.share;
         slot.s.update(t, cam);
-        slot.pool.set(slot.foot, POOL_R * h * 0.6, slot.s.lit * (1 - age) * POOL_GAIN);
+        // (Where it meets the ground: a slight glow over the grass's tips, with the stroke — as it lights, as it dies.)
+        slot.pool.set(slot.foot, EARTH_GLOW_R * h, o.colors?.halo ?? YELLOW, slot.s.lit * (1 - age) * EARTH_GLOW);
       }
       if (stopped && fade <= 0) { for (const sl of slots) { sl.undoOver?.(); sl.s.dispose(); sl.pool.dispose(); } return false; }
       return true;
@@ -530,9 +608,15 @@ export class LightningFx {
     /** No camera shake as it strikes (Electric Terrain's crackle over the ground). */
     quiet?: boolean;
     /** The unit whose silhouette the bolt joins (its aura wraps body and bolt as one): its mask colour and UnitFx.addToMask. */
-    mask?: { color: Color4; add: (mesh: Mesh, mat: ShaderMaterial) => () => void };
+    mask?: { color: Color4; add: (mesh: Mesh, mat: ShaderMaterial) => () => void;
+      /** The whole ribbon in the silhouette, forks too (the aura's outline round all of it, the ribbon filling it), not its core only. */
+      wide?: boolean;
+      /** Its last stretch (from `alsoFrom` of the way along each stroke) in its target's silhouette instead, each frame: the target's mask colour (null: none). */
+      also?: () => Color4 | null; alsoFrom?: number };
     /** Drawn over the auras, without the scene's tone mapping (UnitFx.addOver): its colours as they are. */
-    over?: (mesh: Mesh) => () => void }): LightningPlay {
+    over?: (mesh: Mesh) => () => void;
+    /** Its forks converging on its target (Thunderbolt): each breaks off the main and ends on `to` (jittered a little), none straying off into the air. */
+    converge?: boolean }): LightningPlay {
     const strands = o.strands ?? 2;
     const forks = o.forks ?? 3;
     let resolveHit!: () => void, resolveEnd!: () => void, resolveDone!: () => void;
@@ -540,15 +624,19 @@ export class LightningFx {
     const contactEnds = new Promise<void>((r) => { resolveEnd = r; });
     const done = new Promise<void>((r) => { resolveDone = r; });
     const base = (this.serial++ % 97) * 2.17;
+    // (The whole bolt's line, for where along it each stroke's every point is: one split for all of them.)
+    const chord = (): [Vector3, Vector3] => [from(), to()];
     const mains = Array.from({ length: strands }, (_, i) => new Stroke(this.scene, {
-      from, to, width: o.width * (i === 0 ? 1 : 0.55), wander: (o.wander ?? WANDER) * (i === 0 ? 1 : 1.4), pinEnd: true, k: base + i,
+      from, to, width: o.width * (i === 0 ? 1 : 0.55), wander: (o.wander ?? WANDER) * (i === 0 ? 1 : 1.4), pinEnd: true, k: base + i, chord,
     }));
-    const forkEnds = Array.from({ length: forks }, () => ({ at: 0.3, end: new Vector3(), host: 0 }));
+    const forkEnds = Array.from({ length: forks }, () => ({ at: 0.3, end: new Vector3(), host: 0, off: new Vector3() }));
     const forkStrokes = forkEnds.map((f, i) => new Stroke(this.scene, {
-      from: () => mains[f.host].at(f.at), to: () => f.end, width: o.width * 0.35, k: base + 10 + i,
+      // (Converging: its end on the target — where the target is now, jittered — and held there, not thinning off.)
+      from: () => mains[f.host].at(f.at), to: o.converge ? () => to().add(f.off) : () => f.end, width: o.width * 0.35, k: base + 10 + i,
+      pinEnd: !!o.converge, chord,
     }));
     if (o.colors) for (const s of [...mains, ...forkStrokes]) { s.mat.setVector3('arc', o.colors.arc); s.mat.setVector3('halo', o.colors.halo); s.mat.setVector3('outer', o.colors.halo); }
-    if (o.mask) for (const s of mains) s.maskIn(this.scene, o.mask.color, o.mask.add);
+    if (o.mask) for (const s of o.mask.wide ? [...mains, ...forkStrokes] : mains) s.maskIn(this.scene, o.mask.color, o.mask.add, o.mask.wide);
     if (o.over) for (const s of [...mains, ...forkStrokes]) s.overAuras(o.over);
     const light = new PointLight('boltLight', Vector3.Zero(), this.scene);
     light.diffuse = o.colors?.light ?? new Color3(1, 0.92, 0.6);
@@ -569,6 +657,16 @@ export class LightningFx {
         f.host = Math.floor(hash(s) * strands) % strands;
         f.at = 0.15 + 0.7 * hash(s + 1);
         const p = mains[f.host].at(f.at);
+        // (Converging: a fork breaks off in the main's later half, to run in onto the target close by the main — a
+        // little off its own end — so the strands stay a bundle, not a fan with gaps between them.)
+        if (o.converge) {
+          f.at = 0.45 + 0.35 * hash(s + 1);
+          // (Its spread scaled by the bolt's length, but no further than CONVERGE_SPAN: a long bolt out of the sky lands
+          // its forks on the body too, not a body's height off it in the air.)
+          const span = Math.min(len, CONVERGE_SPAN);
+          f.off.set((hash(s + 2) - 0.5) * 0.03 * span, (hash(s + 3) - 0.5) * 0.06 * span, (hash(s + 4) - 0.5) * 0.03 * span);
+          return;
+        }
         const off = new Vector3(hash(s + 2) - 0.5, hash(s + 3) - 0.75, hash(s + 4) - 0.5).normalize();
         f.end.copyFrom(p).addInPlace(chord.scale((0.08 + 0.12 * hash(s + 5)))).addInPlace(off.scale(len * (0.1 + 0.15 * hash(s + 6))));
       });
@@ -594,6 +692,8 @@ export class LightningFx {
       }
       const flick = 0.75 + 0.25 * illum(t * 3 + base);
       const strike = 1 - 0.35 * ((t - lastStrike) / RESTRIKE); // each strike flares, then dims
+      // (Its last stretch in its target's silhouette too, whoever that is now.)
+      if (o.mask?.also) { const c2 = o.mask.also(); for (const s of [...mains, ...forkStrokes]) s.maskAlso(c2, o.mask.alsoFrom ?? 0.5); }
       mains.forEach((s) => { s.lit = out * flick * strike; s.update(t, cam); });
       if (restrike) reFork(t);
       forkStrokes.forEach((s, i) => { s.lit = out * strike * (hash(Math.floor(t / RESTRIKE) + i * 7) < 0.7 ? 0.8 : 0); s.update(t, cam); });

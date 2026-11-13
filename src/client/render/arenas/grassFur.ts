@@ -6,6 +6,7 @@
  * stripes, its lines), darker at the roots, nearly its own at the tips; the
  * upper shells drift a little with the wind.
  */
+import { groundLit } from '../../vfx/groundLight.ts';
 import type { Scene } from '@babylonjs/core/scene';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { Observer } from '@babylonjs/core/Misc/observable';
@@ -71,6 +72,8 @@ export function grassFur(scene: Scene, lawn: Mesh, mat: StandardMaterial, w: num
   const blades = bladeMap(scene, seed, opts.clump ?? 0);
   blades.uScale = w / tile; blades.vScale = d / tile;
   const owned: { dispose(): void }[] = [blades];
+  // (The ground under the fur, and every shell of it, lit by glows on the ground — lightning's.)
+  groundLit(mat);
   const shells: { mesh: Mesh; lift: number }[] = [];
   for (let i = 1; i <= SHELLS; i++) {
     const t = i / SHELLS;
@@ -81,6 +84,7 @@ export function grassFur(scene: Scene, lawn: Mesh, mat: StandardMaterial, w: num
     m.specularColor = Color3.Black();
     m.opacityTexture = blades;
     m.transparencyMode = Material.MATERIAL_ALPHATEST;
+    groundLit(m);
     // (Just over its height: only blades that reach this shell show on it.)
     m.alphaCutOff = t * 0.98;
     m.backFaceCulling = false;

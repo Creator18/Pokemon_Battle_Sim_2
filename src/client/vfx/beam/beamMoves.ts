@@ -27,8 +27,15 @@ export interface BeamSpec {
   bolt?: boolean;
   /** A bolt: who it is on now (struck by it), its end run into that one's body (none: out to its front). */
   onto?: () => import('@babylonjs/core/Meshes/transformNode').TransformNode | null;
+  /** Its end exactly on its target point — not stopped short where a body's surface would be (BeamShot.exactTarget). */
+  exactTarget?: boolean;
   /** A bolt straight off the body: no egg (Thunderbolt in a clash; BeamShot.eggless). */
   eggless?: boolean;
+  /**
+   * A bolt drawn as its user's aura, as Thunderbolt's is (eggless bolts always are): its user wearing its type's aura
+   * as it fires, the bolt, its starting egg and its half of a clash's ball all painted by that aura (Ice Beam).
+   */
+  auraBolt?: boolean;
   /** A ball attack in a clash: it flies in and becomes its half of the clash's ball (RecipeFactory.clashBall). */
   ball?: BallColours | true;
   /** A tornado ball (BallSpec.tornado): its half of the clash's ball the moving tornado's half, not the noise. */
@@ -46,6 +53,8 @@ export interface BeamSpec {
    * OUTLINE, RINGS). Both charge, launch and release alike.
    */
   style?: 1 | 2;
+  /** Its half of a clash's ball in the other beam's style (Ice Beam: beam 2's egg, beam 1's clash ball). Unset: as `style`. */
+  clashStyle?: 1 | 2;
   /** Beam 2's outline: 'cel' (default) a flat band in its type's outline colour; 'soft' a glow, fading out to its edge. */
   outline?: 'cel' | 'soft';
 }
@@ -62,12 +71,13 @@ export const BEAM_MOVES: Record<string, BeamSpec> = {
   'Dragon Pulse': { element: 'Dragon', style: 2 },
   'Hyper Beam': { element: 'Normal', style: 2 },
   // An icy thunderbolt, out of a beam's starting egg.
-  'Ice Beam': { element: 'Ice', bolt: true },
+  // (Built as Thunderbolt is — drawn as its user's Ice aura — out of beam 2's starting egg, small: thickness.)
+  'Ice Beam': { element: 'Ice', bolt: true, style: 2, auraBolt: true, thickness: 0.25 },
   'Aurora Beam': { element: 'Ice' },
   'Solar Beam': { element: 'Grass', style: 2 },
   'Flash Cannon': { element: 'Steel', style: 2 },
-  // A psychic bolt, out of a beam's starting egg (as Ice Beam).
-  'Psybeam': { element: 'Psychic', bolt: true },
+  // A psychic bolt, built as Ice Beam is: drawn as its user's Psychic aura, out of beam 2's starting egg, small.
+  'Psybeam': { element: 'Psychic', bolt: true, style: 2, auraBolt: true, thickness: 0.25 },
   'Signal Beam': { element: 'Bug' },
   'Charge Beam': { element: 'Electric' },
   'Hydro Pump': { element: 'Water' },

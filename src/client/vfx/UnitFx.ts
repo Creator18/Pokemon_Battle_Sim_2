@@ -41,7 +41,7 @@ import { RenderTargetTexture } from '@babylonjs/core/Materials/Textures/renderTa
 import { PostProcess } from '@babylonjs/core/PostProcesses/postProcess';
 import { Constants } from '@babylonjs/core/Engines/constants';
 
-import { auraPalette, auraHue, auraGlow, isFire, type RGB } from './auraPalette.ts';
+import { auraPalette, auraHue, auraGlow, isFire, isElectric, type RGB } from './auraPalette.ts';
 import { SkinSampler } from '../render/skinSampler.ts';
 import { partBones } from '../render/bodyParts.ts';
 
@@ -86,6 +86,12 @@ const FOCUS_STAND = 0.4, FOCUS_BAND = 0.7, FOCUS_OVER = 0.5;
 /** Bone flags the part mask's shader takes (four to a vec4). */
 const PART_BONES = 256;
 const ZERO_FLAGS: number[] = new Array(PART_BONES).fill(0);
+/** A bolt in a silhouette (boltMaskColorFor): its blue, as a share of its channel — under a beam's (1), over a body's (0). */
+const BOLT_MASK_B = 0.6;
+/** A bolt's strands this near each other (px, either side of a pixel): the gap between them filled by its aura, not outlined. */
+const BOLT_GAP = 6;
+/** An occluder in the mask (addOccluder): no unit's colour, its alpha alone. */
+export const OCCLUDER_MASK = new Color4(0, 0, 0, 1);
 const JFA_STEPS = [128, 64, 32, 16, 8, 4, 2, 1, 1]; // half-res px; reach ≤ 255 half px (+1 pass for accuracy): a ram clash's drawn-out aura reaches far
 
 /**
@@ -138,6 +144,11 @@ export interface AuraOptions {
    * off the body to the ground, in thin strokes. UnitFx itself ignores it.
    */
   charging?: boolean;
+  /**
+   * Only on its effects, not on the body (Ice Beam's: the bolt, its egg and clash ball drawn by it — BeamShot.maskBall —
+   * the Pokémon itself bare): while every aura it wears is so, its body is in the mask as an occluder, hiding them.
+   */
+  effectsOnly?: boolean;
   /**
    * Its beam's heavy and light noise bursts off the body, again and again,
    * as it does off the Water coat (Flame Charge's fire). UnitFx itself ignores it.
@@ -209,6 +220,10 @@ interface Unit {
   airborne: boolean;
   /** Effect geometry drawn into this unit's silhouette (a beam's shaft): no floor cut while any. */
   extras: Set<AbstractMesh>;
+  /** Till when (its clock) part of another's bolt is in its silhouette (shareBolt): its outline then drawn all round, as with extras of its own. */
+  sharedUntil?: number;
+  /** Its body in the mask as an occluder, no part of its silhouette (every aura it wears effectsOnly). */
+  bodyless?: boolean;
   auras: Aura[];
   flash: Flash | null;
   /** Held white (0..1): an evolving Pokémon glowing white, over any flash. */
@@ -350,6 +365,7 @@ uniform vec4 extra[2];    // airborne, extras, zigzag (Electric: the outline is 
 uniform vec4 focus[2];    // focused on a body part: -, -, -, on (the field then grows from the part)
 uniform vec4 stretch[2];  // drawn out one way: screen dir (unit, gl px axes), how far (× its standoff), -
 uniform float nearSlot;   // the slot nearest the camera: its aura drawn last, over the other's
+uniform vec2 bodyless;    // per slot: its body in the mask as an occluder (Unit.bodyless): its own aura hidden over it too
 uniform vec3 hue[2];
 uniform vec3 glowCol[8];  // per slot: outer glow, inner glow, line, fill
 uniform vec4 shiverPts[36]; // 72 per slot, 4 per vec4
@@ -477,6 +493,17 @@ vec3 glowAt(float d, float aa) {
 /** The fill inside the hot line (sd < 0 inside), its edge hard. */
 float fillAt(float sd, float aa) { return 1.0 - smoothstep(-${AURA_CEL_LINE.toFixed(2)} - aa, -${AURA_CEL_LINE.toFixed(2)} + aa, sd); }
 
+// A narrow gap in an aura's own effects (a bolt's strands near each other): the shape on both sides of uv, d px away
+// either way — across, up and down, or a diagonal. (Its bolt shared: the other's half counts too.)
+float shapeAt(int i, vec2 uv, bool both) { vec4 mm = texture2D(maskSampler, uv); float a = i == 0 ? mm.r : mm.g; return both ? max(mm.r, mm.g) : a; }
+bool inGap(int i, vec2 uv, float d, bool both) {
+  vec2 ax = vec2(d / res.x, 0.0), ay = vec2(0.0, d / res.y), dg = vec2(0.7 * d / res.x, 0.7 * d / res.y), dh = vec2(0.7 * d / res.x, -0.7 * d / res.y);
+  return (shapeAt(i, uv - ax, both) > 0.5 && shapeAt(i, uv + ax, both) > 0.5)
+      || (shapeAt(i, uv - ay, both) > 0.5 && shapeAt(i, uv + ay, both) > 0.5)
+      || (shapeAt(i, uv - dg, both) > 0.5 && shapeAt(i, uv + dg, both) > 0.5)
+      || (shapeAt(i, uv - dh, both) > 0.5 && shapeAt(i, uv + dh, both) > 0.5);
+}
+
 vec4 auraAt(int i, vec2 q, vec2 uv) {
   float off, lineAt, halfW, flick;
   if (!ringAt(i, q, uv, off, lineAt, halfW, flick)) return vec4(0.0);
@@ -493,6 +520,8 @@ void main(void) {
   vec3 bg = texture2D(sceneSampler, vUV).rgb;
   vec3 col = bg;
   vec4 m = texture2D(maskSampler, vUV);
+  // (An occluder — addOccluder — here: in the mask with nothing of any unit's, only its alpha.)
+  bool occl = m.a > 0.4 && max(max(m.r, m.g), m.b) < 0.02;
   vec4 near = texture2D(textureSampler, vUV);
   vec2 p = gl_FragCoord.xy;
 
@@ -500,9 +529,12 @@ void main(void) {
     // The farther one first, the nearer last: where their auras meet, the
     // nearer's lies over the farther's.
     int i = nearSlot < 0.5 ? 1 - k : k;
+    // (The nearer unit's effect drawn in the scene in front of it — addOccluder: the farther unit's aura hidden there,
+    // and what lies under its aura too. A bare body — bodyless — its own aura too: its effects' outlines never over it.)
+    bool hidden = occl && (float(i) != nearSlot || (i == 0 ? bodyless.x : bodyless.y) > 0.5);
     // Its spheres' far sides first, under its aura (over the farther unit's all).
-    col = overOf(col, i == 0 ? texture2D(back0Sampler, vUV) : texture2D(back1Sampler, vUV));
-    if (flags[i].w < 0.5) {
+    if (!hidden) col = overOf(col, i == 0 ? texture2D(back0Sampler, vUV) : texture2D(back1Sampler, vUV));
+    if (flags[i].w < 0.5 || hidden) {
       col = overOf(col, i == 0 ? texture2D(front0Sampler, vUV) : texture2D(front1Sampler, vUV));
       continue;
     }
@@ -516,8 +548,11 @@ void main(void) {
       float hgt = clamp((p.y - b.y) / max(b.w - b.y, 1.0), 0.0, 1.0);
       float up = clamp((power * (1.0 + ${SOFT.toFixed(2)}) - hgt) / ${SOFT.toFixed(2)}, 0.0, 1.0);
       if (up > 0.0) {
-        if (mine > 0.5 && m.b > 0.5) {
-          // Effect geometry (a beam) in the silhouette: outlined, never tinted.
+        if (mine > 0.5 && m.b > 0.3 * mine) {
+          // Effect geometry in the silhouette: outlined, never tinted — a beam's shaft (its blue as strong as its
+          // channel) left as it is; a bolt that is an arm of the aura (its blue weaker: BOLT_MASK_B of its channel,
+          // so told apart at any coverage) filled with the aura's fill too, over the bolt.
+          if (m.b < 0.8 * mine) col = mix(col, glowCol[i * 4 + 3], up);
         } else if (mine > 0.5) {
           if (focus[i].w > 0.5) {
             // A punch: the coat round the hand is laid over the body too,
@@ -535,7 +570,11 @@ void main(void) {
           }
         } else if (mine < 0.5 && other < 0.5 && m.b > 0.5) {
           // An overlay (addOverlay: a wind spiral round the feet): drawn over the aura.
-        } else if (!(other > 0.5 && flags[i].z < 0.5)) {
+        } else if (!((other > 0.5 && flags[i].z < 0.5) || (other > 0.15 && m.b > 0.3 * other && (other > mine || (other == mine && i == 1))))) {
+          // (Its outline over the other's body only when it is nearer — and never over the other's effects: a bolt
+          // shared between them, the other's half of it filled by the other's aura alone, no outline crossing it. A
+          // pixel at the edge of both halves goes to whichever covers more of it — the first on a tie — so one aura
+          // always draws it: none left open, the ground showing through.)
           vec4 w = vec4(0.0);
           if (extra[i].x > 0.5 || extra[i].y > 0.5 || focus[i].w > 0.5) {
             // In the air (or a beam): the whole outline, where it is.
@@ -577,6 +616,17 @@ void main(void) {
               }
             }
           }
+          // (Its own bolt's strands near each other: the narrow gap between them — BOLT_GAP px at most, its own shape on
+          // both sides — filled, not outlined: no thin line of outline running inside the bolt. Never wider, never by
+          // another's shape: else the grass between a bolt and a body, anywhere at the height of the aura, went yellow.)
+          bool shared = extra[i].y > 0.5 && extra[1 - i].y > 0.5 && shape[1 - i].x > 0.01;
+          if (extra[i].y > 0.5 && m.b < 0.01 && w.w < 0.99 && inGap(i, vUV, ${BOLT_GAP.toFixed(1)}, false)) w = vec4(0.0, 0.0, 0.0, 1.0);
+          // (A bolt shared between the two — its firer's half and its target's, each its own aura's — read as one
+          // shape: this one's outline gives way wherever the other's fill covers, so none runs inside where they join.)
+          if (shared) {
+            vec4 wo = auraAt(1 - i, p, vUV);
+            w.xyz *= 1.0 - smoothstep(0.0, 0.08, wo.w);
+          }
           // The glow, the line in the outline's colour, then the fill inside it.
           vec3 c = mix(col, glowCol[i * 4], clamp(0.8 * w.x, 0.0, 1.0));
           c = mix(c, glowCol[i * 4 + 1], clamp(0.9 * w.y, 0.0, 1.0));
@@ -593,6 +643,14 @@ void main(void) {
     }
     // And its spheres' near sides, over its aura.
     col = overOf(col, i == 0 ? texture2D(front0Sampler, vUV) : texture2D(front1Sampler, vUV));
+  }
+  // (A bolt that is an arm of an aura — its own pixels in the silhouette: its aura's fill on top of all on it, over
+  // either aura's outlines, glows and spheres.)
+  for (int i = 0; i < 2; i++) {
+    float mb = i == 0 ? m.r : m.g;
+    // (Its soft edges too — told by its blue's share of its channel, the same however little of the pixel it covers —
+    // or a hairline of what is under shows along every strand inside it.)
+    if (shape[i].x > 0.01 && mb > 0.05 && m.b > 0.3 * mb && m.b < 0.8 * mb) col = glowCol[i * 4 + 3];
   }
   // The auras' noise over it all, in its own colours (never tone mapped nor
   // fogged, as the aura is not): its linear colours to display (the gamma
@@ -629,6 +687,8 @@ export class UnitFx {
   private units = new Map<TransformNode, Unit>();
   private mask: RenderTargetTexture;
   private maskMats: StandardMaterial[];
+  /** A bare body in the mask, as an occluder (Unit.bodyless). */
+  private maskDepth: StandardMaterial;
   /** The part mask (see unitFxPart) and its material per slot. */
   private partMask: RenderTargetTexture;
   private partMats: ShaderMaterial[];
@@ -651,10 +711,20 @@ export class UnitFx {
       Constants.TEXTURETYPE_UNSIGNED_BYTE, false, Texture.BILINEAR_SAMPLINGMODE, true);
     this.mask.clearColor = new Color4(0, 0, 0, 0);
     this.mask.samples = 4;
+    // (Its later groups — a beam's outlines, in BeamFx's BALL_OUTLINE_GROUP — keep the depth drawn so far: occluders.)
+    for (const g of [1, 2, 3]) this.mask.setRenderingAutoClearDepthStencil(g, false);
     this.mask.activeCamera = camera;
     this.mask.renderParticles = false;
     this.mask.renderSprites = false;
     this.mask.refreshRate = 1;
+    // (Painted as an occluder — OCCLUDER_MASK, black, opaque: in front, it covers its effects drawn before it.)
+    this.maskDepth = new StandardMaterial('unitFxMaskDepth', scene);
+    this.maskDepth.disableLighting = true;
+    this.maskDepth.emissiveColor = Color3.Black();
+    this.maskDepth.diffuseColor = Color3.Black();
+    this.maskDepth.specularColor = Color3.Black();
+    this.maskDepth.fogEnabled = false;
+    this.maskDepth.backFaceCulling = false;
     this.maskMats = [new Color3(1, 0, 0), new Color3(0, 1, 0)].map((c, i) => {
       const m = new StandardMaterial(`unitFxMask${i}`, scene);
       m.disableLighting = true;
@@ -697,6 +767,7 @@ export class UnitFx {
       const rt = new RenderTargetTexture(`unitFxLayer${k}`, { ratio: 1 }, scene, false, true,
         Constants.TEXTURETYPE_HALF_FLOAT, false, Texture.BILINEAR_SAMPLINGMODE, true);
       rt.clearColor = new Color4(0, 0, 0, 0);
+      for (const g of [1, 2, 3]) rt.setRenderingAutoClearDepthStencil(g, false);
       rt.activeCamera = camera;
       rt.renderParticles = false;
       rt.renderSprites = false;
@@ -749,7 +820,7 @@ export class UnitFx {
       this.passes.push(pp);
     }
     this.composite = new PostProcess('unitFxComposite', 'unitFxComposite',
-      ['fieldScale', 'res', 'time', 'box', 'shape', 'flags', 'flash', 'extra', 'focus', 'hue', 'glowCol', 'shiverPts', 'nearSlot', 'stretch'],
+      ['fieldScale', 'res', 'time', 'box', 'shape', 'flags', 'flash', 'extra', 'focus', 'hue', 'glowCol', 'shiverPts', 'nearSlot', 'stretch', 'bodyless'],
       ['sceneSampler', 'maskSampler', 'noiseSampler', 'overSampler', 'back0Sampler', 'front0Sampler', 'back1Sampler', 'front1Sampler'], half.ratio, null, Texture.NEAREST_SAMPLINGMODE, engine as never, false,
       null, Constants.TEXTURETYPE_HALF_FLOAT);
     this.composite.onApply = (e) => {
@@ -771,6 +842,7 @@ export class UnitFx {
       e.setFloatArray4('extra', u.extra);
       e.setFloatArray4('focus', u.focus);
       e.setFloat('nearSlot', this.nearSlot);
+      e.setFloat2('bodyless', this.slotBodyless(0), this.slotBodyless(1));
       e.setFloatArray3('hue', u.hue);
       e.setFloatArray3('glowCol', u.glow);
       e.setFloatArray4('shiverPts', u.shiver);
@@ -803,6 +875,21 @@ export class UnitFx {
    * The colour a unit's silhouette is drawn in in the mask — its slot's
    * channel, plus blue marking "effect, not body" (no tint or flash there).
    */
+  /**
+   * Part of another's bolt is in this unit's silhouette now (its last stretch, where it goes in): its aura's outline
+   * drawn all round its shape, as with extras of its own (not stopped at its feet). Told each frame; lapses after.
+   */
+  shareBolt(root: TransformNode): void {
+    const u = this.units.get(root);
+    if (u) u.sharedUntil = this.time + 0.15;
+  }
+
+  /** A bolt that is an arm of its user's aura (Thunderbolt): its mask colour — the unit's, its blue weaker (see the composite). */
+  boltMaskColorFor(root: TransformNode): Color4 | null {
+    const c = this.maskColorFor(root);
+    return c ? new Color4(c.r, c.g, BOLT_MASK_B, 1) : null;
+  }
+
   maskColorFor(root: TransformNode): Color4 | null {
     const u = this.units.get(root);
     if (!u) return null;
@@ -943,8 +1030,9 @@ export class UnitFx {
     this.over.renderList = [...bodies, ...lists[0]];
     this.over.setMaterialForRendering(bodies, this.depthOnly);
     this.layers.forEach((rt, k) => {
-      rt.renderList = [...bodies, ...lists[k + 1]];
+      rt.renderList = [...bodies, ...lists[k + 1], ...this.occluders.keys()];
       rt.setMaterialForRendering(bodies, this.depthOnly);
+      for (const [mesh, o] of this.occluders) rt.setMaterialForRendering(mesh, o.depth);
     });
   }
 
@@ -962,8 +1050,36 @@ export class UnitFx {
   /** The slot nearest the camera this frame (its aura drawn last). */
   private nearSlot = 1;
 
+  /**
+   * Hide the farther unit's aura behind `mesh` — an effect drawn in the scene (a beam's clash ball), `owner`'s — while
+   * `owner` is the nearer unit: `mask` paints OCCLUDER_MASK where it shows (and must discard when `owner` is not the
+   * nearer — the caller's, by nearer()), `depth` writes its depth alone (the units' layers: their spheres and spiked
+   * outlines hidden behind it too). Returns the undo.
+   */
+  addOccluder(mesh: AbstractMesh, mask: Material, depth: Material): () => void {
+    this.occluders.set(mesh, { mask, depth });
+    this.refreshMaskList();
+    this.refreshNoiseList();
+    return () => {
+      this.occluders.delete(mesh);
+      this.refreshMaskList();
+      this.refreshNoiseList();
+    };
+  }
+  private occluders = new Map<AbstractMesh, { mask: Material; depth: Material }>();
+  private slotBodyless(slot: number): number {
+    for (const u of this.units.values()) if (u.slot === slot) return u.bodyless ? 1 : 0;
+    return 0;
+  }
+  /** Whether `root` is the unit nearest the camera this frame (its aura drawn last). */
+  nearer(root: TransformNode): boolean {
+    const u = this.units.get(root);
+    return !!u && u.slot === this.nearSlot;
+  }
+
   private refreshMaskList(): void {
-    this.mask.renderList = [...[...this.units.values()].flatMap((u) => [...u.meshes, ...u.props, ...u.extras]), ...this.overlays];
+    this.mask.renderList = [...[...this.units.values()].flatMap((u) => [...u.meshes, ...u.props, ...u.extras]), ...this.overlays, ...this.occluders.keys()];
+    for (const [mesh, o] of this.occluders) this.mask.setMaterialForRendering(mesh, o.mask);
     // Every unit goes into the part mask (black where not the part), so a
     // part behind a body stays hidden behind it.
     this.partMask.renderList = [...this.units.values()].flatMap((u) => [...u.meshes, ...u.props]);
@@ -977,6 +1093,11 @@ export class UnitFx {
 
   has(root: TransformNode): boolean {
     return this.units.has(root);
+  }
+
+  /** Wearing an aura now (one not yet gone). */
+  hasAura(root: TransformNode): boolean {
+    return (this.units.get(root)?.auras.length ?? 0) > 0;
   }
 
   /** Flash the body `rgb` (display colour): `hold` s at `peak`, then `fade` s out. */
@@ -1018,7 +1139,7 @@ export class UnitFx {
     const opts: Required<AuraOptions> = { edge: 'tongues', reach: 'body', ignite: IGNITE, die: DIE,
       // Every aura is a filled shape: the outline in the type's colour, a
       // lighter shade inside it (auraGlow).
-      fill: true, shiver: (options.edge ?? 'tongues') === 'tongues', strike: false as boolean | string, blade: false, focus: '', region: null, charging: false, noiseBurst: false, wind: true, noiseElement: '', ...options };
+      fill: true, shiver: (options.edge ?? 'tongues') === 'tongues', strike: false as boolean | string, blade: false, focus: '', region: null, charging: false, effectsOnly: false, noiseBurst: false, wind: true, noiseElement: '', ...options };
     const pal = auraPalette(opts.element);
     let onLit = () => {};
     let onGone = () => {};
@@ -1051,6 +1172,13 @@ export class UnitFx {
     let nearest = -1, nd = Infinity;
     for (const o of others) { const dd = Vector3.DistanceSquared(camPos, o.root.getAbsolutePosition()); if (dd < nd) { nd = dd; nearest = o.slot; } }
     this.nearSlot = nearest < 0 ? 1 : nearest;
+    // (A unit wearing auras on its effects alone: its body hides what is behind it in the mask, but is no part of it.)
+    for (const o of others) {
+      const bodyless = o.auras.length > 0 && o.auras.every((a) => !!a.opts.effectsOnly);
+      if (bodyless === !!o.bodyless) continue;
+      o.bodyless = bodyless;
+      this.mask.setMaterialForRendering([...o.meshes, ...o.props], bodyless ? this.maskDepth : this.maskMats[o.slot]);
+    }
     // What belongs to no unit (a ball in flight): over the auras while it is
     // nearer the camera than every unit, under them (in the scene) otherwise.
     let moved = false;
@@ -1094,7 +1222,7 @@ export class UnitFx {
       // Where the silhouette is on screen.
       const box = this.screenBox(u);
       U.box.set(box, s * 4);
-      U.extra.set([u.airborne ? 1 : 0, u.extras.size ? 1 : 0, aura?.opts.element === 'Electric' ? 1 : 0, aura?.opts.fill ? 1 : 0], s * 4);
+      U.extra.set([u.airborne ? 1 : 0, u.extras.size || (u.sharedUntil ?? -1) > this.time ? 1 : 0, isElectric(aura?.opts.element ?? '') ? 1 : 0, aura?.opts.fill ? 1 : 0], s * 4);
       if (aura?.opts.focus && this.partOn(u, aura.opts.focus)) {
         U.focus.set([0, 0, 0, 1], s * 4);
         this.usePart[s] = 1;

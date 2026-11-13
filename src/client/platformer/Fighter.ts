@@ -769,9 +769,13 @@ export class Fighter {
    */
   zap(on: Fighter, move: string, until: Promise<unknown>): void {
     const type = getMove(move)?.moveType;
-    const element = move === 'Ice Beam' ? 'Ice' : move === 'Psybeam' ? 'Psychic' : type === 'Electric' ? 'Electric' : null;
-    if (!element || on.down) return;
-    const aura = this.factory.aura(on.node, { element, edge: 'smooth', reach: 'body', fill: true, ignite: 0.08, die: 0.35, shiver: true });
+    const plain = move === 'Ice Beam' ? 'Ice' : move === 'Psybeam' ? 'Psychic' : type === 'Electric' ? 'Electric' : null;
+    if (!plain || on.down) return;
+    // (In its striker's lightning's colours — Zeraora's blue — not the struck one's own.)
+    const element = this.factory.hueOf(this.node, plain);
+    // (As tight to the body as its firer's: the bolt's far half, taken into its silhouette, then wears the same band
+    // as its near half — both ends joined alike — not a body-wide aura swelling over the whole of it.)
+    const aura = this.factory.aura(on.node, { element, edge: 'smooth', reach: 'tight', fill: true, ignite: 0.08, die: 0.35, shiver: true });
     void until.then(() => aura.release());
   }
 

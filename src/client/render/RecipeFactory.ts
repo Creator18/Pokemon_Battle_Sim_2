@@ -48,7 +48,7 @@ import type { PulseFx, PulseSpec } from '../vfx/PulseFx.ts';
 import type { WindFx } from '../vfx/WindFx.ts';
 import type { WindSpec } from '../vfx/windMoves.ts';
 import { iceBlock, shatterIce, meltIce, ICE_ALPHA, type IceBlock } from './iceBlock.ts';
-import { ICE_BOLT, PSY_BOLT, type LightningFx, type EarthOptions, type BoltColors } from '../vfx/LightningFx.ts';
+import { ICE_BOLT, PSY_BOLT, BLUE_BOLT, type LightningFx, type EarthOptions, type BoltColors } from '../vfx/LightningFx.ts';
 import type { SlashFx } from '../vfx/SlashFx.ts';
 import { QuickStepFx } from '../vfx/QuickStepFx.ts';
 import { gaitSpeed } from './gait.ts';
@@ -58,14 +58,15 @@ import { sampleTrack } from '../recipe/tranm.js';
 import { ArcSlashFx } from '../vfx/ArcSlashFx.ts';
 import { SparkleFx } from '../vfx/SparkleFx.ts';
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
+import type { ShaderMaterial } from '@babylonjs/core/Materials/shaderMaterial';
 import type { ClawSpec } from '../vfx/slashMoves.ts';
 import type { LightningSpec } from '../vfx/lightningMoves.ts';
 import type { BeamSpec } from '../vfx/beam/beamMoves.ts';
 import type { BallSpec } from '../vfx/beam/ballMoves.ts';
 import { fireTone } from '../vfx/xorFire.ts';
 import { RisingFire, FireSphere } from '../vfx/FireFx.ts';
-import { auraReach, auraLineReach, type UnitFx, type AuraHandle, type AuraOptions } from '../vfx/UnitFx.ts';
-import { elementFor, auraGlow, isFire, type RGB } from '../vfx/auraPalette.ts';
+import { auraReach, auraLineReach, OCCLUDER_MASK, type UnitFx, type AuraHandle, type AuraOptions } from '../vfx/UnitFx.ts';
+import { elementFor, auraGlow, isFire, isElectric, type RGB } from '../vfx/auraPalette.ts';
 import { WaterCoat, FIRE_BURSTS, BLUE_FIRE_TOWARD, waterSurface } from '../vfx/WaterCoat.ts';
 import { SkinSampler, VertexSubset } from './skinSampler.ts';
 import { BODY_PARTS, BLADES, CLAW_ON_ATTACK, STRIKE_PARTS, partBones, partMeasureBone, regionFlags } from './bodyParts.ts';
@@ -391,7 +392,26 @@ const CANNONS: Record<string, string[]> = {
   'Mega Blastoise': ['feeler_b_01', 'left_feeler_a_01', 'right_feeler_a_01'],
 };
 /** Bolts in colours of their own, by element (default: Electric's). */
-const BOLT_COLORS: Record<string, BoltColors | undefined> = { Ice: ICE_BOLT, Psychic: PSY_BOLT };
+const BOLT_COLORS: Record<string, BoltColors | undefined> = { Ice: ICE_BOLT, Psychic: PSY_BOLT, BlueElectric: BLUE_BOLT };
+/** A bolt drawn as its user's aura (Thunderbolt): its ribbons' width (× the base, 0.012 of its user's height). */
+const BOLT_AURA_RIBBON = 2.5;
+/** A bolt held in a clash, its half of the ball drawn as its aura: how far short of the clash point it ends (× the ball's radius — inside its core). */
+const BOLT_INTO_CORE = 0.3;
+/** An aura bolt out of its starting egg (Ice Beam): where along the egg, its centre (0) to its tip (1), it starts — inside the core. */
+const BOLT_FROM_EGG = 0.4;
+/**
+ * The glow on the ground under a Pokémon wearing lightning (auraGroundGlow): how bright, how wide (× its height), how
+ * high off the ground it is gone by (× its height), how long it fades out (s); Electric's colour.
+ */
+const AURA_GROUND_GLOW = 1.6, AURA_GROUND_R = 0.75, AURA_GROUND_FADE = 1.2, AURA_GROUND_OUT = 0.3;
+const AURA_GROUND_YELLOW = new Vector3(1.0, 0.88, 0.25);
+/**
+ * Thunder (thunderFromSky): its thick bolt's and its thinner ones' ribbon widths (× the base, 0.012 of the target's
+ * height); where the thinner ones fall from (× its height, sideways and in depth, round the thick one); how high the
+ * sky is (× its height: above the top of any view); how long it holds (s).
+ */
+const THUNDER_MAIN = 6, THUNDER_SIDE = 2.2, THUNDER_SKY_UP = 14, THUNDER_HOLD = 1.0;
+const THUNDER_SIDES: [number, number][] = [[-1.6, 0.4], [1.4, -0.5], [0.3, 1.2]];
 /**
  * A bolt's ends on a body (surfaceToward): how much a point off the line
  * counts against it, and how far in from the surface the bolt runs (× height)
@@ -2223,6 +2243,8 @@ export class RecipeFactory implements UnitFactory {
     // In a clash it aims at the clash point — until it has won, then on into the loser.
     // (Till the clash is met, at the target: it races there until the other's front meets it.)
     const aimAt = clash ? () => (clash.over?.() ? toTarget() : clash.at() ?? toTarget()) : toTarget;
+    // A bolt drawn as its user's aura (Thunderbolt's, off the body; Ice Beam's, out of its egg — BeamSpec.auraBolt).
+    const auraBolt = !!spec.bolt && (!!spec.eggless || !!spec.auraBolt);
     // The charge plays through the wind-up; the launch comes with the loop.
     // From the mouth, or from each of its cannons (CANNONS): twin beams converging.
     const muzzles = this.muzzlesOf(node);
@@ -2241,7 +2263,7 @@ export class RecipeFactory implements UnitFactory {
     // Twins (or triplets) start level with each other (BeamShot.twin).
     const twin = muzzles ? { fwd: () => new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y)), reach: new Map<number, number>() } : undefined;
     const handles = sources.map((from, i) => this.beams!.fire({ ...spec, height, mouth: from, target: aimEach,
-      exactTarget: !!meet,
+      exactTarget: !!meet || !!spec.exactTarget,
       thickness: (spec.thickness ?? 1) * (muzzles ? CANNON_THICKNESS[muzzles.length] ?? 0.5 : 1),
       twin,
       // Out of a muzzle: the ball sits at it (not a face's gap ahead); no egg: at the mouth.
@@ -2254,6 +2276,14 @@ export class RecipeFactory implements UnitFactory {
       targetPoses: target ? (fn) => this.everyStruckPose(target, fn) : undefined,
       // A twin's second beam leaves the clash's ball to the first.
       clash: clash && i > 0 ? { ...clash, ball: false } : clash,
+      // A bolt drawn as its user's aura (auraBolt): its starting egg and its half of a clash's ball drawn so too.
+      maskBall: auraBolt && i === 0 && this.fx?.has(node)
+        ? { color: this.fx.boltMaskColorFor(node)!, add: (mesh: Mesh, mat: ShaderMaterial) => this.fx!.addToMask(node, mesh, mat),
+          back: (mesh: Mesh) => this.fx!.addBack(mesh, node) } : undefined,
+      // (Any other beam in a clash: its pieces hide an aura-drawn ball — the other's, a bolt's — where in front of it.)
+      occlude: clash && !auraBolt && this.fx?.has(node)
+        ? { color: OCCLUDER_MASK, on: () => this.fx!.nearer(node),
+          add: (mesh: Mesh, mask: ShaderMaterial, depth: ShaderMaterial) => this.fx!.addOccluder(mesh, mask, depth) } : undefined,
       // Its own body, so no part of the beam lies over it.
       bodyAhead: u ? (from, aim, radius) => {
         let best = 0;
@@ -2282,8 +2312,10 @@ export class RecipeFactory implements UnitFactory {
     const launched = new Promise<void>((r) => { launchedNow = r; });
     // A bolt off the body (Thunderbolt): its Electric aura, lightning earthing off
     // it to the ground, from the start of its charge until it lets go.
-    if (spec.bolt && spec.eggless) {
-      const aura = this.aura(node, { element: spec.element, edge: 'smooth', reach: 'tight', ignite: 0.3, die: 0.5, shiver: true, charging: true });
+    if (auraBolt) {
+      // (Out of an egg — Ice Beam's — the aura on the bolt, its egg and its clash ball alone: the Pokémon itself bare.)
+      const aura = this.aura(node, { element: spec.element, edge: 'smooth', reach: 'tight', ignite: 0.3, die: 0.5, shiver: true, charging: true,
+        effectsOnly: !spec.eggless });
       void contactEnds.then(() => aura.release());
     }
     const done = (async () => {
@@ -2331,27 +2363,36 @@ export class RecipeFactory implements UnitFactory {
           return f();
         };
         for (const h of handles) {
-          const start = spec.eggless ? body : () => h.eggTip();
+          // (Drawn as its user's aura, out of an egg drawn so too: from inside the egg's core — its fill and the egg's one
+          // — not its torn tip.)
+          const start = spec.eggless ? body : auraBolt ? () => Vector3.Lerp(h.origin(), h.eggTip(), BOLT_FROM_EGG) : () => h.eggTip();
           const end = () => {
             const e = h.end();
             // Connecting, it runs right into the body: on whoever it is on, or (a clash won) the loser pushed through to.
             const on = spec.onto?.();
             if (on) return surfaceOf(on);
             if (struck && clash?.over?.()) return struck();
-            // Held in a clash: it stops at the ball's surface, never on over it (the ball hides where it goes in).
+            // Held in a clash: it stops at the ball's surface, never on over it (the ball hides where it goes in) — or,
+            // its half of the ball drawn as its aura too (BeamShot.maskBall), on into the ball's core: the bolt's fill
+            // and the core's one.
             const met = clash && !clash.over?.() ? clash.at() : null;
             if (met) {
-              const s0 = start(), way = met.subtract(s0), L = way.length(), r = clashBallRadius(clash!.size) * 0.85;
+              const s0 = start(), way = met.subtract(s0), L = way.length();
+              const r = clashBallRadius(clash!.size) * (auraBolt && this.fx?.has(node) ? BOLT_INTO_CORE : 0.85);
               return L > r ? s0.add(way.scale((L - r) / L)) : s0;
             }
             if (!struck) return e;
             const s0 = start(), sp = struck();
             return Vector3.DistanceSquared(s0, e) >= Vector3.DistanceSquared(s0, sp) * 0.97 ? sp : e;
           };
-          this.lightning.bolt(start, end, { width: W * 7, strands: 2, forks: 4, hold: 0, light: 2.5,
-            colors, holdUntil: contactEnds,
-            // (Over the auras, without the scene's tone mapping: the aura's yellow, not bleached to cream.)
-            over: this.fx ? (mesh) => this.fx!.addOver(mesh) : undefined });
+          // (Drawn as its user's Electric aura: boltAura.)
+          const mask = this.boltAura(node, () => spec.onto?.());
+          const width = mask ? (W / TILE_SCALE) * height * BOLT_AURA_RIBBON : W * 7;
+          this.lightning.bolt(start, end, { width, strands: 2, forks: 4, hold: 0, light: 2.5, converge: true,
+            colors, holdUntil: contactEnds, mask,
+            // (Under the auras — their outline and fill laid over it — where it is an aura's; with none, over them,
+            // without the scene's tone mapping: the aura's yellow, not bleached to cream.)
+            over: this.fx && !mask ? (mesh) => this.fx!.addOver(mesh) : undefined });
         }
 
       }
@@ -3452,7 +3493,8 @@ export class RecipeFactory implements UnitFactory {
   aura(node: TransformNode, options: AuraOptions): AuraHandle {
     // A Fire aura on the whole body always has its fire's noise bursting off it
     // (not a hand's or a blade's, nor a struck body's fill).
-    const whole = !options.strike && !options.blade && !options.focus && !options.region && !options.fill;
+    // (An aura on its effects alone — effectsOnly, a bolt's out of an egg — is none: no coat, sphere or tornado on the body.)
+    const whole = !options.strike && !options.blade && !options.focus && !options.region && !options.fill && !options.effectsOnly;
     const fire = options.element === 'Fire' && whole;
     options = { ...options, element: this.hueOf(node, options.element), noiseBurst: options.noiseBurst ?? fire };
     // A slash or claw from a species with a blade of its own: only the blade is coated.
@@ -3495,7 +3537,8 @@ export class RecipeFactory implements UnitFactory {
     // (Its fire in another flame's colours where it says: Brave Bird's blue, round a fire aura of the usual colours.)
     // (A Dragon, Fighting, Dark or Ghost aura on the whole body has one too, in its own colours.)
     const nb = wu && options.noiseBurst && isFire(options.element) ? this.fireSphere(node, options.noiseElement || options.element)
-      : wu && whole && FIRE_SPHERE_BANDS[options.element] ? this.fireSphere(node, options.element) : null;
+      // (Not a bolt's charge — winding up Ice Beam: its aura draws the bolt, no crystal sphere round it.)
+      : wu && whole && !options.charging && FIRE_SPHERE_BANDS[options.element] ? this.fireSphere(node, options.element) : null;
     // A Flying aura on the whole body comes with its outer tornado round it
     // (windCoat), lit and let go with it — a golden one (Sky Attack's), golden.
     // (A Water aura on the whole body: a water tornado — the tornado's shape, the water's colours, ripples and foam.)
@@ -3509,40 +3552,83 @@ export class RecipeFactory implements UnitFactory {
     // (A Fairy aura on the whole body: star sparkles popping off it.)
     const sparkles = wu && whole && options.element === 'Fairy' ? this.sparkles(node) : null;
     const extra = [nb, wind, meadow, sparkles].filter((x): x is NonNullable<typeof x> => !!x);
-    const handle: AuraHandle = extra.length
+    const wrapped: AuraHandle = extra.length
       ? {
         lit: plain.lit, release: () => Promise.all([plain.release(), ...extra.map((x) => x.release())]).then(() => {}),
         // (Burst off on contact — Aqua Jet's water tornado: it swells out and is gone.)
         ...(wind ? { burst: () => Promise.all([plain.release(), wind.burst(), ...(nb ? [nb.release()] : []), ...(meadow ? [meadow.release()] : [])]).then(() => {}) } : {}),
       }
       : plain;
+    // (Its ground glow, if any, let go with it — see below.)
+    let glow: { stop(): void } | null = null;
+    const handle: AuraHandle = { ...wrapped, release: () => { glow?.stop(); return wrapped.release(); },
+      ...(wrapped.burst ? { burst: () => { glow?.stop(); return wrapped.burst!(); } } : {}) };
     // Electricity reads as such only with strokes earthing off the body
     // (EFFECTS.md Part 2 §4): an Electric aura, or any aura on an Electric type.
     const u = this.units.get(node);
     // (Struck by icy or psychic lightning — Ice Beam, Psybeam: its aura, shivering,
     // earths off it in that lightning's strokes.)
-    const zapped = options.shiver ? BOLT_COLORS[options.element] : undefined;
+    // (An aura on its effects alone — effectsOnly: no strokes earthing off the body, no glow under it.)
+    if (options.effectsOnly) return handle;
+    const blue = options.element === 'BlueElectric';
+    const zapped = options.shiver && !blue ? BOLT_COLORS[options.element] : undefined;
     const icy = !!zapped;
-    const electric = icy || options.element === 'Electric' || !!u?.types.includes('Electric');
-    if (!this.lightning || !u || !electric) return handle;
+    // (Lightning of its own colour — Zeraora's blue — earths off it in that colour.)
+    const lit = isElectric(options.element);
+    const electric = icy || lit || !!u?.types.includes('Electric');
+    // Lightning on its body (an Electric aura, or zapped) glows on the ground under it, in the lightning's colour.
+    glow = u && (lit || icy) ? this.auraGroundGlow(node, (zapped ?? (blue ? BLUE_BOLT : undefined))?.halo ?? AURA_GROUND_YELLOW, options.ignite ?? 0.5) : null;
+
+    // (Struck — a zap, shivering: none — no strokes flying off a body the lightning has just connected with; only a
+    // body that is itself electric, charging or clad in it, earths.)
+    if (!this.lightning || !u || !electric || (options.shiver && !options.charging)) return handle;
     const t0 = performance.now(), ignite = options.ignite ?? 0.5;
     // A charge (Volt Tackle) is a body clad in electricity: more strokes,
     // thicker, and never in the flicker's dead air.
-    const charge = options.element === 'Electric' && options.edge === 'tongues';
+    const charge = lit && options.edge === 'tongues';
     // Charging up a Thunderbolt: more strokes, thin, never in the flicker's dead air.
-    const charging = options.element === 'Electric' && !!options.charging;
+    const charging = lit && !!options.charging;
     const earth = this.earthing(node, {
-      power: () => Math.min(1, (performance.now() - t0) / 1000 / ignite) * (options.element === 'Electric' || icy ? 1 : 0.7),
-      bolts: charge || charging ? 9 : options.element === 'Electric' || icy ? 6 : 4,
-      colors: zapped,
+      power: () => Math.min(1, (performance.now() - t0) / 1000 / ignite) * (lit || icy ? 1 : 0.7),
+      bolts: charge || charging ? 9 : lit || icy ? 6 : 4,
+      colors: zapped ?? (blue ? BLUE_BOLT : undefined),
       // (An Electric aura's own strokes a little thicker than the strokes off other auras.)
-      thick: (charge ? 1.3 : charging ? 0.8 : 1) * (options.element === 'Electric' && !charging ? ELECTRIC_THICK : 1),
+      thick: (charge ? 1.3 : charging ? 0.8 : 1) * (lit && !charging ? ELECTRIC_THICK : 1),
       steady: charge || charging,
     });
     return {
       lit: handle.lit,
       release: () => { earth?.stop(); return handle.release(); },
     };
+  }
+
+  /**
+   * The glow on the ground under a Pokémon wearing lightning: a soft disc of `tint` light AURA_GROUND_R × its height
+   * across, lit in the floor's own shading (groundLight: the grass there glows too, feet stay in front of it), flickering with the lightning; it comes up over
+   * `ignite` s, dims as it rises off the ground (gone AURA_GROUND_FADE × its height up) and fades out when stopped.
+   */
+  private auraGroundGlow(node: TransformNode, tint: Vector3, ignite: number): { stop(): void } | null {
+    const u = this.units.get(node);
+    if (!this.lightning || !u) return null;
+    const h = displayHeight(u.model.height);
+    const g = this.lightning.groundGlow(tint);
+    const at = new Vector3();
+    const t0 = performance.now(), seed = Math.random() * 10;
+    let stopAt = 0;
+    const obs = this.scene.onBeforeRenderObservable.add(() => {
+      const t = (performance.now() - t0) / 1000;
+      const up = Math.min(1, t / Math.max(0.05, ignite));
+      const out = stopAt ? Math.max(0, 1 - (performance.now() - stopAt) / 1000 / AURA_GROUND_OUT) : 1;
+      if (stopAt && out <= 0) { this.scene.onBeforeRenderObservable.remove(obs); g.dispose(); return; }
+      const p = node.position;
+      const floor = this.groundAt ? this.groundAt(p.x, p.z) : 0;
+      const high = Math.max(0, 1 - (p.y - floor) / (AURA_GROUND_FADE * h));
+      // (A lightning flicker: two quick wobbles and a rare dip.)
+      const flick = 0.8 + 0.12 * Math.sin(t * 37 + seed) + 0.08 * Math.sin(t * 61 + seed * 2);
+      at.set(p.x, floor, p.z);
+      g.set(at, AURA_GROUND_R * h, up * out * high * flick * AURA_GROUND_GLOW);
+    });
+    return { stop: () => { if (!stopAt) stopAt = performance.now(); } };
   }
 
   /** Earthing strokes off a unit's body, until stopped. */
@@ -3579,6 +3665,68 @@ export class RecipeFactory implements UnitFactory {
     }, o);
   }
 
+  /**
+   * An Electric bolt drawn as its user's aura (all Electric lightning off a Pokémon): its ribbons in its user's
+   * silhouette — its Electric aura outlining it with its body and filling it, the ribbon itself drawing nothing — and,
+   * while it is on someone wearing an aura of their own, its far half in that one's silhouette: taken in by the
+   * target's aura as it is let go by its firer's, both ends joined the same way, split at one place along the bolt
+   * (LightningFx StrokeOpts.chord). None — a plain bolt — with no aura on its user to carry it (drawn nothing, it
+   * would not show at all).
+   */
+  private boltAura(node: TransformNode, onto: () => TransformNode | null | undefined) {
+    const fx = this.fx;
+    const color = fx?.hasAura(node) ? fx.boltMaskColorFor(node) : null;
+    if (!fx || !color) return undefined;
+    return {
+      color, wide: true, alsoFrom: 0.5,
+      add: (mesh: Mesh, mat: ShaderMaterial) => fx.addToMask(node, mesh, mat),
+      also: () => {
+        const on = onto();
+        if (!on || !fx.hasAura(on)) return null;
+        fx.shareBolt(on);
+        return fx.boltMaskColorFor(on);
+      },
+    };
+  }
+
+  /**
+   * Thunder striking `target` (after `delay` s): one thick bolt out of the sky high above it (above the top of the view),
+   * THUNDER_RING thinner ones round it, falling in from further out — all landing on its skin, all drawn as its
+   * Electric aura (the zap it wears while struck: its outline round them and its fill over them, the ribbons
+   * themselves drawing nothing — boltAura) — it flinching from the strike till they let go. Its hit: the thick one's;
+   * it lets go after THUNDER_HOLD s.
+   */
+  private thunderFromSky(target: TransformNode, delay: number, holdUntil?: Promise<void>, element = 'Electric'): BeamPlay {
+    const L = this.lightning!;
+    const H = this.heightOf(target);
+    // The sky: straight up, far above it — whatever the camera, out above the top of the view.
+    const sky = (dx: number, dz: number) => () => target.position.add(new Vector3(dx * H, THUNDER_SKY_UP * H, dz * H));
+    // Where each lands: on its skin — the point of its body facing that bolt's sky, as its pose is now (a crouching
+    // flinch, a turned back): never a fixed point over its feet, which hangs in the air above it seen from the side.
+    const onBody = (dx: number, dz: number) => this.surfaceToward(target, sky(dx, dz));
+    // Struck: its zap — the aura that carries every bolt — from the strike till they let go.
+    let zap: { release(): void } | null = null;
+    const zapAt = sleep(delay).then(() => {
+      // (In its caster's lightning's colours — Zeraora's blue — not the struck one's own.)
+      zap = this.aura(target, { element, edge: 'smooth', reach: 'tight', fill: true, ignite: 0.05, die: 0.35, shiver: true });
+    });
+    const asAura = () => {
+      const fx = this.fx!;
+      const color = fx.boltMaskColorFor(target)!;
+      return { color, wide: true, add: (mesh: Mesh, mat: ShaderMaterial) => fx.addToMask(target, mesh, mat) };
+    };
+    const thin = 0.012 * H;
+    // (Held — as long as told — or THUNDER_HOLD s.)
+    const main = L.bolt(sky(0, 0), onBody(0, 0), { width: thin * THUNDER_MAIN, strands: 2, forks: 4, hold: THUNDER_HOLD, holdUntil, delay, light: 3,
+      converge: true, mask: asAura() });
+    const ring = THUNDER_SIDES.map(([dx, dz], j) => L.bolt(sky(dx, dz), onBody(dx, dz), { width: thin * THUNDER_SIDE, strands: 1, forks: 1,
+      hold: 0, holdUntil: main.contactEnds, delay: delay + (j + 1) * 0.05, light: 0.6, converge: true, mask: asAura() }));
+    void Promise.all([zapAt, main.contactEnds]).then(() => setTimeout(() => zap?.release(), 120));
+    // Struck: it flinches as the thick bolt hits, held in its flinch till the bolts let go.
+    void main.hit.then(() => this.holdHitReact(target, main.contactEnds));
+    return { hit: main.hit, contactEnds: main.contactEnds, done: Promise.all([main.done, ...ring.map((r) => r.done)]).then(() => {}) } as unknown as BeamPlay;
+  }
+
   playLightning(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: LightningSpec): BeamPlay {
     if (!this.lightning) return this.fallback.playLightning(node, target, targetPos, spec);
     const L = this.lightning;
@@ -3596,10 +3744,14 @@ export class RecipeFactory implements UnitFactory {
     // The body: the ranged pose; the lightning leaves at its release.
     const release = u ? this.oneShot(u, this.act(u, 'ranged'), 0.5, 0.8) : 0;
     const W = 0.012 * TILE_SCALE; // a hairline-and-a-bit; thick bolts are multiples
+    // (Drawn as its user's aura (boltAura): its ribbons thin, by its user's height.)
+    const auraW = 0.012 * this.heightOf(node) * BOLT_AURA_RIBBON;
     const play = (() => {
       switch (spec.kind) {
-        case 'thunder': { // Thunderbolts falling out of the sky: onto the target (a hit), and the tiles round it.
-          // Missing, they keep well off its body.
+        case 'thunder': { // Out of the sky onto the target: a thick bolt, thinner ones round it, all converging on it.
+          // (A hit, with its aura there to carry them: drawn as the target's Electric aura — thunderFromSky. A miss: the
+          // old fall of bolts onto the ground round it, well off its body.)
+          if (target && !spec.miss && this.fx?.has(target)) return this.thunderFromSky(target, release, undefined, this.hueOf(node, 'Electric'));
           const ring = HEX_SIZE * Math.sqrt(3);
           const clear = Math.max(THUNDER_CLEAR * ring, target ? this.heightOf(target) * THUNDER_CLEAR_BODY : 0);
           return L.thunder(feet, { width: W * 7, hold: 1.0, ring, clear, delay: release, miss: spec.miss });
@@ -3608,15 +3760,22 @@ export class RecipeFactory implements UnitFactory {
           // Reaching out to the neighbouring tiles' middles, whatever its size.
           const reach = (HEX_SIZE * Math.sqrt(3) * 0.85) / this.heightOf(node);
           const burst = this.earthing(node, { power: () => 1, bolts: 12, thick: 1.6, spread: reach, steady: true });
-          const p = L.bolt(from, mid, { width: W * 3.8, strands: 2, forks: 3, hold: 1.0, delay: release });
+          const mask = this.boltAura(node, () => target);
+          const p = L.bolt(from, mid, { width: mask ? auraW : W * 3.8, strands: 2, forks: 3, hold: 1.0, delay: release, mask, converge: !!mask });
           void p.contactEnds.then(() => burst?.stop());
           return p;
         }
         case 'spark': // Thin bolts.
-          return L.bolt(from, mid, { width: W * 1.8, strands: 2, forks: 2, hold: 0.6, delay: release, light: 0.8 });
+        {
+          const mask = this.boltAura(node, () => target);
+          return L.bolt(from, mid, { width: mask ? auraW : W * 1.8, strands: 2, forks: 2, hold: 0.6, delay: release, light: 0.8, mask, converge: !!mask });
+        }
         case 'bolt':
         default: // Thunderbolt: thick — charged up as a beam is (BEAM_CHARGE) before it strikes.
-          return L.bolt(from, mid, { width: W * 7, strands: 2, forks: 4, hold: 0.9, delay: Math.max(release, BEAM_CHARGE), light: 2.5 });
+        {
+          const mask = this.boltAura(node, () => target);
+          return L.bolt(from, mid, { width: mask ? auraW : W * 7, strands: 2, forks: 4, hold: 0.9, delay: Math.max(release, BEAM_CHARGE), light: 2.5, mask, converge: !!mask });
+        }
       }
     })();
     // (Struck, the target wears the filled Electric aura, which earths off its

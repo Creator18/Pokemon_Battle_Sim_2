@@ -80,6 +80,8 @@ const OUTLINE_SOFT_IN = 0.75;
  * much round the beam staggers them.
  */
 const SPIKE = 0.6, SPIKE_GAP = 1.6, SPIKE_RATE = 3.2, SPIKE_STAGGER = 0.45;
+/** A starting egg drawn as its user's aura (BeamShot.maskBall: Ice Beam's): its spiked outline's spikes and swell, wider. */
+const MASK_EGG_SPIKE = 1.6, MASK_EGG_GROW = 1.9;
 /** And how far a spike's tip leans forward, the way the beam travels (× the core's radius, at a spike's full height). */
 const SPIKE_LEAN = 1.4;
 /** A spike's profile (GLSL): rising slowly from behind to its tip near its front, then falling away quickly (SPIKE_FRONT of it) — never a cliff. */
@@ -361,8 +363,21 @@ uniform float whole;
 uniform vec3 color, rim, color2, color3;
 uniform float time, pan, cutoff, dark, multi;
 uniform vec2 nscale;
+// (Drawn by its user's aura instead — a bolt's clash ball, BeamShot.maskBall: nothing of its own; its MASK_TWIN paints
+// its shape into the silhouette.)
+uniform float ghost;
+#ifdef MASK_TWIN
+uniform vec4 maskColor;
+// (An occluder's twin — BeamShot.occlude — while its owner is not the nearer unit: nothing.)
+uniform float occlOff;
+#endif
 ${NOISE}
 void main(void) {
+#ifndef MASK_TWIN
+  if (ghost > 0.5) discard;
+#else
+  if (occlOff > 0.5) discard;
+#endif
 #ifdef OUTLINE_TWIN
   // (An outline's near side, by the way its surface faces — not its triangles', which its leaning spikes fold: only its
   // far side draws, behind its core.)
@@ -380,6 +395,10 @@ void main(void) {
   float n = fbm(q);
   // Dissolve.
   if (n < cutoff) discard;
+#ifdef MASK_TWIN
+  gl_FragColor = maskColor;
+  return;
+#endif
   float t = clamp((n - cutoff) / max(1.0 - cutoff, 1e-3), 0.0, 1.0);
   vec3 c;
   if (dark > 0.5) {
@@ -704,12 +723,14 @@ Effect.ShadersStore.beamRingsEggVertexShader = Effect.ShadersStore.beamMeshVerte
 // the clash plane (its front flattened there) and torn away across it by its
 // noise — so the other beam's half, torn the same way, blends into it.
 Effect.ShadersStore.beamClashVertexShader = Effect.ShadersStore.beamMeshVertexShader
-  .replace('varying float vAlong, vTh;', 'varying float vAlong, vTh, vSeam;')
+  // (seamFlat 1: its outline's flat face exactly on the clash plane, not a little past it — the two halves' outlines
+  // meeting edge to edge at the meet point: maskBall's spiked outline under the aura.)
+  .replace('varying float vAlong, vTh;', 'varying float vAlong, vTh, vSeam; uniform float seamFlat;')
   .replace('vec4 w = world * vec4(p, 1.0);', `onCap = p.y > ${CLASH_SEAM.toFixed(2)} ? 1.0 : 0.0;
   p.y = min(p.y, ${CLASH_SEAM.toFixed(2)});
   vSeam = p.y;
   vec4 w = world * vec4(p, 1.0);`)
-  .replace('/*SEAM*/', `pg.y = min(pg.y, ${CLASH_SEAM.toFixed(2)});
+  .replace('/*SEAM*/', `pg.y = min(pg.y, ${CLASH_SEAM.toFixed(2)} * (1.0 - seamFlat));
   sk = 0.0; // (No lean here: it would carry its spikes past the seam, into the other beam's half.)`);
 Effect.ShadersStore.beamClashFragmentShader = MASTER_FRAG
   .replace('varying float vAlong, vTh;', `varying float vAlong, vTh, vSeam;
@@ -934,8 +955,24 @@ export interface BeamShot {
    * draws a bolt from `origin()` to `end()` in their place.
    */
   bolt?: boolean;
+  /** Its half of a clash's ball in this style instead of `style`'s (BeamSpec.clashStyle). */
+  clashStyle?: 1 | 2;
   /** No starting egg, charge or launch either (Thunderbolt: its bolt leaves the body itself). */
   eggless?: boolean;
+  /**
+   * Its half of a clash's ball drawn as its user's aura, as its bolt is (Thunderbolt's lightning): its shape painted
+   * into its user's silhouette in `color` (UnitFx.boltMaskColorFor) by `add` (UnitFx.addToMask, returning the undo) —
+   * the aura's fill over it, the aura's outline round it; and beam 2's spiked outline round that, crisp, in the bolt's
+   * outer colour, laid under the aura by `back` (UnitFx.addBack: after tone mapping, in its own colours).
+   */
+  maskBall?: { color: Color4; add: (mesh: Mesh, mat: ShaderMaterial) => () => void; back: (mesh: Mesh) => () => void };
+  /**
+   * Drawn in the scene against a clash ball drawn as an aura (the other's maskBall): its core pieces and their outlines
+   * hide that aura where they are in front of it, while `on` (its user the nearer unit) — painted `color` into the
+   * mask by `mask` twins, and their depth alone into the units' layers by `depth` twins, through `add`
+   * (UnitFx.addOccluder, returning the undo).
+   */
+  occlude?: { color: Color4; on: () => boolean; add: (mesh: Mesh, mask: ShaderMaterial, depth: ShaderMaterial) => () => void };
   /**
    * Its front is at the clash point the moment it opens (no column racing
    * out): a ball's half of a clash's ball, opened as the ball arrives.
@@ -1268,7 +1305,11 @@ class Beam implements BeamHandle {
     // (Beam 2's core in its own colour where its type's hot fill reads wrong: Dark's comes out pink.)
     const base = coloursFor(shot.element, shot.palette);
     const coreHot = shot.style === 2 ? shot.palette?.core ?? BEAM2_CORE[shot.element] : undefined;
-    const col = (this.col = coreHot ? { ...base, hot: coreHot, accent: coreHot } : base);
+    // (A bolt's — Thunderbolt's — in the colours of the aura outline round its lightning: its inner glow, rimmed in its
+    // outer glow. Pikachu's yellow rimmed orange; Zeraora's cyan rimmed deep blue.)
+    const bolt = shot.style === 2 && shot.maskBall ? auraGlow(shot.element) : null;
+    const col = (this.col = bolt ? { ...base, hot: bolt[1], accent: bolt[1], main: bolt[1], dark: bolt[0] }
+      : coreHot ? { ...base, hot: coreHot, accent: coreHot } : base);
     const H = this.H;
 
     // The master-shader layers: hot core, bright, torn black skin. Each
@@ -1285,7 +1326,7 @@ class Beam implements BeamHandle {
       const mat = new ShaderMaterial(name, scene, { vertex: shader, fragment: shader }, {
         attributes: ['position', 'uv'],
         uniforms: ['world', 'viewProjection', 'origin', 'aim', 'side', 'upv', 'len', 'rad', 'ovalMid', 'eggShape', 'gone', 'twist', 'egg', 'eggFront', 'split', 'time', 'disp', 'pan',
-          'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi', 'fwdNoise'],
+          'color', 'rim', 'cutoff', 'dark', 'nscale', 'color2', 'color3', 'multi', 'fwdNoise', 'ghost'],
       });
       // (Only its own skin: a clash's streaks of the other beam keep their one colour.)
       const patchwork = !!l.dark && !!multi && l.color === col.dark;
@@ -1502,19 +1543,24 @@ class Beam implements BeamHandle {
     // the rest of the layered beam (its body and skin, swirls, sparks) never shown.
     const aura = shot.style === 2;
     if (aura) this.onlyCore();
+    // (A bolt — Thunderbolt's lightning — throws no sparks off where it connects: the lightning lands clean.)
+    if (shot.bolt) this.streamSparks.mesh.layerMask = 0;
     if (OUTLINE && aura) {
-      const core = [this.tubes[0], this.balls[0], this.tips[0], this.hemis[0],
+      const core = [this.tubes[0], this.balls[0], this.tips[0], this.clash1 ? undefined : this.hemis[0],
         ...this.shells.filter((x) => x.i === 0), ...this.rootShells.filter((x) => x.i === 0), ...this.puffs.filter((x) => x.i === 0)];
       // (In its type's aura outline colour — the line round a Pokémon's aura, and the beam's own skin: its body's colour is too pale to show against the white.)
       // (Soft: a glow from its body's lighter colour against the core out to that outline colour at its edge.)
       const soft = shot.outline === 'soft' ? col.main : undefined;
       for (const piece of core) if (piece) this.outlineOf(piece.mesh, piece.layer.mat, col.dark, undefined, soft);
       this.coreOverBallOutline();
+      if (shot.maskBall) this.maskBallIn(shot.maskBall);
     }
     // Its rings of stars, round the core's tube (RINGS).
     if (RINGS && aura && this.tubes[0]) this.outlineOf(this.tubes[0].mesh, this.tubes[0].layer.mat, col.dark, { shader: 'beamRings', grow: RING_GROW, near: true, name: 'Rings' });
     // (Starting on its egg at the mouth: the same rings on it, on one way with the tube's.)
     if (RINGS && aura && this.balls[0]) this.outlineOf(this.balls[0].mesh, this.balls[0].layer.mat, col.dark, { shader: 'beamRingsEgg', grow: RING_GROW, near: true, name: 'Rings' });
+    // (Hiding an aura-drawn clash ball where it is in front of it — beam 1 or 2.)
+    if (shot.occlude) this.occludeIn(shot.occlude);
     this.setBeamVisible(false);
     this.tick = scene.onBeforeRenderObservable.add(() => this.update());
   }
@@ -1525,8 +1571,10 @@ class Beam implements BeamHandle {
    * and its sparks. (Its layer mask, which the beam's own updates never touch:
    * they go on running, unseen.)
    */
+  /** Beam 2 with beam 1's clash half (BeamShot.clashStyle 1: Ice Beam). */
+  private get clash1(): boolean { return this.shot.style === 2 && this.shot.clashStyle === 1; }
   private onlyCore(): void {
-    const hidden = [...this.tubes.slice(1), ...this.balls.slice(1), ...this.tips.slice(1), ...this.hemis.slice(1),
+    const hidden = [...this.tubes.slice(1), ...this.balls.slice(1), ...this.tips.slice(1), ...(this.clash1 ? [] : this.hemis.slice(1)),
       ...this.shells.filter((x) => x.i > 0), ...this.rootShells.filter((x) => x.i > 0), ...this.puffs.filter((x) => x.i > 0),
       ...this.swirls, ...this.arcs.filter((_, k) => k % BEAM_R.length > 0)].map((x) => x.mesh);
     // (Its charge kept as beam 1's — the sparks gathering into its egg before it is let go; only those off its contact go.)
@@ -1578,7 +1626,7 @@ class Beam implements BeamHandle {
     // (Its own define, so its own compiled effect: sharing its core's — compiled first, without \`grow\` among its uniforms —
     // its grow would never reach the shader.)
     const mat = new ShaderMaterial(`${core.name}${as?.name ?? 'Outline'}`, this.scene, path, {
-      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY'], defines: ['#define OUTLINE_TWIN'],
+      attributes: opts.attributes, uniforms: [...opts.uniforms.filter((u) => !['grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY'].includes(u)), 'grow', 'eggBack', 'spike', 'eye', 'soft', 'view', 'whole', 'windup', 'seamP', 'seamN', 'seamOn', 'groundY', 'seamFlat'], defines: ['#define OUTLINE_TWIN'],
       // (A soft outline is see-through at its edge: blended, writing no depth of its own.)
       needAlphaBlending: !!soft,
     });
@@ -1622,7 +1670,8 @@ class Beam implements BeamHandle {
     const groundY = this.shot.feet?.()?.y ?? 0;
     for (const { src, core, twin, mat, rings } of this.outlines) {
       // (Its rings — lightning and stars — only once it is let go: none on the ball as it winds up.)
-      const on = src.isEnabled(false) && src.isVisible && (!rings || this.opened);
+      // (Drawn as its user's aura — maskBall — no rings: the bolt is the aura's.)
+      const on = src.isEnabled(false) && src.isVisible && (!rings || (this.opened && !this.shot.maskBall));
       twin.setEnabled(on);
       if (!on) continue;
       twin.position.copyFrom(src.position);
@@ -1630,7 +1679,7 @@ class Beam implements BeamHandle {
       twin.scaling.copyFrom(src.scaling);
       twin.layerMask = src.layerMask;
       const from = core as unknown as Store;
-      for (const [k, v] of Object.entries(from._floats)) if (k !== 'dark' && k !== 'multi' && k !== 'grow' && k !== 'spike') mat.setFloat(k, k === 'cutoff' ? v * OUTLINE_CUT : v);
+      for (const [k, v] of Object.entries(from._floats)) if (k !== 'dark' && k !== 'multi' && k !== 'grow' && k !== 'spike' && k !== 'ghost') mat.setFloat(k, k === 'cutoff' ? v * OUTLINE_CUT : v);
       for (const [k, v] of Object.entries(from._vectors3)) mat.setVector3(k, v);
       for (const [k, v] of Object.entries(from._vectors2)) mat.setVector2(k, v);
       if (eye) mat.setVector3('eye', eye);
@@ -1640,6 +1689,9 @@ class Beam implements BeamHandle {
       if (seam) { mat.setFloat('seamOn', 1); mat.setVector3('seamP', seam.at); mat.setVector3('seamN', seam.way); }
       else mat.setFloat('seamOn', 0);
       mat.setFloat('groundY', groundY);
+      // (Its ball's spiked outline under the aura — maskBall — flat exactly on the clash plane, meeting the other half's
+      // there edge to edge, and not cut at it: cut, with no core in front of it there, its face would leave a hole.)
+      if (mat === this.ballMask?.back) { mat.setFloat('seamOn', 0); mat.setFloat('seamFlat', 1); }
       if (rings && tube) {
         mat.setFloat('len', tube._floats.len ?? 0);
         mat.setFloat('rad', tube._floats.rad ?? 1);
@@ -1780,12 +1832,12 @@ class Beam implements BeamHandle {
     const g = clash && this.frontDone && !this.finished
       ? easeOutCubic((this.time - this.frontT) / CLASH_GROW) * (bursting ? 1
         // (Letting go: a beam 2's keeps its size, squeezed onto the beam's axis as the rest of it is; a beam 1's shrinks away.)
-        : this.shot.style === 2 ? 1 : 1 - smoothstep(0.3, 1, dissolve)) * (1 - ended) : 0;
+        : this.shot.style === 2 && !this.clash1 ? 1 : 1 - smoothstep(0.3, 1, dissolve)) * (1 - ended) : 0;
     const at = (clash ? clash.at() : null) ?? origin.add(aim.scale(contactAt));
     const toAim = new Quaternion();
     Quaternion.FromUnitVectorsToRef(Y, aim, toAim);
     // (Beam 2: no clash noise — its clash ball its core and outline alone.)
-    if (this.shot.clashNoise && !this.clashNoise && clash && clash.ball !== false && this.shot.style !== 2) this.clashNoise = this.shot.clashNoise();
+    if (this.shot.clashNoise && !this.clashNoise && clash && clash.ball !== false && (this.shot.style !== 2 || this.clash1)) this.clashNoise = this.shot.clashNoise();
     let noiseR = 0, noiseShow = 0;
     this.hemis.forEach(({ mesh, layer, r, tear }, i) => {
       mesh.setEnabled(g > 0.01 && clash?.ball !== false);
@@ -1819,6 +1871,19 @@ class Beam implements BeamHandle {
       m.setFloat('cutoff', gone >= 0 ? base + (1 - base) * gone : cut(base));
     });
     this.clashNoise?.update(at, aim, noiseR, noiseR > 1e-3 ? noiseShow : 0);
+  }
+
+  /** Its ball and egg in its user's silhouette (maskBall): each mask twin shaped as its core is this frame. */
+  private syncBallMask(): void {
+    if (!this.ballMask) return;
+    type Store = { _floats: Record<string, number>; _vectors3: Record<string, Vector3>; _vectors2: Record<string, Vector2> };
+    for (const { from, mat } of this.ballMask.pairs) {
+      const st = from as unknown as Store;
+      for (const [k, v] of Object.entries(st._floats)) mat.setFloat(k, v);
+      for (const [k, v] of Object.entries(st._vectors3)) mat.setVector3(k, v);
+      for (const [k, v] of Object.entries(st._vectors2)) mat.setVector2(k, v);
+      mat.setFloat('whole', 1);
+    }
   }
 
   /** A beam 2 letting go: its round pieces (egg, end ball, clash ball and their shells) turned round the axis as it spirals in. */
@@ -1972,7 +2037,7 @@ class Beam implements BeamHandle {
 
   private update(): void {
     this.step();
-    if (!this.finished) this.syncOutlines();
+    if (!this.finished) { this.syncOutlines(); this.syncOccluders(); this.syncBallMask(); }
   }
 
   private step(): void {
@@ -2275,6 +2340,97 @@ class Beam implements BeamHandle {
     const meshes = [...this.tubes, ...this.arcs, ...this.balls, ...this.tips, ...this.shells, ...this.puffs, ...this.rootShells, ...this.hemis, ...this.slashes, ...this.swirls, ...this.dust].map((x) => x.mesh);
     for (const m of meshes) { m.material?.dispose(); m.dispose(); }
     for (const o of this.outlines) { o.mat.dispose(); o.twin.dispose(); }
+    if (this.ballMask) { for (const x of this.ballMask.pairs) { x.undo(); x.mat.dispose(); } this.ballMask.undoBack?.(); this.ballMask = null; }
+    for (const o of this.occluders) { o.undo(); o.mask.dispose(); o.depth.dispose(); }
+    this.occluders = [];
+  }
+
+  /** Its occluders (BeamShot.occlude): each piece's mask and depth twins, the material they are shaped from. */
+  private occluders: { from: ShaderMaterial; mask: ShaderMaterial; depth: ShaderMaterial; undo: () => void }[] = [];
+  private occludeOn: (() => boolean) | null = null;
+  private occludeIn(o: NonNullable<BeamShot['occlude']>): void {
+    this.occludeOn = o.on;
+    const make = (from: ShaderMaterial, defines: string[], depth: boolean) => {
+      const path = (from as unknown as { _shaderPath: { vertex: string; fragment: string } })._shaderPath;
+      const opts = (from as unknown as { _options: { attributes: string[]; uniforms: string[] } })._options;
+      const mat = new ShaderMaterial(`${from.name}${depth ? 'Depth' : 'Occl'}`, this.scene, path, {
+        attributes: opts.attributes, uniforms: [...new Set([...opts.uniforms, 'grow', 'maskColor', 'occlOff'])],
+        defines: [...defines, '#define MASK_TWIN'],
+      });
+      mat.backFaceCulling = false;
+      mat.setColor4('maskColor', o.color);
+      mat.setFloat('grow', 0);
+      if (depth) mat.disableColorWrite = true;
+      return mat;
+    };
+    // (Beam 2: its cores and their outlines. Beam 1: every layer of its column, tip, egg and clash half.)
+    const cores = (this.shot.style === 2 ? [...(this.clash1 ? this.hemis : [this.hemis[0]]), this.tubes[0], this.tips[0], this.balls[0]] : [...this.hemis, ...this.tubes, ...this.tips, ...this.balls])
+      .filter((c): c is NonNullable<typeof c> => !!c);
+    const pieces: { mesh: Mesh; from: ShaderMaterial; defines: string[] }[] = [];
+    for (const c of cores) {
+      pieces.push({ mesh: c.mesh, from: c.layer.mat, defines: [] });
+      const t = this.outlines.find((x) => x.src === c.mesh && !x.rings);
+      if (t) pieces.push({ mesh: t.twin, from: t.mat, defines: ['#define OUTLINE_TWIN'] });
+    }
+    for (const p of pieces) {
+      const mask = make(p.from, p.defines, false), depth = make(p.from, p.defines, true);
+      this.occluders.push({ from: p.from, mask, depth, undo: o.add(p.mesh, mask, depth) });
+    }
+  }
+  /** Each occluder shaped as its piece is this frame — and on only while its user is the nearer unit. */
+  private syncOccluders(): void {
+    if (!this.occluders.length) return;
+    type Store = { _floats: Record<string, number>; _vectors3: Record<string, Vector3>; _vectors2: Record<string, Vector2> };
+    const off = this.occludeOn?.() ? 0 : 1;
+    for (const { from, mask, depth } of this.occluders) {
+      const st = from as unknown as Store;
+      for (const mat of [mask, depth]) {
+        for (const [k, v] of Object.entries(st._floats)) if (k !== 'ghost') mat.setFloat(k, v);
+        for (const [k, v] of Object.entries(st._vectors3)) mat.setVector3(k, v);
+        for (const [k, v] of Object.entries(st._vectors2)) mat.setVector2(k, v);
+        mat.setFloat('occlOff', off);
+      }
+    }
+  }
+
+  /** Its half of a clash's ball and its starting egg in its user's silhouette (BeamShot.maskBall), while they last — their own drawing (core, outline) ghosted. */
+  private ballMask: { pairs: { from: ShaderMaterial; mat: ShaderMaterial; undo: () => void }[]; undoBack?: () => void; back?: ShaderMaterial } | null = null;
+  private maskBallIn(mask: NonNullable<BeamShot['maskBall']>): void {
+    const core = this.hemis[0].layer.mat;
+    // A mask twin of `from` on `mesh`: the same shape, painting the silhouette's colour wherever it shows.
+    const twinOf = (mesh: Mesh, from: ShaderMaterial, defines: string[]) => {
+      const path = (from as unknown as { _shaderPath: { vertex: string; fragment: string } })._shaderPath;
+      const opts = (from as unknown as { _options: { attributes: string[]; uniforms: string[] } })._options;
+      const mat = new ShaderMaterial(`${from.name}Mask`, this.scene, path, {
+        attributes: opts.attributes, uniforms: [...new Set([...opts.uniforms, 'grow', 'maskColor'])], defines: [...defines, '#define MASK_TWIN'],
+      });
+      mat.backFaceCulling = false;
+      mat.setColor4('maskColor', mask.color);
+      mat.setFloat('grow', 0);
+      return { from, mat, undo: mask.add(mesh, mat) };
+    };
+    // Its half of a clash's ball, and its starting egg (Ice Beam's — a bolt off the body has none), each so.
+    const pairs: { from: ShaderMaterial; mat: ShaderMaterial; undo: () => void }[] = [];
+    const backs: (() => void)[] = [];
+    let back: ShaderMaterial | undefined;
+    for (const piece of [this.hemis[0], this.balls[0]]) {
+      if (!piece) continue;
+      pairs.push(twinOf(piece.mesh, piece.layer.mat, []));
+      // (Its core draws nothing of its own: the aura draws it.)
+      piece.layer.mat.setFloat('ghost', 1);
+      // Its spiked outline (beam 2's), crisp, under the aura: the aura's outline band would round its spikes.
+      const outline = this.outlines.find((o) => o.src === piece.mesh && !o.rings);
+      if (!outline) continue;
+      // (Under the aura there is no core's stencil to draw over it, as in the scene: drawn whole, the clash half's near
+      // side's leaning spikes fold over it.)
+      // (The clash half's far side only. The egg's whole — its far side alone shows nothing of it.)
+      outline.mat.setFloat('whole', piece === this.balls[0] ? 1 : 0);
+      // (The egg's spikes out wider: the aura's fill and outline lie over its middle.)
+      if (piece === this.balls[0]) { outline.mat.setFloat('spike', MASK_EGG_SPIKE); outline.mat.setFloat('grow', MASK_EGG_GROW); }
+      backs.push(mask.back(outline.twin));
+      if (piece === this.hemis[0]) back = outline.mat;
+    }
+    this.ballMask = { pairs, undoBack: () => backs.forEach((u) => u()), back };
   }
 }
 
