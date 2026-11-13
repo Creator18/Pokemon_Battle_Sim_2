@@ -17,6 +17,7 @@ import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 // primitive fallbacks below (rounder limbs/bodies than plain cylinders).
 import '@babylonjs/core/Meshes/Builders/capsuleBuilder';
 import '@babylonjs/core/Rendering/outlineRenderer'; // overlay (hit flash)
+import '@babylonjs/core/Animations/animatable'; // scene.beginDirectAnimation (playFaint's fallback)
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -863,7 +864,7 @@ export class PokemonFactory implements UnitFactory {
     });
   }
 
-  playBall(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: BallSpec): BeamPlay {
+  playBall(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: BallSpec, _opts?: { point?: boolean }): BeamPlay {
     return this.playBeam(node, target, targetPos, { element: spec.element });
   }
 

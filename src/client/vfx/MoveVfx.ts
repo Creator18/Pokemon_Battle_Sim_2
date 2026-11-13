@@ -135,7 +135,11 @@ export class MoveVfx {
     ps.direction1 = new Vector3(-1, -1, -1);
     ps.direction2 = new Vector3(1, 1, 1);
     ps.manualEmitCount = 120;
+    // (Gone once its last particle has — but not its texture: shared by every one of these (smokeTexture, flareTexture),
+    // disposing it with one would leave every other still running unable to draw or ever finish.)
     ps.disposeOnStop = true;
+    const dispose = ps.dispose.bind(ps);
+    ps.dispose = () => dispose(false);
     ps.start();
     setTimeout(() => ps.stop(), 60);
   }
@@ -158,7 +162,11 @@ export class MoveVfx {
     ps.direction2 = new Vector3(1, 2, 1);
     ps.gravity = new Vector3(0, 1, 0);
     ps.manualEmitCount = 150;
+    // (Gone once its last particle has — but not its texture: shared by every one of these (smokeTexture, flareTexture),
+    // disposing it with one would leave every other still running unable to draw or ever finish.)
     ps.disposeOnStop = true;
+    const dispose = ps.dispose.bind(ps);
+    ps.dispose = () => dispose(false);
     ps.start();
     setTimeout(() => ps.stop(), 100);
   }

@@ -28,6 +28,10 @@ export interface BeamPlay {
   launched?: Promise<void>;
   /** Cut it off now (beams: struck while charging or pouring, or turned into a clash) — it dies away at once, never landing; `quiet`: its user's clip left as it is (another — a stagger — takes over). */
   cancel?: (quiet?: boolean) => void;
+  /** Where it is this frame (balls). */
+  position?: () => Vector3;
+  /** Burst where it is, now (balls: it has met something on its way). */
+  burst?: () => void;
 }
 /** A beam clash: `met` as the two beams meet, `hit` when the winner's beam lands (or, a tie, as both disperse); `done` once both are gone. */
 export interface ClashPlay { met: Promise<void>; hit: Promise<void>; done: Promise<void>; /** Who won (a live struggle: once decided; none: a tie). */ winner?: () => import('@babylonjs/core/Meshes/transformNode').TransformNode | null;
@@ -74,7 +78,7 @@ export interface UnitFactory {
    */
   playAttackLunge(node: TransformNode, targetPos: Vector3, swipe?: boolean): Promise<void>;
   /** A physical attack as a flurry of `power`'s many blows (where the factory can); resolves on the last blow. */
-  playFlurry?(node: TransformNode, targetPos: Vector3, power: number): Promise<void>;
+  playFlurry?(node: TransformNode, targetPos: Vector3, power: number, onBlow?: (i: number, of: number) => void): Promise<void>;
   /**
    * A quick step into a strike (the priority moves: Quick Attack, Extreme
    * Speed, Shadow Sneak, Sucker Punch): vanish, dash to `land` as streaks
@@ -129,7 +133,7 @@ export interface UnitFactory {
   /** Two beams meet head-on: `winner` pushes the ball back into the other (null: a tie, both disperse). */
   playClash(a: TransformNode, b: TransformNode, specA: BeamSpec, specB: BeamSpec, winner: TransformNode | null, margin: number, standUntil?: Promise<void>): ClashPlay;
   /** A ball attack (Shadow Ball…): a sphere of the type forms at the mouth, flies, and bursts on the target. */
-  playBall(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: BallSpec): BeamPlay;
+  playBall(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: BallSpec, opts?: { point?: boolean }): BeamPlay;
   /** Gust / Twister: a whirlwind or a tornado growing out of the ground on the target. */
   playWind(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: WindSpec): BeamPlay;
   /** Fire Spin / Whirlpool: rings of `element` spinning up round the target's tile. `hit` once they are up, `contactEnds` as they go. */

@@ -18,7 +18,8 @@ import {
 } from '../../shared/index.ts';
 import type { HexBoard } from '../render/HexBoard.ts';
 import { castKindFor, type UnitFactory } from '../render/unitFactory.ts';
-import type { AuraHandle, AuraOptions } from '../vfx/UnitFx.ts';
+import type { AuraHandle } from '../vfx/UnitFx.ts';
+import { QUICK_COATED, isPunch, coatOf } from '../vfx/moveCoats.ts';
 import { beamFor, type BeamSpec } from '../vfx/beam/beamMoves.ts';
 import { ballFor } from '../vfx/beam/ballMoves.ts';
 import { pulseFor, terrainPulseElement, type PulseSpec } from '../vfx/PulseFx.ts';
@@ -34,23 +35,8 @@ import type { BattleCamera } from '../camera/BattleCamera.ts';
 import { hpColor } from '../theme.ts';
 import { HEX_SIZE } from '../hexWorld.ts';
 
-/** Priority strikes whose user dashes coated head to toe in the move's element. */
-const QUICK_COATED = new Set(['Zippy Zap', 'Aqua Jet', 'Grassy Glide', 'Flame Charge', 'Aerial Ace']);
-/** A punching move (Mach Punch, Bullet Punch, Fire Punch, Hammer Arm…): thrown with an arm, never a kick. */
-const isPunch = (name: string): boolean => /Punch|Fist|Hammer Arm|Uppercut/.test(name);
-/** Moves whose coat is not their type's own colours: Brave Bird's Flying aura (and tornado) in gold. */
-/**
- * Moves whose coat is not their type's plain aura: Sky Attack's Flying aura
- * (and its sphere) in gold; Brave Bird's is Flare Blitz's fire aura, in its
- * usual colours, with its fire sphere in blue flame.
- */
-const MOVE_AURA: Record<string, Partial<AuraOptions> & { element: string }> = {
-  'Sky Attack': { element: 'Gold' },
-  'Brave Bird': { element: 'Fire', noiseElement: 'BlueFire' },
-};
-/** The aura a move coats its user in (whole body): its own (MOVE_AURA), or its type's. */
-const auraOf = (moveName: string | null | undefined, type: string): AuraOptions =>
-  ({ element: type, edge: 'tongues', reach: 'body', ...(moveName ? MOVE_AURA[moveName] : undefined) });
+// (The coats: shared with the side-on fighter.)
+const auraOf = coatOf;
 /** A move's recoil (a fraction of the damage it deals; 0 for none). */
 const recoilOf = (moveName: string | null | undefined): number => (moveName ? getMove(moveName)?.recoilFraction ?? 0 : 0);
 

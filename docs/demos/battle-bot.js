@@ -9,6 +9,7 @@
   const IDLE = { want: 0, jumpHeld: false, jumpPressed: false, sink: false, aim: 0, ranged: false, close: false, mobility: false, control: false };
   window.__battle = async (o = {}) => {
     for (let i = 0; i < 100 && !window.__zone; i++) await sleep(0.1);
+    window.__F = await import('/src/client/platformer/Fighter.ts');
     const P = window.__pbw, sc = P.scene;
     for (const k of ['__loop', '__zip', '__counter', '__cc', '__agility', '__back', '__cf']) window[k] && (window[k].stop = true);
     window.__zone?.dispose();
@@ -52,7 +53,14 @@
         const tell = foe.telling, physical = tell === foe.moves.close || tell === foe.moves.mobility;
         let r = null;
         if (Math.random() < skill) {
-          if (me.moves.control === 'Sucker Punch' || (me.moves.control === 'Counter' && physical)) { r = { ...base, control: true }; tally('brace on tell'); }
+          // (The new kit: Earthquake wound up — jump it; Stone Edge on its way — step back out of its crack.)
+          if (tell === 'Earthquake') { r = { ...base, jumpPressed: true, jumpHeld: true }; tally('jump the quake'); }
+          // (Stone Edge: Detect braced — it zips clear as the pillar strikes — else up over it.)
+          else if (tell === 'Stone Edge') {
+            if (me.moves.control === 'Detect' && me.ready('Detect') && Math.random() < 0.5) { r = { ...base, control: true }; tally('detect the stone edge'); }
+            else { r = { ...base, jumpPressed: true, jumpHeld: true }; tally('jump the stone edge'); }
+          }
+          else if (me.moves.control === 'Sucker Punch' || me.moves.control === 'Detect' || (me.moves.control === 'Counter' && physical)) { r = { ...base, control: true }; tally(`brace on tell (${me.moves.control})`); }
           else if (!physical) {
             if (Math.random() < 0.5) { r = { ...base, dash: true, want: 0 }; tally('back dash a beam'); }
             else if (Math.random() < 0.5) { r = { ...base, ranged: true }; tally('meet the beam'); }
@@ -68,8 +76,15 @@
       nextThink = t + 0.15 + Math.random() * 0.2;
       // An opening (it recovering, or still): attack — close in reach, else a beam, else in with Agility, else walk.
       const reach = (me.H + foe.H * 0.5) * 1.1;
-      if (dist <= reach && Math.abs(dy) < me.H * 0.8) { tally('slash'); return { ...base, close: true }; }
-      if (Math.abs(dy) < me.H * 0.6 && dist < 10 && Math.random() < 0.35) { tally('beam'); return { ...base, ranged: true }; }
+      const F = window.__F;
+      // (Earthquake: the foe on the ground in its area. Stone Edge: the foe on the ground at mid range.)
+      if (me.moves.close === 'Earthquake' && me.grounded && foe.grounded && dist <= (F?.QUAKE_RADIUS ?? 5.7) * 0.9 && me.ready('Earthquake')) { tally('earthquake'); return { ...base, close: true }; }
+      if (me.moves.ranged === 'Stone Edge' && me.grounded && foe.grounded && dist > 3 && dist < 9 && me.ready('Stone Edge') && Math.random() < 0.5) { tally('stone edge'); return { ...base, ranged: true }; }
+      if (dist <= reach && Math.abs(dy) < me.H * 0.8 && me.moves.close !== 'Earthquake') { tally('slash'); return { ...base, close: true }; }
+      // (A beam — not into a Stone Edge pillar.)
+      const walled = F && F.Fighter.pillarAlong(pf.arena, me.mouth(), me.aimDir(0), dist) !== null;
+      if (walled && me.grounded && Math.random() < 0.5) { tally('over a pillar'); return { ...base, want: dir, jumpPressed: true, jumpHeld: true }; }
+      if (me.moves.ranged !== 'Stone Edge' && !walled && Math.abs(dy) < me.H * 0.6 && dist < me.beamRange && Math.random() < 0.35) { tally('beam'); return { ...base, ranged: true }; }
       // (Far off: Agility's boost first, if it has it; then in with a dash — zippy, boosted.)
       if (me.moves.mobility === 'Agility' && dist > 5 && me.ready('Agility') && Math.random() < 0.5) { tally('agility boost'); return { ...base, mobility: true }; }
       if (dist > 4.5 && me.ready('Dash') && Math.random() < 0.5) { tally(me.zippy ? 'zippy dash in' : 'dash in'); return { ...base, want: dir, dash: true }; }
@@ -86,6 +101,8 @@
       for (const [who, f] of [['you', me], ['boss', foe]]) {
         if (!Number.isFinite(f.x) || !Number.isFinite(f.y)) flag(`${who} NaN position`);
         if (Math.abs(f.x) > 11.2) flag(`${who} out of the arena (x ${f.x.toFixed(1)})`);
+        // (Inside a Stone Edge pillar — not on top of one.)
+        if ((pf.arena.pillars ?? []).some((pl) => f.x > pl.plat.x + 0.1 && f.x < pl.plat.x + pl.plat.w - 0.1 && f.y < pl.plat.top - 0.3 && pl.plat.h > 0.5) && !f.types.includes('Ghost') && !f.quick) flag(`${who} inside a pillar`);
         if (f.y < -0.05) flag(`${who} under the floor (y ${f.y.toFixed(2)})`);
         if (f.busy && !f.down && !f.clashing) { if (busySince[who] < 0) busySince[who] = t; else if (t - busySince[who] > 5) flag(`${who} busy > 5 s (${f.using || (f.quick ? 'quick' : f.stunned ? 'stunned' : '?')})`); }
         else busySince[who] = -1;

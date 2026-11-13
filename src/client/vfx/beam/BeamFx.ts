@@ -1026,6 +1026,8 @@ export interface BeamShot {
   target(): Vector3;
   /** Where the attacker stands (for the dust rings); null while it is in the air (no dust). */
   feet?(): Vector3 | null;
+  /** The floor's height (BeamSpec.groundY): its outline kept above it. Unset: where its user stands. */
+  groundY?: number;
   /**
    * Which way the attacker faces (yaw, radians; 0 = +Z). Given, the ball and
    * the beam point the way it looks — pitched only to reach the target's
@@ -1729,7 +1731,7 @@ class Beam implements BeamHandle {
     const way = met ? met.subtract(this.anchor) : null;
     const seam = met && way && way.lengthSquared() > 1e-8 ? { at: met, way: way.normalize() } : null;
     // The ground under it: where its user stands (a flier: the board's, 0).
-    const groundY = this.shot.feet?.()?.y ?? 0;
+    const groundY = this.shot.groundY ?? this.shot.feet?.()?.y ?? 0;
     for (const { src, core, twin, mat, rings } of this.outlines) {
       // (Its rings — lightning and stars — only once it is let go: none on the ball as it winds up.)
       // (Drawn as its user's aura — maskBall — no rings: the bolt is the aura's.)

@@ -15,6 +15,7 @@
  */
 
 import type { Scene } from '@babylonjs/core/scene';
+import '@babylonjs/core/Meshes/thinInstanceMesh'; // mesh.thinInstanceSetBuffer (the wind coat's leaves: Wood Hammer, Leaf Blade…)
 import type { Observer } from '@babylonjs/core/Misc/observable';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
@@ -420,6 +421,12 @@ const THUNDER_SIDES: [number, number][] = [[-1.6, 0.4], [1.4, -0.5], [0.3, 1.2]]
  * (and goes into it) rather than stopping short in the aura.
  */
 const SURFACE_SIDE = 1.5, SURFACE_IN = 0.12;
+/**
+ * …and only from its body near the line between them: no further off it than this (× its height). Without it a wing
+ * tip or a tail curling toward the other reached further than its body and won — the bolt bent away to a limb off to
+ * the side, the blow landing all the same. None that near: its middle.
+ */
+const SURFACE_OFF = 0.3;
 /** Thunder's bolts that miss land at least this far off the target: × the way to the next tile's middle, or × its height if more. */
 const THUNDER_CLEAR = 0.5, THUNDER_CLEAR_BODY = 0.7;
 /**
@@ -966,7 +973,7 @@ export class RecipeFactory implements UnitFactory {
    * blow (the hit); it plays on out to its idle. A unit with no strikes to
    * throw lunges instead.
    */
-  async playFlurry(node: TransformNode, targetPos: Vector3, power: number): Promise<void> {
+  async playFlurry(node: TransformNode, targetPos: Vector3, power: number, onBlow?: (i: number, of: number) => void): Promise<void> {
     const u = this.units.get(node);
     if (!u) return this.fallback.playAttackLunge(node, targetPos);
     const strikes = this.flurryOf(node, u);
@@ -989,7 +996,7 @@ export class RecipeFactory implements UnitFactory {
     let left = 0;
     const obs = this.scene.onBeforeRenderObservable.add(() => {
       const t = (performance.now() - t0) / 1000;
-      while (left < made.blows.length && t >= made.blows[left]) { if (!u.down) this.afterimage(node, FLURRY_GHOST); left++; }
+      while (left < made.blows.length && t >= made.blows[left]) { if (!u.down) this.afterimage(node, FLURRY_GHOST); onBlow?.(left, made.blows.length); left++; }
     });
     void player.play(FLURRY_CLIP, { fade: 0.1 }).then(() => {
       this.scene.onBeforeRenderObservable.remove(obs);
@@ -2477,16 +2484,19 @@ export class RecipeFactory implements UnitFactory {
     void sleep(FIRE_BURST_TIME * FIRE_BURST_HOLD).then(() => sphere.release());
   }
 
-  playBall(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: BallSpec): BeamPlay {
+  playBall(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: BallSpec, opts: { point?: boolean } = {}): BeamPlay {
     spec = { ...spec, element: this.hueOf(node, spec.element) };
     if (!this.beams) return this.fallback.playBall(node, target, targetPos, spec);
+    // (Thrown at a point — the side-on fighter's, straight along its aim: it flies right to it, its contact the
+    // fighter's to find.)
+    const point = !!opts.point && !target;
     const u = this.units.get(node);
     const d = targetPos.subtract(node.position);
     if (Math.abs(d.x) + Math.abs(d.z) > 1e-3) this.setFacing(node, Math.atan2(d.x, d.z));
     const height = u ? displayHeight(u.model.height) : 1.2;
     const aimAt = target ? () => this.middleOf(target) : () => targetPos;
     const ball = throwBall(this.beams, { element: spec.element, colours: spec.colours, height, from: this.mouthOf(node), target: aimAt,
-      targetSize: () => (target ? this.heightOf(target) : height),
+      targetSize: () => (target ? this.heightOf(target) : point ? 0 : height),
       // No wind spiral round the feet of a unit in the air.
       feet: () => (u && this.aloft(u, 0.05) ? null : node.position),
       overlay: this.fx ? (mesh, mat) => this.fx!.addOverlay(mesh, mat) : undefined,
@@ -2496,6 +2506,8 @@ export class RecipeFactory implements UnitFactory {
       // (Sorted against the units by camera distance: over their auras while nearer.)
       free: this.fx ? (mesh) => this.fx!.addFree(mesh) : undefined });
     if (spec.burst === 'fire') void ball.hit.then(() => this.fireBurst(ball.position(), height));
+    let cancelled = false, letGo!: () => void;
+    const launched = new Promise<void>((r) => { letGo = r; });
     const done = (async () => {
       const player = u?.model.player;
       const chain = !!player && ['beamStart', 'beamEnd'].every((a) => player.has(this.act(u!, a)));
@@ -2512,12 +2524,34 @@ export class RecipeFactory implements UnitFactory {
           if (!u.down && player.active?.action === end) void player.play(this.act(u, 'idle'), { fade: 0.25 });
         });
       } else {
+        // (No wind-up of its own: its ranged clip — then held till the ball has had its charge all the same.)
+        const t0 = performance.now();
         await sleep(u ? this.oneShot(u, this.act(u, 'ranged'), 0.5, 0.8) : 0.4);
+        const first = spec.tornado && this.wind ? NOISE_FIRST : 0;
+        await sleep(Math.max(0, BALL_CHARGE + first - (performance.now() - t0) / 1000));
       }
-      ball.launch();
+      if (!cancelled) { ball.launch(); letGo(); }
       await ball.done;
     })();
-    return { hit: ball.hit, contactEnds: ball.hit, done };
+    return { hit: ball.hit, contactEnds: ball.hit, done, launched, position: () => ball.position(), burst: () => ball.burst(),
+      // (Cut off while it charges — its thrower struck: gone, never thrown. Once thrown it flies on by itself.)
+      cancel: () => { if (!cancelled) { cancelled = true; ball.vanish(); } } };
+  }
+
+  /**
+   * A ram's burst (as playRunInto's) — at its set-off (`launch`, behind it) or its impact (`hit`, ahead of it), facing
+   * `way` (−1, 1 along x) — and its dust off the ground (none in the air). The side-on fighter's own run carries it.
+   */
+  ramBurst(node: TransformNode, element: string, kind: 'launch' | 'hit', way: number): void {
+    const u = this.units.get(node);
+    if (!u) return;
+    const fx = (this.quickStep ??= new QuickStepFx(this.scene));
+    const H = this.heightOf(node), dir = new Vector3(way, 0, 0), tone = this.hueOf(node, element);
+    const at = node.position.add(new Vector3(0, H * 0.45, 0)).add(dir.scale(kind === 'hit' ? H * 0.45 : -H * 0.25));
+    const size = H * (kind === 'hit' ? QS_HIT_BURST : QS_LAUNCH_BURST);
+    if (this.beams) this.beams.hemiBurst(at, dir, size, tone, true);
+    else fx.hemisphere(at, dir, size * 2, new Color3(...auraGlow(tone)[0]));
+    if (!this.aloft(u, 0.05)) fx.dust(node.position.clone(), H);
   }
 
   playPulse(node: TransformNode, target: TransformNode | null, targetPos: Vector3, spec: PulseSpec): BeamPlay {
@@ -3259,20 +3293,27 @@ export class RecipeFactory implements UnitFactory {
     const done = (async () => {
       const player = u?.model.player;
       const chain = !!player && ['beamStart', 'beamEnd'].every((a) => player.has(this.act(u!, a)));
+      // (In the clash: held in its looped ranged pose — as a beam's user is — till it is over, then let go.)
+      const loop = chain && player!.has(this.act(u!, 'beamLoop'));
+      const letGo = () => {
+        const end = this.act(u!, 'beamEnd');
+        void player!.play(end, { fade: 0.08 }).then(() => {
+          if (!u!.down && player!.active?.action === end) void player!.play(this.act(u!, 'idle'), { fade: 0.25 });
+        });
+      };
       if (u && player && chain) {
         const t0 = performance.now();
         await player.play(this.act(u, 'beamStart'), { fade: 0.12 });
         await sleep(Math.max(0, BALL_CHARGE - (performance.now() - t0) / 1000));
-        const end = this.act(u, 'beamEnd');
-        void player.play(end, { fade: 0.08 }).then(() => {
-          if (!u.down && player.active?.action === end) void player.play(this.act(u, 'idle'), { fade: 0.25 });
-        });
+        if (loop) void player.play(this.act(u, 'beamLoop'), { fade: 0.06 });
+        else letGo();
       } else {
         await sleep(u ? this.oneShot(u, this.act(u, 'ranged'), 0.5, 0.8) : 0.4);
       }
       ball.launch();
       await half.front;
       await holdUntil;
+      if (loop && !u!.down) letGo();
       endContact();
       await Promise.all([half.release(0.5), flyOn.then((p) => p)]);
     })();
@@ -3424,6 +3465,7 @@ export class RecipeFactory implements UnitFactory {
         const along = Vector3.Dot(v, dir);
         if (along <= 0) return;
         const off = Math.sqrt(Math.max(0, v.lengthSquared() - along * along));
+        if (off > SURFACE_OFF * H) return;
         const s = along - SURFACE_SIDE * off;
         if (s > score) { score = s; best.copyFrom(p); }
       });

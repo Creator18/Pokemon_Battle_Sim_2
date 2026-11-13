@@ -20,6 +20,8 @@ import { groundQuake } from './groundLight.ts';
 
 /** The wave: how fast its front runs (× the user's height a second), how high it lifts (× its height), how wide its band (× its height). */
 const SPEED = 9, LIFT = 0.16, WIDTH = 0.55;
+/** A later tremor (QuakeOptions.ripple): its lift, × the first's. */
+const RIPPLE_LIFT = 0.6;
 /** How long its cracks take to open (s), and to fade once its front is out (s). */
 const CRACK_IN = 0.25, CRACK_OUT = 1.4;
 /** Its rocks: how many over its disc (per unit of its radius, in units of its height), their size (× its height); none nearer the camera than ROCK_NEAR (z, world units) — over the fighters' feet. */
@@ -61,6 +63,8 @@ export interface QuakeOptions {
   height: number;
   /** How far out it reaches, all round (world units). */
   radius: number;
+  /** A later tremor of the same quake: a ripple — its floor heaving less, no rocks, no new cracks. */
+  ripple?: boolean;
   /** Its front now, each frame (world units out from x) — the hit's timing. */
   onFront?: (front: number) => void;
 }
@@ -256,7 +260,7 @@ export class QuakeFx {
     // none in front of the fighters' feet, nearer the camera.
     type Rock = { d: number; x: number; z: number; ux: number; size: number; at: number; inst: InstancedMesh | null; spin: Vector3; tilt: number };
     const rocks: Rock[] = [];
-    const n = Math.round(ROCK_DENSITY * far / H);
+    const n = o.ripple ? 0 : Math.round(ROCK_DENSITY * far / H);
     for (let i = 0; i < n * 3 && rocks.length < n; i++) {
       const d = Math.sqrt(Math.random()) * far, a = Math.random() * Math.PI * 2;
       if (d < 0.35 * H) continue;
@@ -266,7 +270,7 @@ export class QuakeFx {
         at: -1, inst: null, spin: new Vector3(Math.random() * 6, Math.random() * 6, Math.random() * 6), tilt: (Math.random() - 0.5) * 0.9 });
     }
     const bases = this.bases();
-    this.puff(new Vector3(o.x, o.floor, o.z), 10, H);
+    if (!o.ripple) this.puff(new Vector3(o.x, o.floor, o.z), 10, H);
     const t0 = performance.now();
     let outAt = -1;
     return new Promise((resolve) => {
@@ -275,9 +279,9 @@ export class QuakeFx {
         const front = Math.min(far + width * 2, speed * t);
         o.onFront?.(front);
         // Its lift: up at once, dying away as it runs out.
-        const lift = LIFT * H * Math.min(1, t / 0.06) * Math.max(0, 1 - 0.65 * front / Math.max(far, 1e-3));
+        const lift = (o.ripple ? RIPPLE_LIFT : 1) * LIFT * H * Math.min(1, t / 0.06) * Math.max(0, 1 - 0.65 * front / Math.max(far, 1e-3));
         if (front >= far + width * 2 && outAt < 0) outAt = t;
-        const crack = Math.min(1, t / CRACK_IN) * (outAt < 0 ? 1 : Math.max(0, 1 - (t - outAt) / CRACK_OUT));
+        const crack = o.ripple ? 0 : Math.min(1, t / CRACK_IN) * (outAt < 0 ? 1 : Math.max(0, 1 - (t - outAt) / CRACK_OUT));
         wave.set(o.x, o.z, front, outAt < 0 ? lift : 0, width, crack, far);
         // Its rocks: each bursting up as the front passes it (a little behind it), standing, sinking back.
         let busy = false;

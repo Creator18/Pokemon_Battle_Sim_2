@@ -153,7 +153,11 @@ export class QuickStepFx {
     ps.direction1 = new Vector3(-1, 0.3, -1); ps.direction2 = new Vector3(1, 0.8, 1);
     ps.minEmitPower = 0.6 * height; ps.maxEmitPower = 1.4 * height;
     ps.manualEmitCount = 24;
+    // (Gone once its last particle has — but not its texture: shared by every one of these (smokeTexture, flareTexture),
+    // disposing it with one would leave every other still running unable to draw or ever finish.)
     ps.disposeOnStop = true;
+    const dispose = ps.dispose.bind(ps);
+    ps.dispose = () => dispose(false);
     ps.targetStopDuration = 0.7;
     ps.start();
   }

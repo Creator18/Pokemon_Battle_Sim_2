@@ -174,6 +174,8 @@ export class Platformer {
       },
       onClashEnd: (_a, _b, w, s) => this.note(`clash over → ${w ? `${w.name} wins` : 'tie'}${s ? ` (stops ${Math.round(s.rival * 1000)} / ${Math.round(s.you * 1000)}${s.outright ? ', outright' : ''})` : ''}`),
     };
+    // (Its boss's mind sees the arena too: the Stone Edge pillars in it.)
+    if (this.ai) this.ai.arena = this.arena;
     this.build(o.backdrop ?? true);
     this.placeAll();
     if (this.boss) this.buildHud();

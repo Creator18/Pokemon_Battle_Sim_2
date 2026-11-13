@@ -66,12 +66,15 @@ import { beamFor as beamSpecFor } from '../vfx/beam/beamMoves.ts';
 import { lightningFor } from '../vfx/lightningMoves.ts';
 import type { BeamSpec } from '../vfx/beam/beamMoves.ts';
 import { getMove, getTypeEffectiveness, MoveCategory } from '../../shared/index.ts';
+import { ballFor, type BallSpec } from '../vfx/beam/ballMoves.ts';
+import { clawFor } from '../vfx/slashMoves.ts';
+import { QUICK_COATED, isPunch, coatOf } from '../vfx/moveCoats.ts';
 import { canDoubleJump } from '../../shared/data/weights.ts';
 
 /** A platform: its left edge, its top, its width, its depth below its top (world units); `hidden`: solid but not drawn. */
 /**
  * A platform: its left edge, its top, how wide, how deep (down from its top); unseen (the stadium's floor and walls).
- * `pillar`: a Stone Edge pillar — solid, but a teleport goes through it and a Ghost type passes it.
+ * `pillar`: a Stone Edge pillar — solid to all (runs, dashes, teleports: gone over, not through), but a Ghost type passes it.
  */
 export interface Platform { x: number; top: number; w: number; h: number; hidden?: boolean; pillar?: boolean }
 
@@ -120,6 +123,8 @@ export const IDLE: Intent = { want: 0, jumpHeld: false, jumpPressed: false, sink
 
 /** What a fighter lives in: its level, every fighter in it, and who is told of each blow. */
 export interface Arena {
+  /** A status come on a fighter (confused): for the log. */
+  onStatus?: (on: Fighter, status: string, seconds: number) => void;
   level: Platform[];
   fighters: Fighter[];
   /** A blow landed: who by, on whom, with what, for how much. */
@@ -163,6 +168,8 @@ export const QUICK_DIST = 3.2;
 const QUICK_COOL = 0.4, QUICK_GAP = 0.08;
 /** A teleport: how far (× its height), how long before the next (s). */
 const TELEPORT_DIST = 3.6, TELEPORT_COOL = 0.5;
+/** Teleport: its foe, caught unawares, can't turn round for this long after it appears behind it (s). */
+const TELEPORT_UNAWARE = 0.45;
 /** Agility, a movement move — zips in speed lines the way it is held, one after another: how soon the next (s). */
 const AGILITY_COOL = 0.08;
 /**
@@ -188,13 +195,16 @@ const QUAKE_DELAY = 0.22, QUAKE_POP = 7, QUAKE_JOLT = 0.55, QUAKE_RUMBLE = 0.02;
  * two, three; how long they
  * stand (s), shaking EDGE_WARN s before; how hard the foe is thrown up off its pillar (world units/s).
  */
-const EDGE_RANGE = 11, EDGE_NEAR = 1.4, EDGE_W = 2.0, EDGE_FIT = 0.95;
+export const EDGE_RANGE = 11;
+const EDGE_NEAR = 1.4, EDGE_W = 2.0, EDGE_FIT = 0.95;
 const EDGE_HEIGHTS = [2.1, 2.6, 3.1], EDGE_TARGET_H = 1.6;
-const EDGE_TELL = 0.4, EDGE_STAGGER = 0.28, EDGE_LIFE = 7, EDGE_WARN = 0.9, EDGE_POP = 3.5;
+const EDGE_TELL = 0.4, EDGE_STAGGER = 0.28, EDGE_LIFE = 10, EDGE_WARN = 0.9, EDGE_POP = 3.5;
 /** Earthquake: how long it holds its charging pose (s); from the air, how long it is gone between going up and coming down (s). */
 const QUAKE_POSE = 0.6, QUAKE_AIR_GAP = 0.4;
+/** Earthquake's tremors: how many waves it sends out (its blow shared among them), and how far apart (s). */
+const QUAKE_PULSES = 3, QUAKE_PULSE_GAP = 0.35;
 /** Earthquake's area: its radius round the user (world units) — 10% more than the pitch's painted Pokéball's. */
-const QUAKE_RADIUS = POKEBALL_R * 1.1;
+export const QUAKE_RADIUS = POKEBALL_R * 1.1;
 /** Detect going off: how far clear of the attack's reach it stops (world units), and the least it goes (× its height). */
 const DETECT_CLEAR = 0.6, DETECT_MIN = 0.5;
 /**
@@ -230,10 +240,12 @@ const COUNTER_DOUBLE = 2;
  *   its abuse:  1 + ABUSE_STEP × its heat — each use of it adds 1 heat, halving every ABUSE_HALF s.
  */
 const SLOT_COOL = { ranged: 1.2, close: 0.45, mobility: 0.5, control: 2.5 } as const;
-const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 9, 'Dash': 0.5, 'Back Dash': 0.5, 'Teleport': 0.5,
+const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 9, 'Dash': 0.5, 'Back Dash': 0.5, 'Teleport': 7,
   // (The braces turn back the blow that comes — their strength the incoming move's — so they cool longer, and gone off,
   // by the power of the move they turned back: cooldownFor.)
-  'Sucker Punch': 5, 'Counter': 5, 'Detect': 5 };
+  'Sucker Punch': 5, 'Counter': 5, 'Detect': 5,
+  // (The heavy area moves: Earthquake's tremors over the whole Pokéball; Stone Edge's pillars standing 7 s.)
+  'Earthquake': 3.5, 'Stone Edge': 4 };
 const SPEED_K: [number, number] = [0.6, 1.5], POWER_REF = 80, POWER_K: [number, number] = [0.5, 1.6];
 const ABUSE_HALF = 3, ABUSE_STEP = 0.6;
 /** Counter's blow coming in mid-swing: its clip begun this far (s) short of the blow as it opens out of its teleport. */
@@ -261,6 +273,57 @@ export const BEAM_REACH = 8;
  * its hit zone, no further.
  */
 const BEAM2_REACH = POKEBALL_R;
+/**
+ * A ball (Shadow Ball, Moonblast, Focus Blast…): how far it flies (world units), how near it must come to a body to
+ * strike it (× its thrower's height). Charged as a beam is; let go, its thrower is free at once — it flies on straight
+ * along the aim by itself (jump it), bursting on the first foe it meets, a Stone Edge pillar, or at its reach. Aura
+ * Sphere (never misses) homes on its foe instead, round anything between.
+ */
+export const BALL_REACH = 8;
+const BALL_TOUCH = 0.22;
+/** A beam's line: how near a ball must come to it to meet it (× the beam's firer's height). */
+const BEAM_TOUCH = 0.25;
+/**
+ * A ram (Flare Blitz, Brave Bird, Sky Attack, Head Smash…), its close move: coated, it runs at RAM_SPEED straight in, up
+ * to RAM_DIST × its height, into the first foe in its way — its damage by how far it ran (RAM_MOMENTUM at a standing
+ * start, whole at its full run: momentum), the foe thrown back, the move's recoil on itself.
+ */
+export const RAM_DIST = 3.2;
+const RAM_SPEED = 13, RAM_MOMENTUM = 0.7, RAM_CONTACT = 0.12;
+/** Thrash, Outrage: its rampage over, it is confused — every way it is told to go turned round — this long (s). */
+const RAMPAGES = new Set(['Thrash', 'Outrage']);
+export const CONFUSE_TIME = 3.5;
+const CONFUSE_GLOW: [number, number, number] = [0.75, 0.35, 1];
+/** Its ranged move a ball. */
+export const isBall = (move?: string | null): boolean => !!ballFor(move);
+/** A ram (its close move: a charge on foot or wing). */
+export const isRamMove = (move?: string | null): boolean => !!move && !!getMove(move)?.isRam;
+/**
+ * A priority dash (Quick Attack, Aqua Jet, Accelerock, Bullet Punch, Mach Punch, Ice Shard, Zippy Zap…): Quick Attack's
+ * step in its own type — not a brace (Sucker Punch) nor a strike from behind (Shadow Sneak, Feint).
+ */
+export const isQuickStrike = (move?: string | null): boolean => {
+  const m = move ? getMove(move) : null;
+  return !!m && m.quickPriority && m.category === MoveCategory.PHYSICAL && !m.isRam && !BRACES.has(move!) && !BEHIND_STRIKES[move!];
+};
+/** A slash or a claw (Dragon Claw, Night Slash, Slash, Cut, X-Scissor, Leaf Blade…): its type, as the marks wear it. */
+const slashType = (move: string): string | null => CLOSE_MOVES[move] ?? clawFor(move)?.element ?? null;
+/** A plain contact blow (Close Combat, Thrash, Outrage, Iron Tail, Fire Fang…): a flurry, more and faster blows the stronger. */
+export const isFlurry = (move?: string | null): boolean => {
+  const m = move ? getMove(move) : null;
+  return !!m && m.category === MoveCategory.PHYSICAL && m.basePower > 0 && !m.isRam && !m.quickPriority && !slashType(move!)
+    && move !== 'Earthquake' && move !== 'Stone Edge';
+};
+
+/** A ball out: charging at its mouth, or let go and flying. */
+interface Thrown {
+  play: BeamPlay; move: string; homing: Fighter | null;
+  /** Its line (from its mouth, along its aim), when it was pressed (its own clock), and its look as a clash's half. */
+  from: [number, number]; dir: [number, number]; pressedAt: number; spec: BeamSpec;
+  launched: boolean; done: boolean;
+  /** Those it has passed through (unhurtable, or braced): never struck by it after. */
+  passed: Set<Fighter>;
+}
 /**
  * Its ranged move as a beam: a beam move's own; a bolt (Thunderbolt) a beam of lightning straight off its body, no egg
  * (as the hex battle's clashes drew it).
@@ -375,6 +438,32 @@ export class Fighter {
   private reach: Reach | null = null; private measured = 0;
   /** Its beam out now (charging or pouring), if any. */
   beam: Firing | null = null;
+  /** Its balls out (charging, or flying on their own). */
+  balls: Thrown[] = [];
+  /** Its ram under way: lit and running (`go`), how far it has run, its coat. */
+  private ramming: { move: string; k: number; dir: number; go: boolean; ran: number; coat: { release(): Promise<void> }; ghostT: number } | null = null;
+  /** Caught unawares (a Teleport behind it) till this (its own clock): it can't turn round. */
+  unawareUntil = -1;
+  /** Its ball still charging, as a beam charging is (its line, when pressed, its look in a clash): a clash's other half. */
+  get ballCharge(): { play: BeamPlay; move: string; spec: BeamSpec; pressedAt: number; from: [number, number]; dir: [number, number]; range: number; launched: false; ball: Thrown } | null {
+    const t = this.balls.find((b) => !b.launched && !b.done);
+    return t ? { play: t.play, move: t.move, spec: t.spec, pressedAt: t.pressedAt, from: t.from, dir: t.dir, range: BALL_REACH, launched: false, ball: t } : null;
+  }
+  /** Its charging beam or ball, as a clash's rival: whichever it has. */
+  chargeOf(): { from: [number, number]; dir: [number, number] } | null {
+    return this.beam && !this.beam.launched ? this.beam : this.ballCharge;
+  }
+  /** Its charge taken into a clash (or a burst): gone from it — the clash plays it from here. */
+  private seize(): { play: BeamPlay; move: string; spec: BeamSpec; pressedAt: number } {
+    if (this.beam) { const b = this.beam; this.beam = null; return b; }
+    const c = this.ballCharge!;
+    c.ball.done = true;
+    this.balls = this.balls.filter((b) => b !== c.ball);
+    return c;
+  }
+  /** Confused (Thrash, Outrage) till this (its own clock): every way it is told turned round. */
+  confusedUntil = -1;
+  get confused(): boolean { return this.time < this.confusedUntil; }
   /** Thrown back (s left): out of its own control, the throw dying away. */
   private knockT = 0;
   /** Caught unawares (a strike from behind on it, till its blow lands): it can't turn round to face its striker. */
@@ -435,13 +524,16 @@ export class Fighter {
   }
 
   /** Busy: in a move, mid step, held, or down — it takes no new move. */
-  get busy(): boolean { return this.firing || this.quick || this.stunned || this.down || this.dashT > 0 || this.time < this.lagUntil; }
+  get busy(): boolean { return this.firing || this.quick || !!this.ramming || this.stunned || this.down || this.dashT > 0 || this.time < this.lagUntil; }
   /** Braced to counter. */
   get countering(): boolean { return this.counterUntil >= 0; }
   /** Where its mouth is (its beams' height). */
   get mouthY(): number { return this.factory.mouthAt(this.node).y; }
   /** Its ranged move's reach. */
-  get beamRange(): number { const s = this.moves.ranged ? beamFor(this.moves.ranged) : null; return s ? beamReach(s) : BEAM_REACH; }
+  get beamRange(): number {
+    if (isBall(this.moves.ranged)) return BALL_REACH;
+    const s = this.moves.ranged ? beamFor(this.moves.ranged) : null; return s ? beamReach(s) : BEAM_REACH;
+  }
 
   /** Put somewhere, still, facing `dir`. */
   place(x: number, y: number, dir: number): void {
@@ -458,6 +550,7 @@ export class Fighter {
     for (const pl of [...this.pillars]) pl.crumble();
     if (this.down) { this.down = false; this.factory.revive(this.node); }
     this.beam?.play.cancel?.(); this.beam = null;
+    this.dropBalls(true); this.stopRam(); this.confusedUntil = -1;
     this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null;
     this.counterUntil = -1; this.lagUntil = 0; this.flyReadyAt = 0;
     this.readyAt.clear(); this.coolLen.clear(); this.heat.clear(); this.run = null; this.agilityUntil = -1;
@@ -571,10 +664,14 @@ export class Fighter {
     this.measure();
     this.quickCool = Math.max(0, this.quickCool - dt);
     this.dashCool = Math.max(0, this.dashCool - dt);
+    // Its balls in flight: each meets what it meets.
+    this.flyBalls(arena);
     // (Mid Quick Attack: the step carries it; it neither falls nor runs till it is back.)
     if (this.quick) { this.vx = 0; this.vy = 0; return; }
     const held = this.stunned || this.down;
-    const it = held ? IDLE : intent;
+    // (Confused: every way it is told — left and right, up and down its aim, the way it faces — turned round.)
+    const told = held ? IDLE : intent;
+    const it = this.confused ? { ...told, want: -told.want, aim: -told.aim, face: told.face ? -told.face : told.face } : told;
     // Its aim: where it looks, and where its moves go (held through a move: it set its line as it began).
     // (Its beam pouring, or held in a clash: its gaze kept on the beam's line, wherever the aim key goes since.)
     if (!this.down) { this.aim = it.aim; this.factory.setGaze(this.node, this.firing && this.lineGaze !== null ? this.lineGaze : this.aim * AIM_ANGLE); }
@@ -586,18 +683,19 @@ export class Fighter {
     if (!this.busy) {
       if (it.ranged && this.ready(this.moves.ranged)) this.fire(arena);
       else if (it.close && this.ready(this.moves.close)) this.slash(arena);
-      else if (it.mobility && this.moves.mobility === 'Quick Attack') this.quickAttack(arena);
+      else if (it.mobility && isQuickStrike(this.moves.mobility)) this.quickAttack(arena, this.moves.mobility!);
       else if (it.control && BRACES.has(this.moves.control ?? '') && this.ready(this.moves.control)) this.brace();
       else if (it.mobility && this.moves.mobility === 'Dash') this.dash();
       else if (it.mobility && this.moves.mobility && BEHIND_STRIKES[this.moves.mobility]) this.strikeFromBehind(arena, this.moves.mobility);
       else if (it.dash) this.dashButton(arena, it.want);
       else if (it.mobility && this.moves.mobility === 'Agility') this.agility();
+      else if (it.mobility && this.moves.mobility === 'Teleport' && this.ready('Teleport')) this.teleportBehind(arena);
       else if (it.mobility && this.moves.mobility && TELEPORTS[this.moves.mobility]) this.teleport(arena, TELEPORTS[this.moves.mobility]);
     }
     const want = it.want;
     // (Turned only once it fits: turning by another would swing its tail into it — it steps away first, then turns.)
     const turnTo = want || it.face || 0;
-    if (turnTo && !this.firing && !held && !this.turnLocks && (turnTo === this.facing || this.canTurn(turnTo, arena))) this.face(turnTo);
+    if (turnTo && !this.firing && !held && !this.turnLocks && this.time >= this.unawareUntil && (turnTo === this.facing || this.canTurn(turnTo, arena))) this.face(turnTo);
     if (it.jumpPressed) this.sinceJumpPress = 0;
     this.jumpHeld = it.jumpHeld;
     this.sinceGround = this.grounded ? 0 : this.sinceGround + dt;
@@ -613,6 +711,8 @@ export class Fighter {
       this.vx = 0;
       if (this.flying) this.vy = 0;
       else this.vy = Math.max(-FALL_MAX, this.vy - GRAVITY * dt);
+    } else if (this.ramming && !held) {
+      this.ramStep(dt, arena);
     } else if (this.dashT > 0) {
       this.dashT -= dt;
       this.vx = this.facing * DASH_SPEED; this.vy = 0;
@@ -647,18 +747,29 @@ export class Fighter {
     }
     // Moved, sideways then up and down, each against the platforms; then out of every other body.
     const p = this.node.position;
-    const wasX = p.x;
+    const wasX = p.x, wasY = p.y;
+    const hw = this.W / 2;
+    // (Clear of every solid, standing at (x, y).)
+    const free = (x: number, y: number) => !this.solids(arena).some((o) => this.overlaps(x, y, o));
     p.x += this.vx * dt;
     for (const s of this.solids(arena)) {
       if (!this.overlaps(p.x, p.y, s)) continue;
       // (Only just under its top — its feet sunk into a floor: for the fall's pass to stand it on it, not to be thrown
       // out sideways off its end.)
       if (p.y > s.top - 0.25) continue;
-      // (Out the side it was on before it moved; already in it — nudged in by something — out its nearer face. Never
-      // out through the far side: a body a little in a wall, moving away from it, would come out beyond it.)
-      const hw = this.W / 2;
-      const left = wasX + hw <= s.x + 1e-3 ? true : wasX - hw >= s.x + s.w - 1e-3 ? false : p.x - s.x < s.x + s.w - p.x;
-      p.x = left ? s.x - hw - 1e-4 : s.x + s.w + hw + 1e-4;
+      const leftX = s.x - hw - 1e-4, rightX = s.x + s.w + hw + 1e-4;
+      // (Moved into it: back out the side it came from.)
+      if (wasX + hw <= s.x + 1e-3) p.x = leftX;
+      else if (wasX - hw >= s.x + s.w - 1e-3) p.x = rightX;
+      else {
+        // (Already in it — a Stone Edge pillar come up where it stood, a push: out a side that is clear — the nearer one
+        // first, never into another solid (the arena's wall beyond: through it, out of the arena); neither clear: up onto
+        // its top, if that is within its height; else left for the fall's pass.)
+        const near = p.x - s.x < s.x + s.w - p.x ? [leftX, rightX] : [rightX, leftX];
+        const out = near.find((x) => free(x, p.y));
+        if (out !== undefined) p.x = out;
+        else if (s.top - p.y <= this.H && free(p.x, s.top)) { p.y = s.top; this.vy = Math.max(this.vy, 0); }
+      }
       this.vx = 0;
     }
     const wasGrounded = this.grounded;
@@ -666,8 +777,20 @@ export class Fighter {
     p.y += this.vy * dt;
     for (const s of this.solids(arena)) {
       if (!this.overlaps(p.x, p.y, s)) continue;
-      if (this.vy <= 0) { p.y = s.top; this.grounded = true; }
-      else p.y = s.top - s.h - this.H - 1e-4;
+      const bottom = s.top - s.h;
+      if (this.vy > 0 && wasY + this.H <= bottom + 1e-3) {
+        // (Rising into it from below: its head against its underside.)
+        p.y = bottom - this.H - 1e-4;
+      } else if (this.vy <= 0 || s.top - p.y <= this.H) {
+        // (Down onto it — or in it with its top within its height: a Stone Edge pillar rising under it as it jumps —
+        // stood on its top. Never put under it: a pillar's underside is the floor, and under that, out of the world.)
+        p.y = s.top; this.grounded = true;
+      } else {
+        // (Deep in it, its top far above: out a clear side instead.)
+        const leftX = s.x - hw - 1e-4, rightX = s.x + s.w + hw + 1e-4;
+        const near = p.x - s.x < s.x + s.w - p.x ? [leftX, rightX] : [rightX, leftX];
+        p.x = near.find((x) => free(x, p.y)) ?? p.x;
+      }
       this.vy = 0;
     }
     this.unblock(arena);
@@ -724,6 +847,27 @@ export class Fighter {
    * How far along a line (from `from`, the way `dir` — a unit — at most `range`) it first meets a Stone Edge pillar
    * standing in `arena`, or null: a beam stopped there.
    */
+  /**
+   * How far along a line (from, along dir, within range) it first meets the ground — the floor (y 0) or a platform's top,
+   * coming down onto it from above; null: never. A beam or a ball fired down stops there, not on into it.
+   */
+  static groundAlong(arena: Arena, from: [number, number], dir: [number, number], range: number): number | null {
+    if (dir[1] >= -1e-6) return null;
+    let best: number | null = null;
+    const meet = (top: number, lo: number, hi: number) => {
+      if (from[1] < top - 1e-3) return;
+      const t = (top - from[1]) / dir[1];
+      if (t < 0 || t > range) return;
+      const x = from[0] + dir[0] * t;
+      if (x >= lo && x <= hi && (best === null || t < best)) best = t;
+    };
+    meet(0, -Infinity, Infinity);
+    for (const s of arena.level) if (!s.hidden) meet(s.top, s.x, s.x + s.w);
+    return best;
+  }
+  /** The nearer of two stops along a line (either may be none). */
+  static nearer(a: number | null, b: number | null): number | null { return a === null ? b : b === null ? a : Math.min(a, b); }
+
   static pillarAlong(arena: Arena, from: [number, number], dir: [number, number], range: number): number | null {
     let best: number | null = null;
     for (const s of arena.level) {
@@ -758,6 +902,8 @@ export class Fighter {
   private fire(arena: Arena): void {
     if (!this.moves.ranged) return;
     if (this.moves.ranged === 'Stone Edge') { this.stoneEdge(arena); return; }
+    const ball = ballFor(this.moves.ranged);
+    if (ball) { this.throwBall(arena, this.moves.ranged, ball); return; }
     const spec = beamFor(this.moves.ranged);
     if (!spec) return;
     const name = this.moves.ranged;
@@ -769,8 +915,7 @@ export class Fighter {
     // A foe's beam toward it, not yet launched, whose line meets its own: a clash — however far either would reach
     // alone (each line taken out past the other's mouth).
     const span = (f: Fighter) => { const [fx, fy] = f.mouth(); return Math.hypot(fx - from[0], fy - from[1]) + f.H; };
-    const rival = this.foes(arena).find((f) => f.beam && !f.beam.launched && !f.down && f.facing === -this.facing
-      && Fighter.linesMeet(from, dir, span(f), f.beam.from, f.beam.dir, span(f), (this.H + f.H) * 0.25));
+    const rival = this.rivalFor(arena, from, dir);
     if (rival) {
       // (Its beam begun — the clash, or the burst, is how it goes: its cooldown counts from its end.)
       this.startRun(name);
@@ -780,7 +925,7 @@ export class Fighter {
       return;
     }
     // (Stopped by a Stone Edge pillar in its way: short of it, nothing beyond it struck.)
-    const wall = Fighter.pillarAlong(arena, from, dir, range);
+    const wall = Fighter.nearer(Fighter.pillarAlong(arena, from, dir, range), Fighter.groundAlong(arena, from, dir, range));
     const found = this.beamTarget(arena, range);
     const hit = found && (wall === null || found.d < wall) ? found : null;
     const ahead = hit?.f ?? null;
@@ -796,8 +941,11 @@ export class Fighter {
     const conn = { on: !!ahead, onto: null as Fighter | null };
     // (A bolt first, whatever its style — Ice Beam's, Psybeam's are beam 2s: it ends on the foe it is on, run into its
     // body and taken into its aura, as Thunderbolt's.)
-    const play = this.factory.playBeam(this.node, null, at, spec.bolt ? { ...spec, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) }
-      : spec.style === 2 ? { ...spec, endBall: () => conn.on } : spec);
+    // (Its outline kept above the arena's floor — not the height it stands at: fired down off a platform or from the air,
+    // it goes down with its core.)
+    const floored: BeamSpec = { ...spec, groundY: 0 };
+    const play = this.factory.playBeam(this.node, null, at, spec.bolt ? { ...floored, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) }
+      : spec.style === 2 ? { ...floored, endBall: () => conn.on } : floored);
     const mine: Firing = { id: ++beamIds, play, move: name, spec, at: ahead, pressedAt: this.time, launched: false, from, dir,
       range: hit ? hit.d + 0.3 : wall ?? range, launchedAt: Infinity, pouring: true, struck: new Set(), end: at, reach: Math.max(1, range),
       get connected() { return conn.on; }, set connected(v: boolean) { conn.on = v; },
@@ -822,13 +970,13 @@ export class Fighter {
    * body near enough to the burst hurt and knocked back, away from the other; one further off just loses its beam.
    */
   private faceBurst(rival: Fighter, name: string, spec: BeamSpec, arena: Arena): void {
-    const theirs = rival.beam!;
+    const theirs = rival.seize();
     // (A burst is no interruption: both beams cool down — its own, let go just now, and the rival's — before any
     // knock back.)
     this.completeRun();
     rival.completeRun();
     theirs.play.cancel?.();
-    rival.beam = null; rival.firing = false; rival.using = '';
+    rival.firing = false; rival.using = '';
     this.factory.playFaceBurst(this.node, rival.node, spec.element, theirs.spec.element);
     arena.onBurst?.(this, rival, name, theirs.move);
     const [ax, ay] = this.mouth(), [bx, by] = rival.mouth();
@@ -950,7 +1098,9 @@ export class Fighter {
   reachWith(move: string): number {
     const spec = beamFor(move);
     if (spec && move === this.moves.ranged) return beamReach(spec) + this.reachOf().front;
-    if (move === 'Quick Attack') return QUICK_DIST * this.H + this.reachOf().front;
+    if (isBall(move)) return BALL_REACH + this.reachOf().front;
+    if (isRamMove(move)) return RAM_DIST * this.H + this.reachOf().front;
+    if (isQuickStrike(move)) return QUICK_DIST * this.H + this.reachOf().front;
     return this.H * CLOSE_REACH * 1.45;
   }
 
@@ -958,7 +1108,7 @@ export class Fighter {
   private roomAlong(arena: Arena, dir: number): number {
     const p = this.node.position;
     let open = 0;
-    while (open < 200 && !arena.level.some((s) => !s.pillar && this.overlaps(p.x + dir * (open + 0.1), p.y + 1e-3, s))) open += 0.1;
+    while (open < 200 && !this.solids(arena).some((s) => this.overlaps(p.x + dir * (open + 0.1), p.y + 1e-3, s))) open += 0.1;
     return open;
   }
 
@@ -1007,6 +1157,7 @@ export class Fighter {
     if (this.down) return;
     this.interruptRun();
     this.beam?.play.cancel?.(); this.beam = null;
+    this.dropBalls(); this.stopRam();
     this.firing = false; this.using = '';
     this.knockT = KNOCK_TIME;
     this.vx = dir * KNOCK_SPEED;
@@ -1026,7 +1177,7 @@ export class Fighter {
     if (!b || !b.launched || !b.pouring) return;
     // (A Stone Edge pillar in its line — standing there from the first, or come up since: it goes no further, nothing
     // past it struck.)
-    const wall = Fighter.pillarAlong(arena, b.from, b.dir, b.reach);
+    const wall = Fighter.nearer(Fighter.pillarAlong(arena, b.from, b.dir, b.reach), Fighter.groundAlong(arena, b.from, b.dir, b.reach));
     const full = wall === null ? b.reach : Math.min(b.reach, wall);
     const k = Math.min(1, Math.max(0, (this.time - b.launchedAt) / FRONT_TIME));
     const reach = Math.min(full, b.range * (1 - (1 - k) * (1 - k) * (1 - k)));
@@ -1088,9 +1239,9 @@ export class Fighter {
    * stronger pushes through into the other (a tie: both burst).
    */
   private clash(rival: Fighter, name: string, spec: BeamSpec, arena: Arena): void {
-    const theirs = rival.beam!;
+    // (Its rival's beam — or ball — charging: taken into the clash, played from here, a ball as its half of the ball.)
+    const theirs = rival.seize();
     theirs.play.cancel?.();
-    rival.beam = null;
     // Its head start (s): how much sooner its front would have launched. Their fronts meet where both have come as far
     // as the time allows — the rival's share of the way (from its mouth) 1/2 + head / (2 · FRONT_TIME).
     const head = Math.max(0, Math.min(FRONT_TIME, rival.time - theirs.pressedAt));
@@ -1137,7 +1288,10 @@ export class Fighter {
     });
     rival.clashing = meter(rs, 1);
     this.clashing = meter(ms, -1);
-    const play = this.factory.playClash(rival.node, this.node, theirs.spec, spec, null, 0, undefined, fromRival, struggle);
+    // (Every bolt — Thunderbolt off the body, Ice Beam, Psybeam — clashes on beam 2's clash ball, the one made for them,
+    // never beam 1's.)
+    const onBall = (s: BeamSpec): BeamSpec => ({ ...(s.bolt && s.style !== 2 ? { ...s, style: 2 as const } : s), groundY: 0 });
+    const play = this.factory.playClash(rival.node, this.node, onBall(theirs.spec), onBall(spec), null, 0, undefined, fromRival, struggle);
     for (const f of [this, rival]) { f.firing = true; f.using = f === this ? name : theirs.move; f.usingSince = f.time; }
     this.beam = null; rival.beam = null;
     arena.onClash?.(rival, this, null, +fromRival.toFixed(2));
@@ -1173,7 +1327,9 @@ export class Fighter {
   private slash(arena: Arena): void {
     if (!this.moves.close) return;
     if (this.moves.close === 'Earthquake') { this.quake(arena); return; }
-    const type = CLOSE_MOVES[this.moves.close];
+    if (isRamMove(this.moves.close)) { this.ram(arena); return; }
+    if (isFlurry(this.moves.close)) { this.flurry(arena); return; }
+    const type = slashType(this.moves.close);
     if (!type) return;
     const name = this.moves.close;
     // (Its slash sweeps a disc out along its aim from its middle: a foe whose body that disc touches is struck.)
@@ -1240,7 +1396,7 @@ export class Fighter {
    * under the foe struck it and threw it up onto its top; the ones between, a wall — stepped up toward the foe
    * (EDGE_HEIGHTS), too tall to jump from the floor at their top. They stand EDGE_LIFE s as platforms (shaking EDGE_WARN s
    * before they go), then crumble; a beam stops at them. One set at a time: a new one crumbles the old. Earthquake
-   * shatters them; a teleport goes through them, a Ghost type passes them.
+   * shatters them; nothing goes through them — run, dash or teleport: over them — but a Ghost type, which passes them.
    */
   private stoneEdge(arena: Arena): void {
     const name = this.moves.ranged!;
@@ -1303,7 +1459,8 @@ export class Fighter {
           // (Onto its middle, to ride it up.)
           if (f.takeHit(this, name, () => this.factory.playHitReact(f.node), arena)) { f.node.position.x = at.x; riding.add(f); }
         }
-        if (i === spots.length - 1) this.finishRun(k);
+        // (Gone off as it should with its first pillar up: its cooldown from now.)
+        if (i === 0) this.finishRun(k);
       });
       setTimeout(() => handle.warn(EDGE_WARN), (EDGE_TELL + i * EDGE_STAGGER + EDGE_LIFE - EDGE_WARN) * 1000);
       setTimeout(() => pillar.crumble(), (EDGE_TELL + i * EDGE_STAGGER + EDGE_LIFE) * 1000);
@@ -1317,12 +1474,16 @@ export class Fighter {
     const k = this.startRun(name);
     // (Its charging pose, the wave let go from it.)
     void this.factory.playChargePose(this.node, QUAKE_POSE).then(() => { if (this.using === name) this.end(); });
-    const passed = new Set<Fighter>();
-    const x0 = this.x;
-    setTimeout(() => {
-      arena.shake?.(QUAKE_JOLT);
+    const x0 = this.x, floor = this.y;
+    // Its tremors: QUAKE_PULSES waves out from it, QUAKE_PULSE_GAP s apart, each a share of the blow to a foe on the
+    // ground as it reaches it — in the air as one passes, that one missed (a jump timed well dodges some, or all). Only
+    // the last throws it up (thrown by an earlier one, the rest would miss it).
+    const tremor = (n: number) => {
+      const last = n === QUAKE_PULSES - 1;
+      const passed = new Set<Fighter>();
+      arena.shake?.(n === 0 ? QUAKE_JOLT : QUAKE_JOLT * 0.5);
       const radius = QUAKE_RADIUS;
-      void this.factory.playQuake({ x: x0, z: 0, floor: this.y, height: this.H, radius,
+      void this.factory.playQuake({ x: x0, z: 0, floor, height: this.H, radius, ripple: n > 0,
         onFront: (front) => {
           arena.shake?.(QUAKE_RUMBLE);
           // (Its wave shatters any Stone Edge pillar it reaches.)
@@ -1332,16 +1493,23 @@ export class Fighter {
             if (passed.has(f) || Math.abs(f.x - x0) > Math.min(front, radius)) continue;
             passed.add(f);
             // (In the air as it passes: missed.)
-            if (!f.grounded || f.down || f.invulnerable) continue;
-            if (f.takeHit(this, name, () => this.factory.playHitReact(f.node), arena)) { f.vy = Math.max(f.vy, QUAKE_POP); f.grounded = false; }
+            if (!f.grounded || f.down || (f.invulnerable && n === 0)) continue;
+            const share = Math.max(1, Math.round(this.damageTo(name, f) / QUAKE_PULSES));
+            // (Its later tremors strike through the grace the first one's blow left: one quake, several blows.)
+            if (f.takeHit(this, name, () => this.factory.playHitReact(f.node), arena, share, n > 0) && last) { f.vy = Math.max(f.vy, QUAKE_POP); f.grounded = false; }
           }
-        } }).then(() => this.finishRun(k));
-    }, QUAKE_DELAY * 1000);
+        } });
+      // (Gone off as it should once its first tremor is out: its cooldown from now — not left to its last, which a move
+      // begun meanwhile would rob of its finish, and so of any cooldown at all.)
+      if (n === 0) this.finishRun(k);
+    };
+    for (let n = 0; n < QUAKE_PULSES; n++) setTimeout(() => tremor(n), (QUAKE_DELAY + n * QUAKE_PULSE_GAP) * 1000);
   }
 
   /** Quick Attack, the way it faces: QUICK_DIST × its height on, short of a wall, or up to the nearest body in its way (a foe there struck). */
-  private quickAttack(arena: Arena): void {
-    if (!this.ready('Quick Attack') || (!this.grounded && !this.flying && !this.airDash)) return;
+  private quickAttack(arena: Arena, move = 'Quick Attack'): void {
+    if (!this.ready(move) || (!this.grounded && !this.flying && !this.airDash)) return;
+    const type = getMove(move)?.moveType ?? 'Normal';
     const p = this.node.position, dir = this.facing;
     // (Along its aim when aloft, or aimed up off the ground — level otherwise: it can't go down into the ground.)
     const tilt = !this.grounded || this.aim > 0 ? this.aim * AIM_ANGLE : 0;
@@ -1349,7 +1517,7 @@ export class Fighter {
     let reach = QUICK_DIST * this.H;
     const stepLen = 0.05;
     for (let d = stepLen; d <= reach; d += stepLen) {
-      if (arena.level.some((s) => this.overlaps(p.x + dir * ux * d, p.y + uy * d + 1e-3, s))) { reach = d - stepLen; break; }
+      if (this.solids(arena).some((s) => this.overlaps(p.x + dir * ux * d, p.y + uy * d + 1e-3, s))) { reach = d - stepLen; break; }
     }
     const upTo = (f: Fighter) => {
       const [lo, hi] = f.span();
@@ -1370,11 +1538,16 @@ export class Fighter {
     this.face(dir, true);
     if (!this.grounded && !this.flying) this.airDash = false;
     this.quick = true; this.vx = 0; this.vy = 0;
-    this.using = 'Quick Attack'; this.usingSince = this.time;
+    this.using = move; this.usingSince = this.time;
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
-    const k = this.startRun('Quick Attack');
-    void this.factory.playQuickStep(this.node, at, land, 'attack', 'Normal', !!struck).then(() => {
-      if (struck && !struck.down) struck.takeHit(this, 'Quick Attack', () => this.factory.playHitReact(struck.node), arena);
+    const k = this.startRun(move);
+    // (Coated head to toe — Aqua Jet, Zippy Zap, Grassy Glide: its water bursting off it as the blow lands. A punch
+    // thrown with its arm.)
+    const coat = QUICK_COATED.has(move) ? this.factory.aura(this.node, coatOf(move, type)) : null;
+    const strike = isPunch(move) && this.factory.punchPlan?.(this.node).key === 'swipe' ? 'swipe' : 'attack';
+    void this.factory.playQuickStep(this.node, at, land, strike, type, !!struck).then(() => {
+      if (coat) void (struck && coat.burst ? coat.burst() : coat.release());
+      if (struck && !struck.down) struck.takeHit(this, move, () => this.factory.playHitReact(struck.node), arena);
       if (this.canFly && this.aim > 0 && this.y > 1e-3) this.flying = true;
       this.quick = false; this.quickCool = QUICK_COOL; this.using = ''; this.finishRun(k);
       setTimeout(() => { if (!this.firing && !this.quick) this.clip = ''; }, 350);
@@ -1455,6 +1628,41 @@ export class Fighter {
     });
   }
 
+  /**
+   * Teleport: gone in its ring and back right behind its nearest foe, facing its back — its foe, caught unawares, held
+   * from turning round TELEPORT_UNAWARE s: its chance. No room behind it: before it. No foe: along its aim, as ever.
+   */
+  private teleportBehind(arena: Arena): void {
+    const foe = this.foes(arena).filter((f) => !f.down)
+      .sort((a, b) => Math.hypot(a.x - this.x, a.y - this.y) - Math.hypot(b.x - this.x, b.y - this.y))[0];
+    if (!foe) { this.teleport(arena, 'ring'); return; }
+    // (Behind it: on the side it faces away from.)
+    const spot = (s: number) => {
+      const [flo, fhi] = foe.span();
+      return { x: s > 0 ? fhi + this.reachOf().front + FEINT_GAP : flo - this.reachOf().front - FEINT_GAP, dir: -s };
+    };
+    let at = spot(-foe.facing);
+    if (!this.fitsAt(arena, at.x, foe.y, at.dir)) at = spot(foe.facing);
+    if (!this.fitsAt(arena, at.x, foe.y, at.dir)) { this.teleport(arena, 'ring'); return; }
+    this.quick = true; this.vx = 0; this.vy = 0;
+    this.using = 'Teleport'; this.usingSince = this.time;
+    const k = this.startRun('Teleport');
+    void this.factory.playTeleport(this.node, new Vector3(at.x, foe.y, 0), {
+      look: 'ring', element: 'Psychic', face: at.dir > 0 ? Math.PI / 2 : -Math.PI / 2,
+      onArrive: () => {
+        this.face(at.dir, true);
+        // (Caught unawares: it can't turn round for a moment.)
+        foe.unawareUntil = foe.time + TELEPORT_UNAWARE;
+      },
+    }).then(() => {
+      this.face(at.dir, true);
+      this.grounded = this.y <= 1e-3;
+      if (!this.grounded) this.flying = this.flying || this.mayFly;
+      this.quick = false; this.quickCool = TELEPORT_COOL; this.using = ''; this.clip = '';
+      this.finishRun(k);
+    });
+  }
+
   /** Agility: its boost — AGILITY_TIME s of zippy dashes — a flash as it takes hold; its cooldown from now. */
   private agility(): void {
     if (!this.ready('Agility')) return;
@@ -1506,8 +1714,8 @@ export class Fighter {
       });
     // (Through bodies, never through a wall: no further than the level lets it go along the way — the ground below
     // aside, as an aim down along it would graze it.)
-    // (Through a Stone Edge pillar too: a teleport crosses nothing between.)
-    const wallAt = (d: number) => arena.level.some((s) => !s.pillar && this.overlaps(p.x + ux * d, Math.max(0, p.y + uy * d) + 1e-3, s));
+    // (Never through a Stone Edge pillar either — a wall, gone over, not through — but for a Ghost type, which passes it.)
+    const wallAt = (d: number) => this.solids(arena).some((s) => this.overlaps(p.x + ux * d, Math.max(0, p.y + uy * d) + 1e-3, s));
     let open = 0;
     const reach = TELEPORT_DIST * (o.dist ?? 1) * this.H;
     while (open < reach * TELEPORT_PAST && !wallAt(open + 0.1)) open += 0.1;
@@ -1551,6 +1759,259 @@ export class Fighter {
     if (!this.grounded && !this.flying) this.airDash = false;
   }
 
+  /**
+   * Its ranged move a ball: charged at its mouth as a beam is (struck meanwhile: gone), let go along its aim — and its
+   * thrower free at once, the ball flying on by itself (flyBalls). Aura Sphere homes on the nearest foe ahead in reach.
+   */
+  private throwBall(arena: Arena, name: string, spec: BallSpec): void {
+    this.face(this.facing, true);
+    const from = this.mouth(), dir = this.aimDir();
+    const homing = getMove(name)?.alwaysHits
+      ? this.foes(arena).filter((f) => !f.down && Math.sign(f.x - this.x) === this.facing && Math.hypot(f.x - this.x, f.y - this.y) <= BALL_REACH)
+        .sort((a, b) => Math.abs(a.x - this.x) - Math.abs(b.x - this.x))[0] ?? null
+      : null;
+    // (Straight: to its reach, or the Stone Edge pillar in its way.)
+    const far = homing ? BALL_REACH : Fighter.nearer(Fighter.pillarAlong(arena, from, dir, BALL_REACH), Fighter.groundAlong(arena, from, dir, BALL_REACH)) ?? BALL_REACH;
+    const end = new Vector3(from[0] + dir[0] * far, from[1] + dir[1] * far, 0);
+    // (Its look in a clash: the clash's half a ball's, in its colours.)
+    const clashSpec: BeamSpec = { element: spec.element, ball: spec.colours ?? true, tornado: spec.tornado };
+    // A foe's beam or ball charging at it, their lines meeting: a clash, as two beams'.
+    const rival = this.rivalFor(arena, from, dir);
+    if (rival) {
+      // (As a beam's: the clash takes both into it — or the burst, point-blank, leaves both free. Not begun here: begun,
+      // a burst would leave it held in its throw for good.)
+      this.startRun(name);
+      if (Math.hypot(rival.x - this.x, rival.y - this.y) < CLASH_MIN) this.faceBurst(rival, name, clashSpec, arena);
+      else this.clash(rival, name, clashSpec, arena);
+      return;
+    }
+    this.begin(name);
+    this.lineGaze = Math.atan2(dir[1], Math.abs(dir[0]));
+    if (this.announceAttack(arena)) { this.dropAttack(); return; }
+    const k = this.startRun(name);
+    const play = this.factory.playBall(this.node, homing?.node ?? null, end, spec, { point: !homing });
+    const t: Thrown = { play, move: name, homing, launched: false, done: false, passed: new Set(), from, dir, pressedAt: this.time, spec: clashSpec };
+    this.balls.push(t);
+    void play.launched?.then(() => {
+      if (!this.balls.includes(t)) return;
+      t.launched = true;
+      // Let go: its cooldown from now, and free at once — the ball flies on by itself.
+      this.finishRun(k);
+      if (this.firing && this.using === name) this.end();
+    });
+    void play.hit.then(() => {
+      // (Aura Sphere at the end of its flight with nothing met on the way: on its foe — it never misses.)
+      if (!t.done && t.launched && homing && !homing.down && !t.passed.has(homing) && this.balls.includes(t)) {
+        t.done = true;
+        homing.takeHit(this, name, () => this.factory.playHitReact(homing.node), arena);
+      }
+      t.done = true;
+    });
+    void play.done.then(() => { this.balls = this.balls.filter((b) => b !== t); });
+  }
+
+  /** Its balls in flight, this frame: one touching a foe strikes it and bursts there; one in a Stone Edge pillar bursts on it. */
+  private flyBalls(arena: Arena): void {
+    for (const t of this.balls) {
+      if (!t.launched || t.done || !t.play.position) continue;
+      const p = t.play.position(), r = BALL_TOUCH * this.H;
+      if (!t.homing && arena.level.some((s) => s.pillar && p.x > s.x - r && p.x < s.x + s.w + r && p.y < s.top + r && p.y > s.top - s.h - r)) {
+        t.done = true; t.play.burst?.(); continue;
+      }
+      // Another's ball met on its way, in the air: the stronger flies on, the other bursts (even: both).
+      const met = this.foes(arena).flatMap((f) => f.balls.filter((o) => o.launched && !o.done && o.play.position).map((o) => ({ f, o })))
+        .find(({ f, o }) => { const q = o.play.position!(); return Math.hypot(q.x - p.x, q.y - p.y) < r + BALL_TOUCH * f.H; });
+      if (met) {
+        const won = this.outweighs(t.move, met.f, met.o.move);
+        if (won <= 0) { t.done = true; t.play.burst?.(); }
+        if (won >= 0) { met.o.done = true; met.o.play.burst?.(); }
+        arena.onStatus?.(won > 0 ? this : won < 0 ? met.f : this, `ball clash: ${t.move} vs ${met.o.move} — ${won > 0 ? t.move : won < 0 ? met.o.move : 'even'}`, 0);
+        if (t.done) continue;
+      }
+      // A foe's beam pouring across its way: the stronger goes on — the ball bursting on it, or the beam cut off.
+      const across = this.foes(arena).find((f) => {
+        const b = f.beam;
+        if (!b || !b.launched || !b.pouring) return false;
+        const along = Math.max(0, Math.min(b.range, (p.x - b.from[0]) * b.dir[0] + (p.y - b.from[1]) * b.dir[1]));
+        return Math.hypot(p.x - (b.from[0] + b.dir[0] * along), p.y - (b.from[1] + b.dir[1] * along)) < r + BEAM_TOUCH * f.H;
+      });
+      if (across) {
+        const b = across.beam!, won = this.outweighs(t.move, across, b.move);
+        if (won <= 0) { t.done = true; t.play.burst?.(); }
+        if (won >= 0) { b.play.cancel?.(); across.beam = null; across.firing = false; across.using = ''; across.completeRun(); }
+        arena.onStatus?.(won > 0 ? this : across, `ball vs beam: ${t.move} vs ${b.move} — ${won > 0 ? t.move : won < 0 ? b.move : 'even'}`, 0);
+        if (t.done) continue;
+      }
+      for (const f of this.foes(arena)) {
+        if (f.down || t.passed.has(f)) continue;
+        const [l, rr, b, tp] = f.box();
+        if (Math.hypot(Math.max(l, Math.min(rr, p.x)) - p.x, Math.max(b, Math.min(tp, p.y)) - p.y) > r) continue;
+        t.passed.add(f);
+        // (Unhurtable, or braced and gone — Detect, Sucker Punch: it flies on through where it was.)
+        if (f.takeHit(this, t.move, () => this.factory.playHitReact(f.node), arena)) { t.done = true; t.play.burst?.(); break; }
+      }
+    }
+  }
+
+  /** A foe (facing it) whose beam or ball, charging, has a line meeting its own (from, along dir): a clash. */
+  private rivalFor(arena: Arena, from: [number, number], dir: [number, number]): Fighter | null {
+    const span = (f: Fighter) => { const [fx, fy] = f.mouth(); return Math.hypot(fx - from[0], fy - from[1]) + f.H; };
+    return this.foes(arena).find((f) => {
+      const c = f.chargeOf();
+      return !!c && !f.down && f.facing === -this.facing && Fighter.linesMeet(from, dir, span(f), c.from, c.dir, span(f), (this.H + f.H) * 0.25);
+    }) ?? null;
+  }
+
+  /**
+   * Its `move` against `other`'s `theirs`, met in the air (a ball and a ball, or a ball and a beam): power × type
+   * effectiveness each (clashTerms), as a clash weighs them — 1 its own the stronger, −1 the other's, 0 even.
+   */
+  private outweighs(move: string, other: Fighter, theirs: string): number {
+    const a = this.clashTerms(move, theirs), b = other.clashTerms(theirs, move);
+    const k = (a.P * a.E) / (b.P * b.E);
+    return k > CLASH_TIE ? 1 : k < 1 / CLASH_TIE ? -1 : 0;
+  }
+
+  /** Its balls still charging gone (all of them, `all`: those in flight too, struck nothing more). Whether one was charging. */
+  private dropBalls(all = false): boolean {
+    let charging = false;
+    for (const t of this.balls) {
+      if (!t.launched) { charging = true; t.play.cancel?.(); }
+      t.done = true;
+    }
+    this.balls = all ? [] : this.balls.filter((t) => t.launched);
+    if (charging) this.interruptRun();
+    return charging;
+  }
+
+  /** Its close move a ram: coated (in its coat's colours), then the run (ramStep). On the ground or flying only. */
+  private ram(arena: Arena): void {
+    const name = this.moves.close!;
+    if (!this.grounded && !this.flying) return;
+    const type = getMove(name)?.moveType ?? 'Normal';
+    this.face(this.facing, true);
+    this.vx = 0;
+    this.using = name; this.usingSince = this.time;
+    if (this.announceAttack(arena)) { this.dropAttack(); return; }
+    const k = this.startRun(name);
+    const coat = this.factory.aura(this.node, coatOf(name, type));
+    const r = { move: name, k, dir: this.facing, go: false, ran: 0, coat, ghostT: 0 };
+    this.ramming = r;
+    void coat.lit.then(() => {
+      if (this.ramming !== r) return;
+      r.go = true;
+      this.factory.ramBurst(this.node, coatOf(name, type).element, 'launch', r.dir);
+    });
+  }
+
+  /** Its ram, this frame: lit, it runs on — into the first foe ahead (the blow), a wall, or its full run (a miss). */
+  private ramStep(dt: number, arena: Arena): void {
+    const r = this.ramming!;
+    this.vy = this.flying ? 0 : Math.max(-FALL_MAX, this.vy - GRAVITY * dt);
+    if (!r.go) { this.vx = 0; return; }
+    const front = this.reachOf().front;
+    const foe = this.foes(arena).filter((f) => {
+      if (f.down) return false;
+      const [lo, hi] = f.span();
+      const gap = r.dir > 0 ? lo - (this.x + front) : this.x - front - hi;
+      return gap <= RAM_CONTACT * this.H + RAM_SPEED * dt && gap > -this.H && f.y < this.y + this.H && f.y + f.H > this.y;
+    })[0];
+    const full = RAM_DIST * this.H;
+    if (foe) { this.ramInto(foe, arena); return; }
+    const was = this.x;
+    this.vx = r.dir * RAM_SPEED;
+    r.ghostT -= dt;
+    if (r.ghostT <= 0) { this.factory.afterimage(this.node, DASH_GHOST); r.ghostT = DASH_GHOST_EVERY; }
+    r.ran += RAM_SPEED * dt;
+    // (Its full run out — or a wall: a miss, its cooldown spent all the same.)
+    if (r.ran >= full || (r.ran > 0.3 && Math.abs(was - this.lastX) < 1e-4)) { this.finishRun(r.k); this.stopRam(); }
+    this.lastX = was;
+  }
+  private lastX = NaN;
+
+  /** Its ram on `foe`: the blow — by how far it ran — the foe thrown back, its recoil on itself. */
+  private ramInto(foe: Fighter, arena: Arena): void {
+    const r = this.ramming!;
+    const name = r.move;
+    this.factory.ramBurst(this.node, coatOf(name, getMove(name)?.moveType ?? 'Normal').element, 'hit', r.dir);
+    const run = Math.min(1, r.ran / (RAM_DIST * this.H));
+    const damage = hurt(this.damageTo(name, foe) * (RAM_MOMENTUM + (1 - RAM_MOMENTUM) * run));
+    this.finishRun(r.k);
+    this.stopRam();
+    if (foe.takeHit(this, name, () => this.factory.playHitReact(foe.node), arena, damage)) {
+      foe.knockBack(r.dir);
+      this.recoil(hurt((getMove(name)?.recoilFraction ?? 0) * damage), name, arena);
+    }
+  }
+
+  /** Its ram over (struck, missed, or landed): stopped, its coat let go. */
+  private stopRam(): void {
+    const r = this.ramming;
+    if (!r) return;
+    this.ramming = null;
+    this.vx = 0; this.using = ''; this.lastX = NaN;
+    void r.coat.release();
+  }
+
+  /** Its own move's recoil: `damage` off its HP (a faint if none left), told as `<move> recoil`. */
+  private recoil(damage: number, move: string, arena: Arena): void {
+    if (this.down || damage <= 0) return;
+    this.hp = Math.max(0, this.hp - damage);
+    arena.onHit?.(this, this, `${move} recoil`, damage);
+    void this.factory.playHitReact(this.node);
+    if (this.hp <= 0) {
+      this.down = true;
+      this.dropBalls(); this.firing = false; this.using = '';
+      void this.factory.playFaint(this.node).then(() => {
+        if (this.respawn) setTimeout(() => { if (this.down) this.restore(); }, RESPAWN * 1000);
+      });
+    }
+  }
+
+  /**
+   * Its close move a plain contact blow (Close Combat, Thrash, Outrage…): a flurry where it stands, more and faster
+   * blows the stronger it is, its damage shared out over them (each on a foe still in reach; after the first, through
+   * its grace). Thrash and Outrage leave it confused (CONFUSE_TIME s).
+   */
+  private flurry(arena: Arena): void {
+    const name = this.moves.close!;
+    const dir = this.aimDir(), R = this.H * CLOSE_REACH;
+    const inReach = (f: Fighter) => {
+      if (f.down) return false;
+      const cx = this.x + dir[0] * R * 0.75, cy = this.y + this.H * 0.5 + dir[1] * R * 0.75;
+      const [l, r, b, t] = f.box();
+      return Math.hypot(Math.max(l, Math.min(r, cx)) - cx, Math.max(b, Math.min(t, cy)) - cy) <= R * 0.75;
+    };
+    const near = this.foes(arena).filter(inReach).sort((a, b) => Math.abs(a.x - this.x) - Math.abs(b.x - this.x))[0];
+    const at = near ? near.node.position.clone() : new Vector3(this.x + this.facing * this.H, this.y, 0);
+    this.face(this.facing, true);
+    this.begin(name);
+    if (this.announceAttack(arena)) { this.dropAttack(); return; }
+    const k = this.startRun(name);
+    let landed = 0;
+    const blow = (i: number, of: number) => {
+      if (this.down || this.using !== name || !near || !inReach(near)) return;
+      if (landed === 0 && near.invulnerable) return;
+      const share = Math.max(1, Math.round(this.damageTo(name, near) / of));
+      if (near.takeHit(this, name, () => this.factory.playHitReact(near.node), arena, share, landed > 0, i === of - 1)) landed++;
+      void i;
+    };
+    const play = this.factory.playFlurry ? this.factory.playFlurry(this.node, at, getMove(name)?.basePower ?? 60, blow) : Promise.resolve();
+    void play.then(() => {
+      if (this.using !== name) return;
+      this.finishRun(k); this.end();
+      if (RAMPAGES.has(name)) this.confuse(CONFUSE_TIME);
+    });
+  }
+
+  /** Confused for `seconds`: every way it is told turned round; a violet glow while it lasts. */
+  confuse(seconds: number): void {
+    if (this.down) return;
+    this.confusedUntil = this.time + seconds;
+    this.factory.tell(this.node, CONFUSE_GLOW, seconds);
+    this.arenaRef?.onStatus?.(this, 'confused', seconds);
+  }
+
   private begin(name: string): void { this.firing = true; this.using = name; this.usingSince = this.time; this.telling = ''; this.lineGaze = null; }
   private end(): void { this.firing = false; this.using = ''; this.clip = ''; this.lineGaze = null; this.face(this.facing, true); }
 
@@ -1559,9 +2020,13 @@ export class Fighter {
    * HP it faints once `over` (a practice target stands again after RESPAWN s). Whether it landed: not on one down,
    * unhurtable, or braced to counter (that one turns it back).
    */
-  takeHit(by: Fighter, move: string, flinch: Promise<unknown> | (() => Promise<unknown>), arena: Arena, damageOverride?: number): boolean {
+  takeHit(by: Fighter, move: string, flinch: Promise<unknown> | (() => Promise<unknown>), arena: Arena, damageOverride?: number,
+    /** A later blow of one move that strikes more than once (Earthquake's tremors): through its grace after the first. */
+    through = false,
+    /** Pushed back from its striker (not by a flurry's blows before its last: it stays in reach of the rest). */
+    push = true): boolean {
     // (Nor from one down: a blow wound up before its striker fainted lands nothing.)
-    if (this.down || this.invulnerable || (by !== this && by.down)) return false;
+    if (this.down || (this.invulnerable && !through) || (by !== this && by.down)) return false;
     // (Braced to counter: the blow sets it off — none of it taken.)
     if (this.countering && by !== this && this.setsOff(move)) { this.counter(by, arena, move); return false; }
     // (Immune — its type unaffected by the move's: no damage, no flinch, no push; only told so.)
@@ -1572,13 +2037,16 @@ export class Fighter {
     // (Unhurtable till its flinch is over and HIT_GRACE after, blinking; pushed back from its striker.)
     this.graceUntil = Infinity;
     void over.then(() => { this.graceUntil = this.time + HIT_GRACE; if (!this.down) this.factory.blink(this.node, HIT_GRACE); });
-    this.pushFrom(by);
+    if (push) this.pushFrom(by);
     // (Struck while braced: the brace is broken — out of it, as if it had run out.)
     // (Its move under way cut off by the blow: no cooldown for it — nor for a brace broken so.)
     this.interruptRun();
     if (this.countering) { this.counterUntil = -1; this.firing = false; this.using = ''; }
     // (Its beam, charging or pouring, cut off by the blow — quietly: its flinch, not its idle, takes over.)
     if (this.beam) { this.beam.play.cancel?.(true); this.beam = null; this.firing = false; this.using = ''; }
+    // (Its ball still charging: gone with it. Its ram: stopped where it is.)
+    if (this.dropBalls()) { this.firing = false; this.using = ''; }
+    this.stopRam();
     this.hp = Math.max(0, this.hp - damage);
     arena.onHit?.(by, this, move, damage);
     this.stunned = true;
@@ -1601,6 +2069,9 @@ export class Fighter {
     if (++this.measured <= BODY_SETTLE) return;
     const r0 = this.factory.reachAlong(this.node);
     if (!r0) return;
+    // (Its skin not yet drawn — the page hidden, no frame rendered: no reading at all. Measured again next frame, never
+    // taken as NaN: one NaN reach would spread to its place, its foe's, the camera.)
+    if (!Number.isFinite(r0.front) || !Number.isFinite(r0.back)) { this.measured--; return; }
     const most = this.H * BODY_MAX;
     const r = { front: Math.min(r0.front, most), back: Math.min(r0.back, most) };
     this.reach = this.reach ? { front: Math.max(this.reach.front, r.front), back: Math.max(this.reach.back, r.back) } : r;

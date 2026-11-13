@@ -183,6 +183,8 @@ export interface BallHandle {
   position(): Vector3;
   /** Gone at once, no burst (it has met a clash: its half of the ball takes over). */
   vanish(): void;
+  /** Burst where it is, now (in flight: it has met something on its way — the side-on fighter decides). */
+  burst(): void;
   /** Resolves on contact — where the hit lands. */
   readonly hit: Promise<void>;
   /** Resolves once the burst has dispersed and everything is gone. */
@@ -325,6 +327,23 @@ class Orb implements BallHandle {
     this.finish();
   }
 
+  burst(): void {
+    if (this.flyT < 0 || this.burstT >= 0 || this.finished) return;
+    this.pop();
+  }
+
+  /** Contact: its burst begins where it is. */
+  private pop(): void {
+    const H = this.shot.height;
+    this.burstT = 0;
+    this.resolveHit();
+    this.fx.options.shake?.(0.22, 260);
+    for (let i = 0; i < ORB_SPARKS; i++) {
+      const d = randomDir();
+      this.sparks.spawn(this.at.add(d.scale(0.2 * H)), d.scale((2.5 + Math.random() * 3) * H), 0.25 + Math.random() * 0.3);
+    }
+  }
+
   launch(): void {
     if (this.flyT >= 0 || this.finished) return;
     if (this.shot.instant) {
@@ -389,15 +408,7 @@ class Orb implements BallHandle {
       const moved = this.at.subtract(prev);
       if (moved.lengthSquared() > 1e-8) this.dir.copyFrom(moved.normalize());
       if (k >= 1 && this.shot.vanish) { this.finish(); return; }
-      if (k >= 1) {
-        this.burstT = 0;
-        this.resolveHit();
-        this.fx.options.shake?.(0.22, 260);
-        for (let i = 0; i < ORB_SPARKS; i++) {
-          const d = randomDir();
-          this.sparks.spawn(this.at.add(d.scale(0.2 * H)), d.scale((2.5 + Math.random() * 3) * H), 0.25 + Math.random() * 0.3);
-        }
-      }
+      if (k >= 1) this.pop();
     } else {
       // Contact: it swells and disperses.
       this.burstT += dt;

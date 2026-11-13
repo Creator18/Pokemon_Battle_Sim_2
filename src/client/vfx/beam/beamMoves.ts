@@ -53,6 +53,12 @@ export interface BeamSpec {
    * OUTLINE, RINGS). Both charge, launch and release alike.
    */
   style?: 1 | 2;
+  /**
+   * The floor's height, if the caller knows it (the side-on arena's: 0). Its outline is kept above it. Unset: the height
+   * its user stands at — wrong on a platform, or aloft over the floor: fired down from there, its outline was held up
+   * there while its core went on down, the two apart.
+   */
+  groundY?: number;
   /** Its half of a clash's ball in the other beam's style (Ice Beam: beam 2's egg, beam 1's clash ball). Unset: as `style`. */
   clashStyle?: 1 | 2;
   /** Beam 2's outline: 'cel' (default) a flat band in its type's outline colour; 'soft' a glow, fading out to its edge. */
