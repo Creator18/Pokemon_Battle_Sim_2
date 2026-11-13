@@ -137,7 +137,8 @@ export function grassStadium(scene: Scene, at = Vector3.Zero()): Arena {
     const m = new StandardMaterial('stadiumPitchMat', scene);
     m.diffuseTexture = tex; m.specularColor = Color3.Black();
     owned.push(m, softGrass(scene, m, innerW * 2 * STADIUM_SCALE, innerD * 2 * STADIUM_SCALE, 1));
-    const pitch = put(MeshBuilder.CreateGround('stadiumPitch', { width: innerW * 2, height: innerD * 2 }, scene), m, 0, 0, 0);
+    // (Cut finely along its length — the fight's way — so Earthquake's wave can heave it: groundLight's quakes.)
+    const pitch = put(MeshBuilder.CreateGround('stadiumPitch', { width: innerW * 2, height: innerD * 2, subdivisionsX: 280, subdivisionsY: 40 }, scene), m, 0, 0, 0);
     owned.push(grassFur(scene, pitch, m, innerW * 2 * STADIUM_SCALE, innerD * 2 * STADIUM_SCALE, STADIUM_SCALE, 5));
   }
 

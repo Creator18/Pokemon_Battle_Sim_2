@@ -81,8 +81,18 @@ export interface MoveKit { ranged?: string; close?: string; mobility?: string; c
  * The braces (control): Sucker Punch — any blow sets it off, and it is back behind its striker; Counter — a physical
  * blow only (a special one lands, breaking it), gone backwards as a back dash and back in at its striker's front.
  */
-export const BRACES = new Set(['Sucker Punch', 'Counter']);
-export const DEFAULT_KIT: MoveKit = { ranged: 'Flamethrower', close: 'Dragon Claw', mobility: 'Quick Attack', control: 'Sucker Punch' };
+export const BRACES = new Set(['Sucker Punch', 'Counter', 'Detect']);
+/** The braces that end in a lunge at the foe (Sucker Punch, Counter): mobility moves too. Detect only gets away. */
+const LUNGING_BRACES = new Set(['Sucker Punch', 'Counter']);
+export const DEFAULT_KIT: MoveKit = { ranged: 'Flamethrower', close: 'Dragon Claw', mobility: 'Quick Attack', control: 'Detect' };
+/**
+ * One mobility move at a time: a lunging brace (Sucker Punch, Counter — each ends in a lunge at the foe) is a mobility move too,
+ * so a kit with a mobility move holds no brace (with both, a fighter could wait a blow out and toggle between the two to
+ * get at its foe). With both, the mobility move is kept.
+ */
+export function oneMobility(kit: MoveKit): MoveKit {
+  return kit.mobility && kit.control && LUNGING_BRACES.has(kit.control) ? { ...kit, control: undefined } : { ...kit };
+}
 
 /**
  * What it wants this frame: which way (−1, 0, 1), its jump (held; pressed this frame — flying: held, it rises; let go, it
@@ -113,6 +123,8 @@ export interface Arena {
   onCounter?(by: Fighter, on: Fighter, move: string, damage: number, brace?: string): void;
   /** A clash's struggle over: who won (none: a tie). */
   onClashEnd?(first: Fighter, second: Fighter, winner: Fighter | null, stops?: { you: number; rival: number; outright: boolean }): void;
+  /** The camera shaken: `trauma` added (0..1; its shake the square of what it holds, dying away). */
+  shake?(trauma: number): void;
   /** Two beams let go too close to clash: both burst point-blank (who, with what). */
   onBurst?(a: Fighter, b: Fighter, moveA: string, moveB: string): void;
 }
@@ -153,6 +165,19 @@ const AGILITY_TIME = 4, ZIP_GAIN = 1.35;
 const AGILITY_GLOW: [number, number, number] = [1, 0.45, 0.75];
 /** A back dash: how far (× TELEPORT_DIST), how soon the next (s). */
 const BACK_DASH_DIST = 0.7, BACK_DASH_COOL = 0.35;
+/** The Pokéball painted on the League stadium's pitch: its outer ring's radius (0.94 of its 11-unit square across, halved). */
+const POKEBALL_R = (11 * 0.94) / 2;
+/**
+ * Earthquake: how long after the stamp begins its wave sets off (s); how hard it throws a foe up (world units/s); the
+ * camera's jolt at the stamp and its rumble each frame the wave runs (trauma, 0..1).
+ */
+const QUAKE_DELAY = 0.22, QUAKE_POP = 7, QUAKE_JOLT = 0.55, QUAKE_RUMBLE = 0.02;
+/** Earthquake: how long it holds its charging pose (s); from the air, how long it is gone between going up and coming down (s). */
+const QUAKE_POSE = 0.6, QUAKE_AIR_GAP = 0.4;
+/** Earthquake's area: its radius round the user (world units) — 10% more than the pitch's painted Pokéball's. */
+const QUAKE_RADIUS = POKEBALL_R * 1.1;
+/** Detect going off: how far clear of the attack's reach it stops (world units), and the least it goes (× its height). */
+const DETECT_CLEAR = 0.6, DETECT_MIN = 0.5;
 /**
  * The moves that play as a teleport, and their look: magical — a ring and a flare ('ring': Teleport) — or physical —
  * a vanish into flickering speed lines along the way it goes, back in along the way it will face ('lines').
@@ -189,7 +214,7 @@ const SLOT_COOL = { ranged: 1.2, close: 0.45, mobility: 0.5, control: 2.5 } as c
 const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 9, 'Dash': 0.5, 'Back Dash': 0.5, 'Teleport': 0.5,
   // (The braces turn back the blow that comes — their strength the incoming move's — so they cool longer, and gone off,
   // by the power of the move they turned back: cooldownFor.)
-  'Sucker Punch': 5, 'Counter': 5 };
+  'Sucker Punch': 5, 'Counter': 5, 'Detect': 5 };
 const SPEED_K: [number, number] = [0.6, 1.5], POWER_REF = 80, POWER_K: [number, number] = [0.5, 1.6];
 const ABUSE_HALF = 3, ABUSE_STEP = 0.6;
 /** Counter's blow coming in mid-swing: its clip begun this far (s) short of the blow as it opens out of its teleport. */
@@ -254,7 +279,7 @@ const BEAM_CHARGE = 1.1, FRONT_TIME = 0.6;
  * far apart as the Pokéball painted on the League stadium's pitch is across (its outer ring: 0.94 of its 11-unit
  * square), each at its edge: from there, a clash.
  */
-const CLASH_MIN = 11 * 0.94;
+const CLASH_MIN = POKEBALL_R * 2;
 /**
  * A clash's stopper: its number runs up from 0 to METER_MAX and back down, steadily, in METER_PERIOD s (each side from
  * its own point in the run); stopped on N, its multiplier is 1 + N / METER_MAX (×1 … ×2); not stopped by METER_TIME s
@@ -368,7 +393,7 @@ export class Fighter {
   constructor(readonly node: TransformNode, private readonly factory: RecipeFactory, readonly team: number,
     readonly maxHp: number, moves: MoveKit, readonly name: string, readonly types: readonly string[],
     readonly respawn: { x: number; y: number } | null = null) {
-    this.moves = { ...moves };
+    this.moves = oneMobility(moves);
     this.hp = maxHp;
     this.H = factory.heightOf(node);
     this.W = this.H * BODY_W;
@@ -836,6 +861,7 @@ export class Fighter {
     this.counterUntil = -1;
     this.braceAgainst = move; this.finishRun(this.braceK); this.braceAgainst = null;
     this.firing = false; this.using = '';
+    if (this.moves.control === 'Detect') { this.detectAway(attacker, arena, move); return; }
     const counter = this.moves.control === 'Counter';
     const damage = hurt((counter ? COUNTER_DOUBLE : COUNTER_TURN) * attacker.damageTo(move, this));
     // (Its attack goes on — its beam pouring on into where this one was — till the counter's blow lands and cuts it off,
@@ -845,7 +871,47 @@ export class Fighter {
     else this.strikeFromBehind(arena, 'Sucker Punch', { foe: attacker, damage });
   }
 
-  /** Whether `move` sets its brace off: any blow, Sucker Punch's; a physical one only, Counter's. */
+  /**
+   * Detect going off: `attacker`'s blow about to land, it zips away backwards — a back dash's vanish, facing the attacker
+   * — the blow going on into where it was. Its back to a wall (no room for a back dash's full way): out at the other end
+   * of the map instead, against the far wall, coming in forwards and facing the attacker.
+   */
+  private detectAway(attacker: Fighter, arena: Arena, move: string): void {
+    const away = Math.sign(this.x - attacker.x) || -this.facing;
+    const half = (BODY_W * this.H) / 2 + 0.1;
+    // Just out of that attack's reach — a short one, a short way back; a long one (a beam), a long way — at least a hop
+    // (DETECT_MIN).
+    const need = away * (attacker.x - this.x) + attacker.reachWith(move) + this.reachOf().back + DETECT_CLEAR;
+    const back = Math.max(DETECT_MIN * this.H, need) * away;
+    const room = this.roomAlong(arena, away) - half;
+    // (No room for it — a wall behind: out at the other end of the map instead, behind the attacker.)
+    const to = Math.abs(back) <= room ? this.x + back : this.x - away * (this.roomAlong(arena, -away) - half);
+    // (Out at the far end: gone backwards, but in forwards facing the attacker — not a back dash's drop back in.)
+    const wrap = Math.abs(back) > room;
+    this.teleport(arena, 'lines', undefined, { dir: away, face: wrap ? Math.sign(attacker.x - to) || away : -away, backward: true, arriveForward: wrap,
+      cool: BACK_DASH_COOL, dist: BACK_DASH_DIST * (this.zippy ? ZIP_GAIN : 1), name: 'Detect Zip', force: true, toX: to });
+  }
+
+  /**
+   * How far `move` of its reaches from its middle (world units): a beam its range past its front, a lunge (Quick Attack)
+   * its way on and a blow, a close blow its swing (CLOSE_REACH, the disc it sweeps), anything else as a close blow.
+   */
+  reachWith(move: string): number {
+    const spec = beamFor(move);
+    if (spec && move === this.moves.ranged) return beamReach(spec) + this.reachOf().front;
+    if (move === 'Quick Attack') return QUICK_DIST * this.H + this.reachOf().front;
+    return this.H * CLOSE_REACH * 1.45;
+  }
+
+  /** How far it can go along `dir` (−1, 1) at its height before a wall (world units). */
+  private roomAlong(arena: Arena, dir: number): number {
+    const p = this.node.position;
+    let open = 0;
+    while (open < 200 && !arena.level.some((s) => this.overlaps(p.x + dir * (open + 0.1), p.y + 1e-3, s))) open += 0.1;
+    return open;
+  }
+
+  /** Whether `move` sets its brace off: any blow, Sucker Punch's and Detect's; a physical one only, Counter's. */
   setsOff(move: string): boolean {
     return this.moves.control !== 'Counter' || getMove(move)?.category === MoveCategory.PHYSICAL;
   }
@@ -1051,6 +1117,7 @@ export class Fighter {
   /** Its close move (a slash), where it stands: on the nearest foe within CLOSE_REACH ahead, level with it — else a miss (no burst). */
   private slash(arena: Arena): void {
     if (!this.moves.close) return;
+    if (this.moves.close === 'Earthquake') { this.quake(arena); return; }
     const type = CLOSE_MOVES[this.moves.close];
     if (!type) return;
     const name = this.moves.close;
@@ -1074,6 +1141,67 @@ export class Fighter {
       if (!near || !inReach(near)) return false;
       return near.takeHit(this, name, () => this.factory.playHitReact(near.node), arena);
     }, true).then(() => { this.finishRun(k); this.end(); });
+  }
+
+  /**
+   * Earthquake: it stamps where it stands — from the air, gone straight up and back in on the ground under it, coming
+   * straight down, to stamp there — and its wave runs out radially round it, an area
+   * QUAKE_RADIUS round it (QuakeFx, QUAKE_DELAY s after the stamp begins) — every foe on the ground in it struck and
+   * thrown up (QUAKE_POP) as its ring reaches it; one in the air as it passes, missed. The camera jolted at the stamp,
+   * rumbling as it runs.
+   */
+  private quake(arena: Arena): void {
+    const name = this.moves.close!;
+    // From the air: gone straight up, and back in on the ground right under where it was, coming straight down — in its
+    // charging pose — stamping as it lands.
+    if (!this.grounded) {
+      const floor = this.floorBelow(arena);
+      this.begin(name);
+      this.quick = true; this.vx = 0; this.vy = 0;
+      const to = new Vector3(this.x, floor, 0);
+      void this.factory.playTeleport(this.node, to, { look: 'lines', going: new Vector3(0, 1, 0), arriveWay: new Vector3(0, -1, 0),
+        arriveClip: 'charge', gap: QUAKE_AIR_GAP, face: this.facing > 0 ? Math.PI / 2 : -Math.PI / 2 }).then(() => {
+        this.quick = false; this.flying = false; this.vy = 0;
+        this.grounded = true;
+        this.stamp(arena, name);
+      });
+      return;
+    }
+    this.begin(name);
+    this.vx = 0;
+    this.stamp(arena, name);
+  }
+
+  /** The floor right under it (world y): the top of the highest platform below its feet, else the ground (0). */
+  private floorBelow(arena: Arena): number {
+    let y = this.y;
+    while (y > 0 && !arena.level.some((s) => this.overlaps(this.x, y - 0.02, s))) y -= 0.02;
+    return Math.max(0, y);
+  }
+
+  /** Earthquake's stamp where it stands, on the ground: its charging pose, its wave let go from it. */
+  private stamp(arena: Arena, name: string): void {
+    const k = this.startRun(name);
+    // (Its charging pose, the wave let go from it.)
+    void this.factory.playChargePose(this.node, QUAKE_POSE).then(() => { if (this.using === name) this.end(); });
+    const passed = new Set<Fighter>();
+    const x0 = this.x;
+    setTimeout(() => {
+      arena.shake?.(QUAKE_JOLT);
+      const radius = QUAKE_RADIUS;
+      void this.factory.playQuake({ x: x0, z: 0, floor: this.y, height: this.H, radius,
+        onFront: (front) => {
+          arena.shake?.(QUAKE_RUMBLE);
+          for (const f of this.foes(arena)) {
+            // (Its area: within its radius, as its ring reaches it.)
+            if (passed.has(f) || Math.abs(f.x - x0) > Math.min(front, radius)) continue;
+            passed.add(f);
+            // (In the air as it passes: missed.)
+            if (!f.grounded || f.down || f.invulnerable) continue;
+            if (f.takeHit(this, name, () => this.factory.playHitReact(f.node), arena)) { f.vy = Math.max(f.vy, QUAKE_POP); f.grounded = false; }
+          }
+        } }).then(() => this.finishRun(k));
+    }, QUAKE_DELAY * 1000);
   }
 
   /** Quick Attack, the way it faces: QUICK_DIST × its height on, short of a wall, or up to the nearest body in its way (a foe there struck). */
@@ -1229,9 +1357,10 @@ export class Fighter {
    * foe), backwards (a back dash's look), how far (× TELEPORT_DIST).
    */
   private teleport(arena: Arena, look: 'lines' | 'ring', element?: string,
-    o: { cool?: number; dir?: number; face?: number; backward?: boolean; dist?: number; name?: string } = {}): void {
+    o: { cool?: number; dir?: number; face?: number; backward?: boolean; arriveForward?: boolean; dist?: number; name?: string; force?: boolean; toX?: number } = {}): void {
     const name = o.name ?? this.moves.mobility ?? 'Teleport';
-    if (!this.ready(name) || (!this.grounded && !this.flying && !this.airDash)) return;
+    // (`force`: whatever its readiness or the air — Detect going off. `toX`: straight there, level — its far end.)
+    if (!o.force && (!this.ready(name) || (!this.grounded && !this.flying && !this.airDash))) return;
     const p = this.node.position, dir = o.dir ?? this.facing;
     const tilt = !this.grounded || this.aim > 0 ? this.aim * AIM_ANGLE : 0;
     const ux = dir * Math.cos(tilt), uy = Math.sin(tilt);
@@ -1248,15 +1377,19 @@ export class Fighter {
     while (open < reach * TELEPORT_PAST && !wallAt(open + 0.1)) open += 0.1;
     // (Landing in a body: on past it first — behind it — up to TELEPORT_PAST further; else drawn back till it fits.)
     const full = Math.min(reach, open);
-    let d = full;
-    if (!fits(p.x + ux * d, p.y + uy * d)) {
+    let d = o.toX !== undefined ? Math.abs(o.toX - p.x) : full;
+    const ux2 = o.toX !== undefined ? Math.sign(o.toX - p.x) || dir : 0;
+    if (o.toX !== undefined) {
+      // (Its far end: back from the wall till it fits there.)
+      while (d > 0.2 && !fits(p.x + ux2 * d, p.y)) d -= 0.1;
+    } else if (!fits(p.x + ux * d, p.y + uy * d)) {
       let on = d;
       while (on < Math.min(full * TELEPORT_PAST, open) && !fits(p.x + ux * on, p.y + uy * on)) on += 0.1;
       if (on < Math.min(full * TELEPORT_PAST, open) || fits(p.x + ux * on, p.y + uy * on)) d = on;
       else { while (d > 0.2 && !fits(p.x + ux * d, p.y + uy * d)) d -= 0.1; }
     }
     if (d <= 0.2) return;
-    const to = new Vector3(p.x + ux * d, p.y + uy * d, 0);
+    const to = o.toX !== undefined ? new Vector3(p.x + ux2 * d, p.y, 0) : new Vector3(p.x + ux * d, p.y + uy * d, 0);
     if (!this.grounded && !this.flying) this.airDash = false;
     this.quick = true; this.vx = 0; this.vy = 0;
     this.using = name; this.usingSince = this.time;
@@ -1264,7 +1397,7 @@ export class Fighter {
     // (There, it will face its nearest foe — behind it, it turns round; it comes in already facing so.)
     const foe = this.foes(arena).sort((a, b) => Math.abs(a.x - to.x) - Math.abs(b.x - to.x))[0];
     const faceThere = o.face ?? (foe ? Math.sign(foe.x - to.x) || dir : dir);
-    void this.factory.playTeleport(this.node, to, { look, element, face: faceThere > 0 ? Math.PI / 2 : -Math.PI / 2, backward: o.backward }).then(() => {
+    void this.factory.playTeleport(this.node, to, { look, element, face: faceThere > 0 ? Math.PI / 2 : -Math.PI / 2, backward: o.backward, arriveForward: o.arriveForward }).then(() => {
       this.face(faceThere, true);
       this.grounded = this.y <= 1e-3;
       // (Aimed up, a flier is carried into the sky — even out of it for now: the way up past its wait.)

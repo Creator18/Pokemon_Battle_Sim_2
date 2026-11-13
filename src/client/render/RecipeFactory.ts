@@ -48,6 +48,7 @@ import type { PulseFx, PulseSpec } from '../vfx/PulseFx.ts';
 import type { WindFx } from '../vfx/WindFx.ts';
 import type { WindSpec } from '../vfx/windMoves.ts';
 import { iceBlock, shatterIce, meltIce, ICE_ALPHA, type IceBlock } from './iceBlock.ts';
+import { QuakeFx, type QuakeOptions } from '../vfx/QuakeFx.ts';
 import { ICE_BOLT, PSY_BOLT, BLUE_BOLT, type LightningFx, type EarthOptions, type BoltColors } from '../vfx/LightningFx.ts';
 import type { SlashFx } from '../vfx/SlashFx.ts';
 import { QuickStepFx } from '../vfx/QuickStepFx.ts';
@@ -649,6 +650,25 @@ export class RecipeFactory implements UnitFactory {
   private lastClaw = new WeakMap<TransformNode, number>();
   /** The quick step's pieces (Quick Attack), once one is played. */
   private quickStep: QuickStepFx | null = null;
+  private quakes: QuakeFx | null = null;
+  /**
+   * Its charging pose (its 'charge' clip — a ram's, gathering itself) held `hold` s where it stands, then back to its idle
+   * (Earthquake's stamp). No such clip: an attack lunge where it stands instead.
+   */
+  async playChargePose(node: TransformNode, hold: number): Promise<void> {
+    const u = this.units.get(node);
+    if (!u) return;
+    const player = u.model.player, clip = this.act(u, 'charge');
+    if (!player.has(clip)) return this.playAttackLunge(node, node.position.clone());
+    void player.play(clip, { fade: 0.08 });
+    await sleep(hold);
+    if (!u.down) void player.play(this.act(u, 'idle'), { fade: 0.25 });
+  }
+
+  /** Earthquake's wave from where it was stamped (QuakeFx): the floor heaving out round it, rocks, dust, cracks. */
+  playQuake(o: QuakeOptions): Promise<void> {
+    return (this.quakes ??= new QuakeFx(this.scene)).quake(o);
+  }
   private arcSlash: ArcSlashFx | null = null;
   /** A Grass aura's meadow patch: built once, instanced. */
   private meadowSrc: Mesh | null = null;
@@ -1447,7 +1467,13 @@ export class RecipeFactory implements UnitFactory {
     /** Backwards, but coming in forwards (Counter): its lines trailing behind it as it arrives, as any teleport's. */
     arriveForward?: boolean;
     /** The way it goes, when not toward `to` (Counter: gone backwards, back in near where it stood). */
-    going?: Vector3 } = {}): Promise<void> {
+    going?: Vector3;
+    /** The way it comes in moving, when not the way it faces (Earthquake from the air: straight down) — its lines and its opening out along it. */
+    arriveWay?: Vector3;
+    /** Its pose as it comes in, in place of its idle (Earthquake from the air: its charging pose). */
+    arriveClip?: string;
+    /** How long it is gone, nothing there, between going and coming (s; TP_GAP). */
+    gap?: number } = {}): Promise<void> {
     const u = this.units.get(node);
     if (!u) { node.position.copyFrom(to); return; }
     const fx = (this.quickStep ??= new QuickStepFx(this.scene));
@@ -1475,12 +1501,15 @@ export class RecipeFactory implements UnitFactory {
     };
     lean(0);
     if (vanishPose) void player.play(vanishPose, { fade: 0.04, loop: true });
-    const way0 = to.subtract(node.position);
+    const way0 = opts.going?.clone() ?? to.subtract(node.position);
     const climb = Math.atan2(way0.y, Math.hypot(way0.x, way0.z) || 1e-6);
     // (Its snout kept on the way it goes, every frame till it is gone — the pose blending in, its gaze, its clip's own
     // movement all made up for: tilted by however far its snout, head to mouth, still points off that way.)
     // (Backwards: upright — its snout points away from the way it goes, nothing to line up.)
-    const align = back ? null : this.scene.onAfterRenderObservable.add(() => {
+    // (Straight up or down — Earthquake from the air: upright too; its snout lined up with that, the whole body would rear
+    // over onto its tail.)
+    const vertical = Math.abs(climb) > Math.PI / 3;
+    const align = back || vertical ? null : this.scene.onAfterRenderObservable.add(() => {
       lean(node.rotation.x + TP_ALIGN * (this.snoutPitch(node, u) - climb));
     });
     // A flicker as it lines up, then gone.
@@ -1499,7 +1528,7 @@ export class RecipeFactory implements UnitFactory {
     fx.squash(g0.meshes, g0.dispose, from, false, TP_SQUASH, undefined, going);
     if (look === 'lines') fx.speedFlicker(from, going, H, TP_LINES);
     else { fx.ring(from, H * 1.3, tint); fx.flare(from, H, undefined, tint); }
-    await sleep(TP_GAP);
+    await sleep(opts.gap ?? TP_GAP);
     // There: turned the way it will face, its pose copied where it now stands (still unseen), opened out of a line,
     // and then the body itself.
     base = to.clone();
@@ -1511,16 +1540,16 @@ export class RecipeFactory implements UnitFactory {
     // (Aloft or not by where it lands — not where it left: a hop up off the ground arrives in its air clips.)
     if (u.hoverTarget <= 0) u.airborne = to.y > 0.05;
     if (striking) opts.onArrive!();
-    else if (!u.down) void player.play(this.act(u, 'idle'), { fade: 0, loop: true });
+    else if (!u.down) void player.play(this.act(u, opts.arriveClip ?? 'idle'), { fade: 0, loop: !opts.arriveClip });
     await frame();
     const at = middle();
     const g1 = this.frozenCopy(u);
     // (Coming in: its lines trailing behind it, the way it now faces — not ahead of it.)
     // (Backwards: trailing from where it came — ahead of it — along the way it went.)
-    if (look === 'lines') fx.speedFlicker(at, back && !opts.arriveForward ? going.normalizeToNew() : new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y)), H, TP_LINES, true);
+    if (look === 'lines') fx.speedFlicker(at, opts.arriveWay?.normalizeToNew() ?? (back && !opts.arriveForward ? going.normalizeToNew() : new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y))), H, TP_LINES, true);
     else { fx.ring(at, H * 1.3, tint); fx.flare(at, H, undefined, tint); }
     // (Opened out of a line along the way it now faces.)
-    const facing = new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y));
+    const facing = opts.arriveWay?.normalizeToNew() ?? new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y));
     await new Promise<void>((r) => fx.squash(g1.meshes, g1.dispose, at, true, TP_SQUASH, r, facing));
     show(true);
     for (let i = 0; i < TP_FLICKERS - 1; i++) { await sleep(beat); show(false); await sleep(beat); show(true); }

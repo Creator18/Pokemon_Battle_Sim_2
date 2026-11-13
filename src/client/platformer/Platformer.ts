@@ -36,6 +36,8 @@ import type { Backdrop, BackdropName } from '../render/arenas/backdrops.ts';
 export type { Platform, MoveKit } from './Fighter.ts';
 export { DEFAULT_KIT } from './Fighter.ts';
 
+/** Camera shake: how far at most it jolts (world units, at full trauma), how fast trauma dies away (a second). */
+const SHAKE_MAX = 0.45, SHAKE_DECAY = 1.6;
 /** The camera: how far off the plane, how high above the body, how far it leads the way it faces, how quickly it follows. */
 const CAM_DIST = 15, CAM_UP = 2.2, CAM_LEAD = 2.5, CAM_EASE = 5;
 /** Framing two (a boss fight): pulled back till both fit across its view, with CAM_MARGIN to spare each side (world units); never nearer than CAM_DIST. */
@@ -119,6 +121,9 @@ export class Platformer {
   private readonly spots: EnemySpot[];
   private readonly camAt = new Vector3();
   private camDist = CAM_DIST;
+  /** Camera shake (Arena.shake): its trauma (0..1, dying away SHAKE_DECAY a second) and its clock. */
+  private trauma = 0;
+  private shakeT = 0;
   private clock = 0;
   private hud: Hud | null = null;
   private painted: Backdrop | null = null;
@@ -152,6 +157,7 @@ export class Platformer {
     this.ai = this.boss ? new BossAI(this.boss, player) : null;
     this.arena = {
       level: this.level, fighters: this.fighters,
+      shake: (t) => { this.trauma = Math.min(1, this.trauma + t); },
       onHit: (by, on, move, dmg) => {
         this.note(`${by.name} ${move} → ${on.name} −${dmg} (${on.hp}/${on.maxHp})`);
         this.hud?.hit(by, on, move);
@@ -345,8 +351,15 @@ export class Platformer {
     Vector3.LerpToRef(this.camAt, goal, k, this.camAt);
     this.camDist += (dist - this.camDist) * k;
     const cam = this.camera as unknown as { setTarget?: (v: Vector3) => void; setPosition?: (v: Vector3) => void; position: Vector3 };
-    const eye = this.camAt.add(new Vector3(0, 0.6, -this.camDist));
-    cam.setTarget?.(this.camAt);
+    // (Shaken: trauma squared, in smooth noise — target and eye together, the view jolting, not swinging round.)
+    this.trauma = Math.max(0, this.trauma - SHAKE_DECAY * dt);
+    this.shakeT += dt;
+    const amp = this.trauma * this.trauma * SHAKE_MAX;
+    const n = (k: number) => Math.sin(this.shakeT * 37 + k) * 0.6 + Math.sin(this.shakeT * 61 + k * 2.3) * 0.4;
+    const jolt = new Vector3(n(1.1) * amp, n(4.7) * amp, 0);
+    const at = this.camAt.add(jolt);
+    const eye = at.add(new Vector3(0, 0.6, -this.camDist));
+    cam.setTarget?.(at);
     if (cam.setPosition) cam.setPosition(eye); else cam.position.copyFrom(eye);
     this.occlude(eye, dt);
   }

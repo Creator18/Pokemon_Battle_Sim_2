@@ -295,7 +295,8 @@ export function leagueStadium(scene: Scene): LeagueStadium {
   ballMat.diffuseTexture = ballTex; ballMat.useAlphaFromDiffuseTexture = true; ballMat.specularColor = new Color3(0, 0, 0);
   ballMat.zOffset = -2;
   groundLit(ballMat);
-  const ball = MeshBuilder.CreateGround('lgPitchBall', { width: 11, height: 11 }, scene);
+  // (Cut finely, to heave with the pitch under it: groundLight's quakes.)
+  const ball = MeshBuilder.CreateGround('lgPitchBall', { width: 11, height: 11, subdivisions: 64 }, scene);
   ball.position.set(0, 0.015, 0); ball.material = ballMat; ball.parent = root; ball.isPickable = false;
 
   // The scoreboard: its housing, a live feed of the fight in its middle, the board's panels drawn round it.
