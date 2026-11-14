@@ -4,6 +4,7 @@
  * above it, its current stats (at level 100, as every Pokémon here is) on the right. Roll on to the next ball and the hologram and stats are its;
  * F chooses — its ball flares and is gone, its light drawn into yours, and it is your Pokémon (X calls it out).
  */
+import { ensureGameUi, cap } from '../ui/gameUi.ts';
 import type { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
@@ -58,10 +59,11 @@ export function starterSelect(scene: Scene, factory: RecipeFactory, pf: Platform
 
   // ── the stats card (right) ──
   const card = document.createElement('div');
-  card.style.cssText = 'position:fixed;right:5%;top:50%;transform:translateY(-50%);width:290px;padding:16px 18px 14px;'
-    + 'border-radius:14px;background:linear-gradient(160deg,rgba(14,32,52,.86),rgba(8,18,32,.9));border:1.5px solid rgba(120,220,255,.55);'
-    + 'box-shadow:0 0 22px rgba(90,200,255,.25),inset 0 0 18px rgba(90,200,255,.08);color:#e8f6ff;font:500 14px/1.35 system-ui,sans-serif;'
-    + 'z-index:25;display:none;pointer-events:none;letter-spacing:.2px';
+  // (The UI kit's card: its panel, its type — the name in the display face, the figures tabular.)
+  ensureGameUi();
+  card.className = 'gui gui-card';
+  card.style.cssText = 'position:fixed;right:max(16px,5%);top:50%;transform:translateY(-50%);width:clamp(250px,26vw,330px);padding:16px 18px 14px;'
+    + 'z-index:25;display:none;pointer-events:none';
   document.body.append(card);
   const fill = (sp: SpeciesDefinition) => {
     const stats: [string, number][] = [
@@ -72,31 +74,30 @@ export function starterSelect(scene: Scene, factory: RecipeFactory, pf: Platform
     card.innerHTML = '';
     const head = document.createElement('div');
     head.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px';
-    const nm = document.createElement('div'); nm.textContent = sp.name.toUpperCase(); nm.style.cssText = 'font:700 20px/1.1 system-ui,sans-serif;letter-spacing:1px';
-    const no = document.createElement('div'); no.textContent = `No. ${String(sp.spriteId).padStart(3, '0')}`; no.style.cssText = 'opacity:.65;font-size:12px';
+    const nm = document.createElement('div'); nm.textContent = sp.name.toUpperCase(); nm.className = 'gui-title';
+    const no = document.createElement('div'); no.textContent = `No. ${String(sp.spriteId).padStart(3, '0')}`; no.style.cssText = 'opacity:.65;font-variant-numeric:tabular-nums';
     head.append(nm, no);
     const types = document.createElement('div'); types.style.cssText = 'display:flex;gap:6px;margin-bottom:10px';
     for (const ty of sp.types) {
       const chip = document.createElement('span'); chip.textContent = ty.toUpperCase();
-      chip.style.cssText = `background:${typeColor(ty)};color:#fff;border-radius:999px;padding:2px 10px;font:700 11px/1.5 system-ui,sans-serif;text-shadow:0 1px 1px rgba(0,0,0,.35)`;
+      chip.className = 'gui-chip'; chip.style.setProperty('--c', typeColor(ty));
       types.append(chip);
     }
-    const lvl = document.createElement('div'); lvl.textContent = 'Lv. 100'; lvl.style.cssText = 'opacity:.7;font-size:12px;margin:-4px 0 8px';
+    const lvl = document.createElement('div'); lvl.textContent = 'Lv. 100'; lvl.style.cssText = 'opacity:.7;margin:-4px 0 8px';
     card.append(head, types, lvl);
     for (const [label, v] of stats) {
-      const row = document.createElement('div'); row.style.cssText = 'display:grid;grid-template-columns:62px 36px 1fr;align-items:center;gap:8px;margin:5px 0';
-      const l = document.createElement('span'); l.textContent = label; l.style.cssText = 'opacity:.8;font-size:12.5px';
-      const n = document.createElement('span'); n.textContent = String(v); n.style.cssText = 'font-weight:700;text-align:right;font-variant-numeric:tabular-nums';
+      const row = document.createElement('div'); row.style.cssText = 'display:grid;grid-template-columns:4.6em 2.6em 1fr;align-items:center;gap:8px;margin:5px 0';
+      const l = document.createElement('span'); l.textContent = label; l.style.cssText = 'opacity:.8';
+      const n = document.createElement('span'); n.textContent = String(v); n.style.cssText = 'font-weight:900;text-align:right;font-variant-numeric:tabular-nums';
       const bar = document.createElement('div'); bar.style.cssText = 'height:7px;border-radius:4px;background:rgba(120,200,255,.14);overflow:hidden';
       const b = document.createElement('div');
       b.style.cssText = `height:100%;width:${Math.min(100, (v / BAR_MAX) * 100)}%;border-radius:4px;background:linear-gradient(90deg,#4fd3ff,#9ff3c6);box-shadow:0 0 8px rgba(110,220,255,.6)`;
       bar.append(b); row.append(l, n, bar); card.append(row);
     }
-    const tot = document.createElement('div'); tot.style.cssText = 'display:flex;justify-content:space-between;margin-top:8px;padding-top:7px;border-top:1px solid rgba(120,220,255,.25);font-size:12.5px';
-    tot.innerHTML = `<span style="opacity:.8">Total</span><span style="font-weight:700">${total}</span>`;
-    const hint = document.createElement('div'); hint.style.cssText = 'margin-top:10px;font-size:12px;opacity:.85;display:flex;gap:14px';
-    hint.innerHTML = '<span><b style="border:1px solid rgba(255,255,255,.5);border-radius:4px;padding:0 5px">F</b> choose</span>'
-      + '<span><b style="border:1px solid rgba(255,255,255,.5);border-radius:4px;padding:0 5px">A</b>/<b style="border:1px solid rgba(255,255,255,.5);border-radius:4px;padding:0 5px">D</b> another ball</span>';
+    const tot = document.createElement('div'); tot.style.cssText = 'display:flex;justify-content:space-between;margin-top:8px;padding-top:7px;border-top:1px solid rgba(255,255,255,.2)';
+    tot.innerHTML = `<span style="opacity:.8">Total</span><span style="font-weight:900">${total}</span>`;
+    const hint = document.createElement('div'); hint.style.cssText = 'margin-top:12px;display:flex;gap:16px;align-items:center';
+    hint.innerHTML = `<span>${cap('F')} choose</span><span>${cap('A')} ${cap('D')} another ball</span>`;
     card.append(tot, hint);
   };
 

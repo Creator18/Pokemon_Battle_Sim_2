@@ -43,6 +43,8 @@ import type { BeamPlay, CastKind, ClashPlay, UnitFactory } from './unitFactory.t
 import { arcTo, KNOCK_TIME, KNOCK_ARC, KNOCK_MIN_ARC } from './unitFactory.ts';
 import { clashBallRadius, TARGET_BODY, type BeamFx, type BeamClash } from '../vfx/beam/BeamFx.ts';
 import { throwBall, evolveAura, BALL_TO_CLASH, NOISE_FIRST, ballNoiseColours } from '../vfx/beam/BallFx.ts';
+import { throwEmber } from '../vfx/beam/EmberFx.ts';
+import { GrowlFx } from '../vfx/GrowlFx.ts';
 import type { DashRings } from '../vfx/DashRings.ts';
 import { ImpactFrame } from '../vfx/ImpactFrame.ts';
 import type { PulseFx, PulseSpec } from '../vfx/PulseFx.ts';
@@ -497,6 +499,8 @@ const CANNON_THICKNESS: Record<number, number> = { 2: 0.6, 3: 0.5 };
 
 /** A ball attack charges at least this long (s) before it is let fly. */
 const BALL_CHARGE = 1.0;
+/** Ember's wind-up (s): a flick, not a ball's charge. */
+const EMBER_CHARGE = 0.22;
 /** Fire Blast's burst (fireBurst): its sphere of flame's first radius (× the attacker's height), how much it swells, over how long (s), and the share of that before it starts dying down. */
 const FIRE_BURST_R = 0.3, FIRE_BURST_GROW = 2.4, FIRE_BURST_TIME = 0.45, FIRE_BURST_HOLD = 0.8;
 /** Its lower part faded out: from this far below its middle (× its radius), up over half its radius. */
@@ -519,6 +523,8 @@ const SWIPE_HIT = 0.03;
  * when in it its blow falls (s, at its own pace); its slash's edge past the part and its inner edge (× its height);
  * its burst's size (× its height).
  */
+/** A crescent cut is sized as if its attacker were at least about this tall (m), so a small one's still reads. */
+const CUT_MIN_H = 1.6;
 const CROSS_TRACE = 0.7, CROSS_GHOSTS = 0.3, CROSS_GHOST_EVERY = 0.06, CROSS_GHOST = 0.6, CROSS_NEXT = 0.15, CROSS_SPEED = 1.25;
 const CROSS_SECOND_HIT = 0.1, CROSS_REACH = 0.22, CROSS_INNER = 0.2, CROSS_BURST = 0.3;
 /** A cross by one with more than one arm a side (Machamp): how many frames its swing is watched before its trail locks to the arm moving most. */
@@ -1832,7 +1838,7 @@ export class RecipeFactory implements UnitFactory {
    * following its striking part — its head on the part, its tail where the swing began, its rim through it — then held
    * a beat and eroded. `onBlow` asked as its head crosses in front (false: missed). Resolves at the blow.
    */
-  async playCrescentSlash(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: () => boolean | void): Promise<void> {
+  async playCrescentSlash(node: TransformNode, targetPos: Vector3, element = 'Normal', onBlow?: () => boolean | void, look: { width?: number; arc?: number; push?: number } = {}): Promise<void> {
     const u = this.units.get(node);
     if (!u) { await this.playAttackLunge(node, targetPos, true); onBlow?.(); return; }
     const player = u.model.player;
@@ -1849,7 +1855,7 @@ export class RecipeFactory implements UnitFactory {
         const o = this.scene.onBeforeRenderObservable.add(() => { if (player.active?.action === end || u.down) { this.scene.onBeforeRenderObservable.remove(o); res(); } });
       });
     }
-    const play = this.crescentOn(node, onAttack ? 'attack' : 'swipe', hue, targetPos);
+    const play = this.crescentOn(node, onAttack ? 'attack' : 'swipe', hue, targetPos, look);
     await Promise.race([play.hit, struck]);
     // (Its burst on the target only if the blow lands.)
     if (onBlow?.() === false) return;
@@ -1862,7 +1868,7 @@ export class RecipeFactory implements UnitFactory {
    * its swipe's, its attack's) — its head on the part, round a sphere about its middle, pushed out toward `targetPos`.
    * `hue` its colours, already its own.
    */
-  private crescentOn(node: TransformNode, key: 'attack' | 'swipe', hue: string, targetPos: Vector3) {
+  private crescentOn(node: TransformNode, key: 'attack' | 'swipe', hue: string, targetPos: Vector3, look: { width?: number; arc?: number; push?: number } = {}) {
     const u = this.units.get(node)!;
     const part = this.impactPart(node, key) ?? 'right_hand';
     const H = this.heightOf(node);
@@ -1885,7 +1891,9 @@ export class RecipeFactory implements UnitFactory {
     };
     const fx = (this.crescents ??= new CrescentFx(this.scene, this.scene.activeCamera!));
     const facing = () => (Math.sin(node.rotation.y) >= 0 ? 1 : -1);
-    return fx.cut({ element: hue, height: H, centre: () => node.position.add(new Vector3(0, H * 0.5, 0)), facing, tilt: 0.25,
+    // (A small one's cut grown toward CUT_MIN_H's size: sized only by it, a little one's would barely show.)
+    const scale = Math.max(1, Math.pow(CUT_MIN_H / Math.max(H, 0.1), 0.7));
+    return fx.cut({ element: hue, height: H, centre: () => node.position.add(new Vector3(0, H * 0.5, 0)), facing, tilt: 0, scale, width: look.width, arc: look.arc, push: look.push,
       sample, trace: CROSS_TRACE,
       // (Pushing out toward what it strikes as it forms.)
       toward: () => targetPos.add(new Vector3(0, H * 0.5, 0)) });
@@ -2566,7 +2574,10 @@ export class RecipeFactory implements UnitFactory {
     if (Math.abs(d.x) + Math.abs(d.z) > 1e-3) this.setFacing(node, Math.atan2(d.x, d.z));
     const height = u ? displayHeight(u.model.height) : 1.2;
     const aimAt = target ? () => this.middleOf(target) : () => targetPos;
-    const ball = throwBall(this.beams, { element: spec.element, colours: spec.colours, height, from: this.mouthOf(node), target: aimAt,
+    // (Ember: Flamethrower's starting egg, small, shot round-end first — EmberFx — sized up a little on a small one.)
+    const ball = spec.ember ? throwEmber(this.beams, { element: spec.element, height, from: this.mouthOf(node), target: aimAt,
+      targetSize: () => (target ? this.heightOf(target) : point ? 0 : height), scale: Math.max(1, Math.pow(CUT_MIN_H / Math.max(height, 0.1), 0.5)) })
+    : throwBall(this.beams, { element: spec.element, colours: spec.colours, height, from: this.mouthOf(node), target: aimAt,
       targetSize: () => (target ? this.heightOf(target) : point ? 0 : height),
       // No wind spiral round the feet of a unit in the air.
       feet: () => (u && this.aloft(u, 0.05) ? null : node.position),
@@ -2589,7 +2600,7 @@ export class RecipeFactory implements UnitFactory {
         await player.play(this.act(u, 'beamStart'), { fade: 0.12 });
         // (A ball whose tornadoes come first charges that much longer.)
         const first = spec.tornado && this.wind ? NOISE_FIRST : 0;
-        await sleep(Math.max(0, BALL_CHARGE + first - (performance.now() - t0) / 1000));
+        await sleep(Math.max(0, (spec.ember ? EMBER_CHARGE : BALL_CHARGE) + first - (performance.now() - t0) / 1000));
         const end = this.act(u, 'beamEnd');
         void player.play(end, { fade: 0.08 }).then(() => {
           if (!u.down && player.active?.action === end) void player.play(this.act(u, 'idle'), { fade: 0.25 });
@@ -2599,7 +2610,7 @@ export class RecipeFactory implements UnitFactory {
         const t0 = performance.now();
         await sleep(u ? this.oneShot(u, this.act(u, 'ranged'), 0.5, 0.8) : 0.4);
         const first = spec.tornado && this.wind ? NOISE_FIRST : 0;
-        await sleep(Math.max(0, BALL_CHARGE + first - (performance.now() - t0) / 1000));
+        await sleep(Math.max(0, (spec.ember ? EMBER_CHARGE : BALL_CHARGE) + first - (performance.now() - t0) / 1000));
       }
       if (!cancelled) { ball.launch(); letGo(); }
       await ball.done;
@@ -2608,6 +2619,23 @@ export class RecipeFactory implements UnitFactory {
       // (Cut off while it charges — its thrower struck: gone, never thrown. Once thrown it flies on by itself.)
       cancel: () => { if (!cancelled) { cancelled = true; ball.vanish(); } } };
   }
+
+  /**
+   * Growl: its cry (its ranged clip), and out of its mouth, as the cry comes, Earthquake's ripple sent through the air
+   * along `way` (GrowlFx). Resolves as its fronts reach their end (`reached`: where it takes effect) and once it's all
+   * over (`done`).
+   */
+  playGrowl(node: TransformNode, way: Vector3, reach?: number, floor?: () => number): { reached: Promise<void>; done: Promise<void> } {
+    const u = this.units.get(node);
+    const H = this.heightOf(node);
+    const fx = (this.growls ??= new GrowlFx(this.scene));
+    // (Its cry under way a beat before the ripples leave its mouth.)
+    const lead = u ? this.oneShot(u, this.act(u, 'ranged'), 0.3, 0.35) : 0;
+    const mouth = this.mouthOf(node);
+    const g = sleep(lead).then(() => fx.play({ height: H, from: mouth, toward: () => way.clone(), reach, floor: floor ?? (() => node.position.y) }));
+    return { reached: g.then((x) => x.reached), done: g.then((x) => x.done) };
+  }
+  private growls: GrowlFx | null = null;
 
   /**
    * A ram's burst (as playRunInto's) — at its set-off (`launch`, behind it) or its impact (`hit`, ahead of it), facing

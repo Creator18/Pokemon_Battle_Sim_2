@@ -11,9 +11,10 @@ import type { Camera } from '@babylonjs/core/Cameras/camera';
 import { Color4 } from '@babylonjs/core/Maths/math.color';
 import { getSpecies } from '../../shared/index.ts';
 import type { RecipeFactory } from '../render/RecipeFactory.ts';
-import { Platformer, bossRoom } from '../platformer/Platformer.ts';
+import { Platformer, bossRoom, FLOORS } from '../platformer/Platformer.ts';
+import { batchStatic } from '../render/staticBatch.ts';
 import type { MoveKit } from '../platformer/Platformer.ts';
-import { keyLegend } from '../platformer/Hud.ts';
+import { ControlsLegend } from '../ui/gameUi.ts';
 import { grassStadium } from '../render/arenas/grassStadium.ts';
 import type { Arena } from '../render/arenas/grassStadium.ts';
 import { colosseum } from '../render/arenas/colosseum.ts';
@@ -55,17 +56,10 @@ function readyCamera(camera: Camera): void {
   cam.lowerRadiusLimit = 0.1; cam.upperRadiusLimit = 200; cam.maxZ = Math.max(cam.maxZ, 400);
 }
 
-/** The controls, as key caps along the bottom right (the moves are on the move bar; with no boss, listed here too). */
-function helpLine(moves: MoveKit, withBar = true): HTMLDivElement {
+/** The controls, as key caps in a column bottom right (the moves are on the move bar, with their keys). */
+function helpLine(_moves: MoveKit, _withBar = true): HTMLDivElement {
   document.querySelector('[data-pf-help]')?.remove();
-  const items: [string[], string][] = [[['A', 'D'], 'run'], [['Space'], 'jump / fly'], [['W', 'S'], 'aim']];
-  if (!withBar) items.push([['U'], moves.ranged ?? '—'], [['I'], moves.close ?? '—'], [['J'], moves.mobility ?? '—'], [['K'], moves.control ?? '—'], [['L'], 'dash (no direction: back dash)']);
-  items.push([['R'], 'restart']);
-  const box = document.createElement('div');
-  box.className = 'mvh'; box.dataset.pfHelp = '';
-  box.append(keyLegend(items));
-  document.body.append(box);
-  return box;
+  return new ControlsLegend([[['A', 'D'], 'run'], [['Space'], 'jump / fly'], [['W', 'S'], 'aim'], [['R'], 'restart']]).el;
 }
 
 /** The boss battlefield: the League stadium (or the colosseum, or the 3D grass stadium), you against a boss. */
@@ -111,6 +105,14 @@ export async function startPalletTown(d: ZoneDeps, o: { body?: string } = {}): P
   readyCamera(camera);
   scene.fogMode = 0;
   const town = palletTown(scene);
+  // (Its static scenery batched — merged by chunk and material into few meshes, few draws. Not what moves, toggles,
+  // fades on its own or is looked up by name: doors and gates, the starters' balls, the lab's loft, the grass fur, the
+  // buildings' walls (each fades on its own), the big trees and outcrops (each fades on its own).)
+  // Nor what stands in front of where you walk (it may come between you and the eye: faded alone, not with its chunk).
+  batchStatic(scene, town.root, {
+    chunk: 18, floors: FLOORS, frontZ: -1.2,
+    exclude: /Door|Gate|gate|labBall|pokeball|labLoft|furShell|Facade|Tuft|holo|Secret|Side|Back$|Jamb|Lintel|Post|Header|Chimney|Great|Old|Outcrop|Nook|Arch|Roots|Branch|Webs|Lamp|lamp/,
+  });
   let story: ReturnType<typeof palletStory> | null = null;
   let oakSaid = 0;
   const pf = await Platformer.start(scene, factory, camera, {
@@ -127,20 +129,20 @@ export async function startPalletTown(d: ZoneDeps, o: { body?: string } = {}): P
     },
   });
   document.querySelector('[data-pf-help]')?.remove();
-  const box = document.createElement('div');
-  box.className = 'mvh'; box.dataset.pfHelp = '';
-  box.append(keyLegend([[['A', 'D'], 'roll'], [['Space'], 'jump'], [['R'], 'restart']]));
-  document.body.append(box);
+  // (The controls, bottom right: what you can do as you are — rolling as a Poké Ball, running as a Pokémon; picking
+  // and sending out once you've a starter.)
+  let haveStarter = false;
+  const box = new ControlsLegend();
+  const legend = () => box.set([
+    [['A', 'D'], pf.player.ball ? 'roll' : 'run'], [['Space'], 'jump'],
+    ...(haveStarter ? [[['Q', 'E'], 'pick'], [['X'], pf.player.ball ? 'send out' : 'Poké Ball']] as [string[], string][] : []),
+    [['R'], 'restart'],
+  ]);
+  legend();
   // (Its story's gates: the lab locked, Route 1 open — till Prof. Oak stops you in the tall grass.)
   story = palletStory(scene, pf, town);
-  // (Your starter's choosing, on Prof. Oak's table: once chosen, X calls it out — and the legend says so.)
-  const legend = (withX: boolean) => {
-    box.replaceChildren(keyLegend(withX
-      ? [[['A', 'D'], 'roll'], [['Space'], 'jump'], [['Q', 'E'], 'pick'], [['X'], 'send out / Poké Ball'], [['R'], 'restart']]
-      : [[['A', 'D'], 'roll'], [['Space'], 'jump'], [['R'], 'restart']]));
-  };
   const pick = starterSelect(scene, factory, pf, town, {
-    active: () => story?.stage === 'lab', say: (t, secs) => story?.say(t, secs), onChosen: () => { legend(true); story?.starterChosen(); },
+    active: () => story?.stage === 'lab', say: (t, secs) => story?.say(t, secs), onChosen: () => { haveStarter = true; legend(); story?.starterChosen(); },
   });
   (window as unknown as { __starter?: unknown }).__starter = pick;
   // (Behind it all: Kanto's country — sky, clouds, three ranges of mountains, hills — the painted layers' parallax.)
@@ -162,16 +164,16 @@ export async function startPalletTown(d: ZoneDeps, o: { body?: string } = {}): P
     const p = pf.player;
     for (const [i, s] of town.signs.entries()) {
       const near = Math.abs(p.x - s.x) < 1.3 && Math.abs(p.y - s.y) < 1.5;
-      if (near && !read.has(i)) { read.add(i); story?.say(s.text, 3.2); }
+      if (near && !read.has(i)) { read.add(i); story?.sign(s.text); }
       if (!near && Math.abs(p.x - s.x) > 4) read.delete(i);
     }
   });
   // (The tall grass pushed aside round you, as you go through it.)
   const unsee = pushAside(scene, () => ({ at: pf.player.node.position.clone(), h: pf.player.H }));
   // (The buildings' front walls: faded away while you are inside one.)
-  const walls = scene.onBeforeRenderObservable.add(() => town.update(pf.player.x, pf.player.y, scene.getEngine().getDeltaTime() / 1000));
+  const walls = scene.onBeforeRenderObservable.add(() => { town.update(pf.player.x, pf.player.y, scene.getEngine().getDeltaTime() / 1000); legend(); });
   (window as unknown as { __pallet?: unknown }).__pallet = story;
-  return { pf, arena: null, dispose: () => { scene.onBeforeRenderObservable.remove(walls); scene.onBeforeRenderObservable.remove(signs); unshadow(); country.dispose(); unsee(); wild.dispose(); pick.dispose(); story.dispose(); box.remove(); pf.dispose(); town.dispose(); } };
+  return { pf, arena: null, dispose: () => { scene.onBeforeRenderObservable.remove(walls); scene.onBeforeRenderObservable.remove(signs); unshadow(); country.dispose(); unsee(); wild.dispose(); pick.dispose(); story.dispose(); box.dispose(); pf.dispose(); town.dispose(); } };
 }
 
 /** The first room: platforms, a pit, a ledge; a practice target ahead (it stands again after fainting). */

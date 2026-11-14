@@ -28,11 +28,11 @@ import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { Platform } from '../platformer/Fighter.ts';
-import { grassFur } from '../render/arenas/grassFur.ts';
+import { furField } from '../render/arenas/grassFur.ts';
 import { softGrass } from '../render/arenas/softGrass.ts';
 import { bevelBox } from '../render/lowPolyKit.ts';
 import { tallGrassPatch } from '../render/tallGrass.ts';
-import { lowPolyTree, treeMaterial, barkTube, leafClump } from '../render/lowPolyTrees.ts';
+import { lowPolyTree, treeMaterial, barkTube, barkWood, leafClump } from '../render/lowPolyTrees.ts';
 import { rock, rockWall, rockMaterial, GREY_ROCK, EARTH_ROCK } from '../render/lowPolyRocks.ts';
 import type { RockLook } from '../render/lowPolyRocks.ts';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -80,8 +80,8 @@ const FRONT = -10, BACK = 12, TREES_Z = [6.5, 9];
 const FAR_BACK = 46, FAR_TREES = [13.5, 18, 23.5, 30];
 /** How far the land runs toward the camera (past it): its near edge out of sight. */
 const NEAR = -34;
-/** A rise's front edge (z): a shallow lip in front of the walk. */
-const Z_RAISE = -2.6;
+/** How near the camera a cliff's boulders run (z): out past the view's edge. */
+const CLIFF_FROM = FRONT - 4;
 
 export interface Route1 {
   level: Platform[];
@@ -149,12 +149,14 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
   const tallMat = new StandardMaterial('route1_tall', scene);
   tallMat.diffuseColor = new Color3(0.26, 0.56, 0.22); tallMat.specularColor = Color3.Black();
   owned.push(lawnMat, tallMat, softGrass(scene, lawnMat, 20, 20, 31), softGrass(scene, tallMat, 14, 20, 32));
+  /** The short lawns, their fur grown over them all at once at the end (furField: a few draws, not 14 per lawn). */
+  const lawns: BMesh[] = [];
   const lawn = (x0: number, x1: number, y: number, z0: number, z1: number, tall: boolean, seed: number) => {
     if (x1 - x0 < 0.05) return;
     const g = MeshBuilder.CreateGround('route1Lawn', { width: x1 - x0, height: z1 - z0, subdivisions: 2 }, scene);
     g.position.set((x0 + x1) / 2, y + 0.001, (z0 + z1) / 2);
     place(g, tall ? tallMat : lawnMat);
-    if (!tall) { owned.push(grassFur(scene, g, lawnMat, x1 - x0, z1 - z0, 1, seed)); return; }
+    if (!tall) { lawns.push(g); return; }
     const t = tallGrassPatch(scene, x0, x1, y, z0, z1, ROUTE_GRASS, seed);
     t.parent = root; t.receiveShadows = true;
   };
@@ -178,34 +180,20 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
     const rows = Math.max(1, Math.round((hi - lo) / 0.85));
     for (let row = 0; row < rows; row++) {
       const ry = lo + ((row + 0.5) / rows) * (hi - lo);
-      for (let z = Z_RAISE + 0.3 + r() * 0.4; z < 8; z += 0.9 + r() * 0.6) {
+      for (let z = CLIFF_FROM + r() * 0.4; z < 8; z += 0.9 + r() * 0.6) {
         // (Kept back of the walk at z ≈ 0, where you climb: only a thin facing there.)
         const nearWalk = Math.abs(z) < 1.1;
         const bw = nearWalk ? 0.35 : 0.7 + r() * 0.6, bh = (hi - lo) / rows * (1.1 + r() * 0.4), bd = 0.9 + r() * 0.7;
         parts.push(rock(scene, 'route1FaceBoulder', x + dir * (bw * 0.35) - 0.1, ry, z, bw, bh, bd, v % 997, row === rows - 1 ? GREY_ROCK : { ...GREY_ROCK, moss: null }, 1));
       }
     }
-    for (let z = Z_RAISE + 0.4; z < 7; z += 1.1 + r() * 0.5) parts.push(rock(scene, 'route1FaceLip', x - dir * 0.15, hi + 0.02, z, 0.9 + r() * 0.5, 0.35, 0.9 + r() * 0.5, v % 991, GREY_ROCK, 1));
+    for (let z = CLIFF_FROM + 0.1; z < 7; z += 1.1 + r() * 0.5) parts.push(rock(scene, 'route1FaceLip', x - dir * 0.15, hi + 0.02, z, 0.9 + r() * 0.5, 0.35, 0.9 + r() * 0.5, v % 991, GREY_ROCK, 1));
     for (let k = 0; k < 4; k++) {
       const z = -4 + k * 3 + r();
       if (Math.abs(z) < 1.2) continue;
       parts.push(rock(scene, 'route1FaceStone', x + dir * (0.7 + r() * 0.8), lo + 0.15, z, 0.45 + r() * 0.4, 0.35, 0.45 + r() * 0.3, v % 983, GREY_ROCK, 1));
     }
     merged('route1FaceRocks', parts);
-  };
-  /** A rise's front, facing the camera (z = FRONT): boulders banked along it, row on row, mossed along its top. */
-  const bank = (x0: number, x1: number, lo: number, hi: number, sd: number) => {
-    const parts: BMesh[] = [];
-    let v = sd;
-    const r = () => { v = (v * 16807 + 5) % 2147483647; return (v % 10000) / 10000; };
-    const rows = Math.max(1, Math.round((hi - lo) / 0.9));
-    for (let row = 0; row < rows; row++) {
-      const ry = lo + ((row + 0.5) / rows) * (hi - lo);
-      for (let x = x0 + r() * 0.5; x < x1; x += 0.9 + r() * 0.6) {
-        parts.push(rock(scene, 'route1FaceBank', x, ry, Z_RAISE + 0.15 - r() * 0.3, 0.9 + r() * 0.7, (hi - lo) / rows * (1.15 + r() * 0.4), 0.9 + r() * 0.5, v % 997, row === rows - 1 ? GREY_ROCK : { ...GREY_ROCK, moss: null }, 1));
-      }
-    }
-    merged('route1FaceBankRocks', parts);
   };
   const X = (x: number) => startX + x;
   const groundAt = (x: number) => baseY + (GROUND.find(([a, b]) => x >= a && x < b) ?? GROUND[GROUND.length - 1])[2];
@@ -217,18 +205,12 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
   // down) to the next ──
   for (const [i, [a, b, h]] of GROUND.entries()) {
     const x0 = X(a), x1 = X(b), y = baseY + h;
-    // (Raised ground's front only a shallow lip in front of the walk — the low ground spreading out before it, toward
-    // the camera: no rise ever stands between the camera and you.)
-    const raised = h > 0.05, zf = raised ? Z_RAISE : FRONT;
+    // (Its ground runs on toward the camera at its own height, past it — never cut short, no section of it seen.)
+    const zf = FRONT;
     level.push({ x: x0, top: y, w: x1 - x0, h: 6 + y, hidden: true });
-    box('route1Earth', x0, x1, -6, y, zf, FAR_BACK, C.earth);
-    // (Raised above the route's lowest ground: its front a rocky bank facing the camera — the land nearer the camera
-    // runs on low, below it, so the camera is never inside a rise.)
-    if (raised) {
-      bank(x0, x1, baseY, y, i * 17 + 5);
-      // (The low ground before it: its short lawn.)
-      lawn(x0, x1, baseY, FRONT, zf - 0.3, false, seed++);
-    }
+    box('route1Earth', x0, x1, -6, y, NEAR, FAR_BACK, C.earth);
+    const near = MeshBuilder.CreateGround('route1LawnNear', { width: x1 - x0, height: FRONT - NEAR, subdivisions: 2 }, scene);
+    near.position.set((x0 + x1) / 2, y + 0.001, (NEAR + FRONT) / 2); place(near, lawnMat);
     const far = MeshBuilder.CreateGround('route1LawnFar', { width: x1 - x0, height: FAR_BACK - BACK, subdivisions: 2 }, scene);
     far.position.set((x0 + x1) / 2, y + 0.001, (BACK + FAR_BACK) / 2); place(far, lawnMat);
     // (Its tall grass where a patch lies on it; short lawn, and the path, between.)
@@ -248,7 +230,7 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
     const next = GROUND[i + 1];
     if (next) {
       const ny = baseY + next[2], lo = Math.min(y, ny), hi = Math.max(y, ny);
-      box('route1Face', x1 - 0.35, x1 + 0.1, lo - 0.3, hi, Z_RAISE, BACK, C.earth);
+      box('route1Face', x1 - 0.35, x1 + 0.1, lo - 0.3, hi, NEAR, BACK, C.earth);
       cliff(x1, lo, hi, ny > y ? -1 : 1, i * 31 + 7);
     }
   }
@@ -256,9 +238,9 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
   const endY = baseY + GROUND[GROUND.length - 1][2];
   // (The land nearest the camera, all along: low, the route's lowest ground — running on under the camera, its near
   // edge never in view.)
-  box('route1EarthNear', X(0), end + 8, -6, baseY, NEAR, Z_RAISE, C.earth);
-  const nearLawn = MeshBuilder.CreateGround('route1LawnNear', { width: end + 8 - X(0), height: FRONT - NEAR, subdivisions: 2 }, scene);
-  nearLawn.position.set((X(0) + end + 8) / 2, baseY + 0.001, (NEAR + FRONT) / 2); place(nearLawn, lawnMat);
+  box('route1EarthNear', end, end + 8, -6, baseY, NEAR, FAR_BACK, C.earth);
+  const nearLawn = MeshBuilder.CreateGround('route1LawnNear', { width: 8, height: FRONT - NEAR, subdivisions: 2 }, scene);
+  nearLawn.position.set(end + 4, baseY + 0.001, (NEAR + FRONT) / 2); place(nearLawn, lawnMat);
 
   // ── the ball-only walls: each standing on its ground, a burrow under it (BURROW high), reaching far above ──
   for (const [a, b, kind] of WALLS) {
@@ -272,15 +254,9 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
       // foot and grip the ground either side; its bark ridged; its crown up out of sight.
       const cx = (x0 + x1) / 2, R = (x1 - x0) / 2, base = y + BURROW;
       const parts: BMesh[] = [];
-      const trunk = barkTube(scene, [0, 0.25, 0.5, 0.75, 1].map((t) => new Vector3(cx + Math.sin(t * 2) * 0.3, base + t * 16, 0.5)),
-        (t) => R * (0.82 + 0.5 * Math.pow(1 - t, 5)), 22);
-      parts.push(trunk);
-      // (Its bark's ridges: thick strands up it.)
-      for (let k = 0; k < 14; k++) {
-        const a = (k / 14) * Math.PI * 2, rr = R * 0.86;
-        parts.push(barkTube(scene, [0, 0.5, 1].map((t) => new Vector3(cx + Math.cos(a + t * 0.25) * rr * (1 - t * 0.12), base + 0.4 + t * 14, 0.5 + Math.sin(a + t * 0.25) * rr * (1 - t * 0.12))),
-          (t) => 0.22 * (1 - t * 0.6), 6));
-      }
+      // (Its trunk in grained bark — deep ridges wandering up it, knots, moss up its foot.)
+      parts.push(barkWood(scene, [0, 0.25, 0.5, 0.75, 1].map((t) => new Vector3(cx + Math.sin(t * 2) * 0.3, base + t * 16, 0.5)),
+        (t) => R * (0.82 + 0.5 * Math.pow(1 - t, 5)), 30, { ridges: 15, depth: 0.14, moss: 0.12, knots: 5, seed: 3 }));
       // (Its buttress roots: arching out and down from its foot — over the burrow's mouth at front and back, gripping
       // the ground either side.)
       for (let k = 0; k < 9; k++) {
@@ -290,7 +266,7 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
         const p1 = new Vector3(cx + ax * (R + 0.35), base + 1.1, 0.5 + az * (R + 0.35));
         const p2 = new Vector3(cx + ax * (R + len * 0.55), y + 0.35, 0.5 + az * (R + len * 0.5));
         const p3 = new Vector3(cx + ax * (R + len), y - 0.15, 0.5 + az * (R + len * 0.9));
-        parts.push(barkTube(scene, [p0, p1, p2, p3], (t) => (0.95 - (k % 3) * 0.1) * Math.pow(1 - t * 0.85, 0.9), 12));
+        parts.push(barkWood(scene, [p0, p1, p2, p3], (t) => (0.95 - (k % 3) * 0.1) * Math.pow(1 - t * 0.85, 0.9), 16, { ridges: 7, depth: 0.16, moss: 0.1, knots: 1, seed: 10 + k }));
       }
       merged('route1GreatTree', parts).material = treeMaterial(scene);
       // Its crown: clumps of leaves high up, round it.
@@ -329,23 +305,67 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
     }
   }
 
-  // ── the Hollow: webs strung between its grass, its walls ──
+  // ── the Hollow: webs strung between its trees, tied down to the ground ──
   {
-    const hx0 = X(64.5), hx1 = X(77), y = groundAt(70);
-    const threads: BMesh[] = [];
-    for (const [k, x] of [hx0 + 1.5, hx0 + 5.2, hx0 + 9.5].entries()) {
-      const cy = y + 1.3 + k * 0.2, cz = 2.4 + k * 0.4, R = 0.75 + k * 0.1, spokes = 9;
-      // (Its spokes out to the grass and trees round it; a spiral wound round them.)
-      for (let r = 0; r < spokes; r++) {
-        const a = (r / spokes) * Math.PI * 2;
-        threads.push(MeshBuilder.CreateTube('route1WebSpoke', { path: [new Vector3(x, cy, cz), new Vector3(x + Math.cos(a) * R, cy + Math.sin(a) * R, cz)], radius: 0.007, tessellation: 3 }, scene));
+    const hx0 = X(64.5), y = groundAt(70);
+    // (Its trees: young trunks behind the path, close enough to string webs between — their bark grained, leaves up
+    // top; each web between two of them.)
+    const TRUNK_Z = 2.8, trunkR = (t: number) => 0.26 * (1 - 0.5 * t) + 0.12 * Math.pow(1 - t, 6);
+    const trunkXs = [hx0 + 0.1, hx0 + 3.4, hx0 + 7.2, hx0 + 11.7];
+    const wood: BMesh[] = [], leaves: BMesh[] = [];
+    const lean = (k: number) => [0.18, -0.12, 0.1, -0.16][k];
+    /** Where trunk `k` is at height `h` (its middle): it leans a little as it climbs. */
+    const trunkAt = (k: number, h: number) => new Vector3(trunkXs[k] + lean(k) * (h / 4.6), y + h, TRUNK_Z);
+    for (const [k, tx] of trunkXs.entries()) {
+      wood.push(barkWood(scene, [0, 0.3, 0.6, 1].map((t) => trunkAt(k, -0.1 + t * 4.7)), trunkR, 14, { ridges: 7, depth: 0.12, moss: 0.2, knots: 2, seed: 60 + k }));
+      // (A limb or two reaching out from it, up where the leaves start.)
+      for (const side of [-1, 1]) {
+        const from = trunkAt(k, 3.1 + (side > 0 ? 0.3 : 0));
+        wood.push(barkTube(scene, [from, from.add(new Vector3(side * 0.7, 0.55, (k % 2 ? 0.3 : -0.3))), from.add(new Vector3(side * 1.25, 0.8, (k % 2 ? 0.5 : -0.4)))], (t) => 0.09 * (1 - 0.6 * t), 6));
       }
+      const crown = trunkAt(k, 4.6), radii = new Vector3(1.5, 1.1, 1.4);
+      for (let c = 0; c < 6; c++) {
+        const a = c * 2.4 + k, rr = c ? 0.85 : 0;
+        leaves.push(leafClump(scene, crown.add(new Vector3(Math.cos(a) * rr, (c % 2) * 0.45 - (c ? 0.25 : -0.2), Math.sin(a) * rr * 0.8)), 0.9 + (c % 3) * 0.2, crown, radii, [0.25, 0.53, 0.24], 700 + k * 10 + c));
+      }
+      void tx;
+    }
+    merged('route1HollowTrees', [...wood, ...leaves]).material = treeMaterial(scene);
+    // The webs: each a ring of frame threads, spokes out to it, a spiral wound round; tied by anchor lines to the
+    // trunks either side, and guy lines down to the ground (sagging a little: silk).
+    const threads: BMesh[] = [];
+    const silk = (name: string, path: Vector3[], r = 0.007) => threads.push(MeshBuilder.CreateTube(name, { path, radius: r, tessellation: 3 }, scene));
+    const sag = (p: Vector3, q: Vector3, by = 0.05) => [p, Vector3.Lerp(p, q, 0.5).add(new Vector3(0, -by, 0)), q];
+    for (let k = 0; k < trunkXs.length - 1; k++) {
+      const left = trunkAt(k, 1.4), right = trunkAt(k + 1, 1.4);
+      const cx = (left.x + right.x) / 2 + (k - 1) * 0.15, cy = y + 1.35 + k * 0.15, cz = TRUNK_Z - 0.05;
+      const R = 0.8 + k * 0.08, spokes = 9;
+      // (Its frame: an uneven ring of threads round it.)
+      const frame: Vector3[] = [];
+      for (let r = 0; r < spokes; r++) {
+        const a = (r / spokes) * Math.PI * 2 + 0.2, rr = R * (1 + 0.12 * Math.sin(r * 2.3 + k));
+        frame.push(new Vector3(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr, cz));
+      }
+      silk('route1WebFrame', [...frame, frame[0]], 0.008);
+      for (const f of frame) silk('route1WebSpoke', [new Vector3(cx, cy, cz), f]);
       const spiral: Vector3[] = [];
       for (let t = 0; t < 5.5 * spokes; t++) {
-        const a = (t / spokes) * Math.PI * 2, rr = 0.1 + (t / (5.5 * spokes)) * (R - 0.12);
-        spiral.push(new Vector3(x + Math.cos(a) * rr, cy + Math.sin(a) * rr - 0.01 * Math.sin(t), cz));
+        const a = (t / spokes) * Math.PI * 2 + 0.2, rr = 0.1 + (t / (5.5 * spokes)) * (R * 0.9 - 0.12);
+        spiral.push(new Vector3(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr - 0.01 * Math.sin(t), cz));
       }
-      threads.push(MeshBuilder.CreateTube('route1WebSpiral', { path: spiral, radius: 0.006, tessellation: 3 }, scene));
+      silk('route1WebSpiral', spiral, 0.006);
+      // (Its anchor lines: from the frame's points nearest each trunk to that trunk's bark, high and low.)
+      const byX = [...frame].sort((p, q) => p.x - q.x);
+      for (const [side, pts] of [[k, byX.slice(0, 3)], [k + 1, byX.slice(-3)]] as [number, Vector3[]][]) {
+        for (const pt of pts) {
+          const at = trunkAt(side, pt.y - y + (pt.y > cy ? 0.35 : -0.15));
+          const toward = Math.sign(pt.x - at.x);
+          silk('route1WebAnchor', sag(pt, at.add(new Vector3(toward * trunkR((at.y - y) / 4.7) * 0.85, 0, -0.04)), 0.03));
+        }
+      }
+      // (Its guy lines: from the lowest frame points down to the ground, splayed.)
+      const low = [...frame].sort((p, q) => p.y - q.y).slice(0, 2);
+      for (const pt of low) silk('route1WebGuy', sag(pt, new Vector3(pt.x + (pt.x - cx) * 0.6, y + 0.02, cz - 0.35), 0.02));
     }
     const web = BMesh.MergeMeshes(threads, true, true)!;
     web.name = 'route1Webs'; place(web, C.web);
@@ -356,10 +376,10 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
   const ot = OLD_TREE, oy = groundAt(ot.x);
   // (Its trunk: ridged bark, a flared foot gripping the ground with its roots.)
   const oldParts: BMesh[] = [];
-  oldParts.push(barkTube(scene, [0, 0.3, 0.6, 1].map((t) => new Vector3(X(ot.x) + Math.sin(t * 3) * 0.25, oy + t * 15, 2.6)), (t) => 1.15 * (0.75 + 0.55 * Math.pow(1 - t, 4)), 16));
+  oldParts.push(barkWood(scene, [0, 0.3, 0.6, 1].map((t) => new Vector3(X(ot.x) + Math.sin(t * 3) * 0.25, oy + t * 15, 2.6)), (t) => 1.15 * (0.75 + 0.55 * Math.pow(1 - t, 4)), 28, { ridges: 12, depth: 0.13, moss: 0.12, knots: 4, seed: 21 }));
   for (const [ax, az] of [[-1, 0], [1, 0], [-0.5, 0.9], [0.6, 0.8], [0, -0.7]] as const) {
-    oldParts.push(barkTube(scene, [new Vector3(X(ot.x) + ax * 0.6, oy + 1.4, 2.6 + az * 0.6), new Vector3(X(ot.x) + ax * 1.4, oy + 0.4, 2.6 + az * 1.2), new Vector3(X(ot.x) + ax * 2.1, oy - 0.05, 2.6 + az * 1.6)],
-      (t) => 0.45 * (1 - t * 0.7), 8));
+    oldParts.push(barkWood(scene, [new Vector3(X(ot.x) + ax * 0.6, oy + 1.4, 2.6 + az * 0.6), new Vector3(X(ot.x) + ax * 1.4, oy + 0.4, 2.6 + az * 1.2), new Vector3(X(ot.x) + ax * 2.1, oy - 0.05, 2.6 + az * 1.6)],
+      (t) => 0.45 * (1 - t * 0.7), 12, { ridges: 5, depth: 0.16, moss: 0.12, knots: 0, seed: 30 + Math.round(ax * 10) }));
   }
   merged('route1OldTree', oldParts).material = treeMaterial(scene);
   for (const [a, b, h] of ot.branches) {
@@ -367,8 +387,8 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
     // (Its branch a round limb out from the trunk — its top where you stand — curving up a touch at its tip; moss and
     // leaves along it.)
     const far = Math.abs(X(a) - X(ot.x)) > Math.abs(X(b) - X(ot.x)) ? X(a) : X(b);
-    const limb = barkTube(scene, [new Vector3(X(ot.x), oy + h - 0.32, 2.2), new Vector3((X(ot.x) + far) / 2, oy + h - 0.3, 1.0), new Vector3(far, oy + h - 0.22, 0)],
-      (t) => 0.42 - t * 0.14, 12);
+    const limb = barkWood(scene, [new Vector3(X(ot.x), oy + h - 0.32, 2.2), new Vector3((X(ot.x) + far) / 2, oy + h - 0.3, 1.0), new Vector3(far, oy + h - 0.22, 0)],
+      (t) => 0.42 - t * 0.14, 16, { ridges: 6, depth: 0.12, moss: 0, knots: 1, seed: 40 + Math.round(h * 10) });
     merged('route1Branch', [limb]).material = treeMaterial(scene);
     const leaves: BMesh[] = [];
     const lc = new Vector3(far, oy + h + 0.3, -0.1);
@@ -458,6 +478,7 @@ export function route1(scene: Scene, parent: TransformNode, startX: number, base
     tree(x, z + ((x * 5) % 2) - 1, TREE_SCALE * (1.15 + row * 0.22 + rnd() * 0.35), r < 0.45 ? 'round' : r < 0.85 ? 'pine' : 'poplar');
   }
 
+  owned.push(furField(scene, lawns, lawnMat, { seed: 31 }));
   return {
     level, root, grass, signs, secret, end,
     dispose: () => { for (const o of owned) o.dispose(); root.dispose(false, true); for (const m of mats.values()) m.dispose(); },

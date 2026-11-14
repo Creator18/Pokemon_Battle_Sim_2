@@ -16,6 +16,7 @@ import type { Scene } from '@babylonjs/core/scene';
 import { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { VertexBuffer } from '@babylonjs/core/Buffers/buffer';
+import { VertexData } from '@babylonjs/core/Meshes/mesh.vertexData';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -266,4 +267,85 @@ export function barkTube(scene: Scene, path: Vector3[], r: (t: number) => number
  */
 export function leafClump(scene: Scene, c: Vector3, r: number, crown: Vector3, radii: Vector3, green: [number, number, number], seed: number): Mesh {
   return clump(scene, c, r, crown, radii, green, seeded(seed), 1);
+}
+
+export interface BarkLook {
+  /** How many ridges round it; how deep its furrows (× its radius). */
+  ridges?: number; depth?: number;
+  /** Moss up from its foot (how high, as a share of its length), and on what faces up. */
+  moss?: number;
+  /** Knots: how many. */
+  knots?: number;
+  seed?: number;
+}
+
+/**
+ * A bark tube with real grain: `path` resampled fine (rings up it), its surface carved into ridges and furrows that
+ * wander as they climb (cut deeper where they're furrows, a few knots swelling out), coloured as wood — dark in the
+ * furrows, warm on the ridges, streaked along its length, moss settled up its foot and on whatever faces up.
+ */
+export function barkWood(scene: Scene, path: Vector3[], r: (t: number) => number, sides = 24, o: BarkLook = {}): Mesh {
+  const ridges = o.ridges ?? 9, depth = o.depth ?? 0.16, mossUp = o.moss ?? 0.18, seed = o.seed ?? 1;
+  // (Its path resampled: rings close enough for the grain to wander.)
+  const fine: Vector3[] = [];
+  const rings = Math.max(6, Math.round(path.reduce((a, p, i) => (i ? a + p.subtract(path[i - 1]).length() : 0), 0) / 0.55));
+  for (let k = 0; k <= rings; k++) {
+    const u = (k / rings) * (path.length - 1), i = Math.min(path.length - 2, Math.floor(u)), f = u - i;
+    fine.push(Vector3.Lerp(path[i], path[i + 1], f));
+  }
+  const tube = MeshBuilder.CreateTube('bark', { path: fine, radiusFunction: (i) => r(i / rings), tessellation: sides, cap: Mesh.CAP_END, updatable: true }, scene);
+  const pos = tube.getVerticesData(VertexBuffer.PositionKind)!;
+  const per = sides + 1;
+  const knots = Array.from({ length: o.knots ?? 3 }, (_, k) => ({ t: 0.25 + ((k * 0.37 + seed * 0.13) % 0.6), a: (k * 2.39 + seed) % (Math.PI * 2) }));
+  const grain: number[] = [];
+  for (let v = 0; v < pos.length / 3; v++) {
+    const ring = Math.min(rings, Math.floor(v / per)), j = v % per, t = ring / rings;
+    const c = fine[ring], p = new Vector3(pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]);
+    const off = p.subtract(c);
+    // Its grain round it: ridges wandering as they climb (a slow sway, a little noise); furrows cut in between.
+    const a = (j / sides) * Math.PI * 2;
+    const sway = Math.sin(t * 5 + seed) * 0.35 + Math.sin(t * 13 + seed * 2) * 0.12;
+    const g = Math.pow(Math.abs(Math.cos((a + sway) * ridges * 0.5)), 0.6);
+    let k = 1 - depth + depth * g * 1.2 + (hash(ring, j, seed) - 0.5) * 0.04;
+    // (Knots: a swelling here and there.)
+    for (const kn of knots) {
+      const da = Math.atan2(Math.sin(a - kn.a), Math.cos(a - kn.a)), dt = (t - kn.t) * 6;
+      k += 0.18 * Math.exp(-(da * da * 5 + dt * dt * 3));
+    }
+    off.scaleInPlace(k);
+    pos[v * 3] = c.x + off.x; pos[v * 3 + 1] = c.y + off.y; pos[v * 3 + 2] = c.z + off.z;
+    grain.push(g);
+  }
+  // Faceted, low-poly: every face flat, its own colour — a furrow's face dark, a ridge's warm, streaked along it; moss
+  // on a face here and there at its foot, and on faces turned straight up. (Not blended vertex to vertex: no blur.)
+  const idx = tube.getIndices()!;
+  const FURROW: [number, number, number] = [0.17, 0.1, 0.06], RIDGE: [number, number, number] = [0.52, 0.35, 0.21], MOSS: [number, number, number] = [0.3, 0.5, 0.22];
+  const P: number[] = [], N: number[] = [], Cc: number[] = [], I: number[] = [];
+  for (let f = 0; f < idx.length; f += 3) {
+    const vs = [idx[f], idx[f + 1], idx[f + 2]];
+    const a = new Vector3(pos[vs[0] * 3], pos[vs[0] * 3 + 1], pos[vs[0] * 3 + 2]);
+    const b = new Vector3(pos[vs[1] * 3], pos[vs[1] * 3 + 1], pos[vs[1] * 3 + 2]);
+    const c = new Vector3(pos[vs[2] * 3], pos[vs[2] * 3 + 1], pos[vs[2] * 3 + 2]);
+    let n = Vector3.Cross(c.subtract(a), b.subtract(a)).normalize();
+    const mid = a.add(b).add(c).scale(1 / 3), axis = fine[Math.min(rings, Math.floor(vs[0] / per))];
+    if (Vector3.Dot(n, mid.subtract(axis)) < 0) n = n.scale(-1);
+    // (Coloured by its quad — both its triangles alike — so the bark reads as flutes, not a checkerboard.)
+    const rs = vs.map((v) => Math.floor(v / per)), js = vs.map((v) => v % per);
+    const cr = Math.min(rings - 1, Math.min(...rs)), cj = Math.max(...js) - Math.min(...js) > 1 ? Math.max(...js) : Math.min(...js);
+    const cell = (rr: number, jj: number) => grain[Math.min(rings, rr) * per + Math.min(sides, jj)] ?? 0.5;
+    const g = (cell(cr, cj) + cell(cr, cj + 1) + cell(cr + 1, cj) + cell(cr + 1, cj + 1)) / 4, t = cr / rings, j = cj;
+    const ring = cr, streak = 0.88 + hash(j, Math.floor(ring / 3), seed) * 0.24;
+    let col = [0, 1, 2].map((i) => (FURROW[i] + (RIDGE[i] - FURROW[i]) * Math.pow(g, 1.3)) * streak) as [number, number, number];
+    if ((t < mossUp * (0.4 + hash(j, 7, seed) * 0.7) && g > 0.6 && hash(ring, j, seed + 5) < 0.3) || (n.y > 0.88 && g > 0.65 && hash(ring, j, seed + 3) < 0.25)) {
+      col = MOSS.map((m) => m * (0.85 + hash(ring, j + 1, seed) * 0.3)) as [number, number, number];
+    }
+    for (const p of [a, b, c]) { P.push(p.x, p.y, p.z); N.push(n.x, n.y, n.z); Cc.push(col[0], col[1], col[2], 1); I.push(I.length); }
+  }
+  const vd = new VertexData();
+  vd.positions = P; vd.normals = N; vd.colors = Cc; vd.indices = I;
+  vd.uvs = new Array((P.length / 3) * 2).fill(0);
+  const bark = new Mesh('bark', scene);
+  vd.applyToMesh(bark);
+  tube.dispose();
+  return bark;
 }

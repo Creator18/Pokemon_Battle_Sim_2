@@ -17,6 +17,7 @@ import { kitFor, AGGRESSIVE } from '../platformer/speciesMoves.ts';
 import { getSpecies } from '../../shared/index.ts';
 import type { SpeciesDefinition } from '../../shared/index.ts';
 import * as MorphFx from '../vfx/MorphFx.ts';
+import { Prompt } from '../ui/gameUi.ts';
 
 /** How long a beaten one lies there to be caught (s); how long of that its body takes to fade at the end. */
 const CATCH_WINDOW = 7, FADE = 2;
@@ -116,16 +117,8 @@ export function wildPokemon(pf: Platformer, o: WildOptions): { dispose(): void; 
   };
   pf.hitHooks.push(hook);
 
-  // ── the catch prompt ──
-  const prompt = document.createElement('div');
-  prompt.style.cssText = 'position:fixed;left:50%;bottom:16%;transform:translateX(-50%);display:none;z-index:28;pointer-events:none;'
-    + 'padding:9px 16px 11px;border-radius:12px;background:rgba(10,16,30,.82);border:1.5px solid rgba(255,255,255,.35);color:#fff;'
-    + 'font:600 16px/1.3 system-ui,sans-serif;text-align:center;box-shadow:0 6px 18px rgba(0,0,0,.35)';
-  const label = document.createElement('div');
-  const bar = document.createElement('div');
-  bar.style.cssText = 'height:4px;margin-top:7px;border-radius:2px;background:linear-gradient(90deg,#ef4444,#f8fafc);transform-origin:left';
-  prompt.append(label, bar);
-  document.body.append(prompt);
+  // ── the catch prompt (the UI kit's: above the move bar, its time running down) ──
+  const prompt = new Prompt();
 
   // ── F: caught ──
   const catchable = () => {
@@ -189,11 +182,7 @@ export function wildPokemon(pf: Platformer, o: WildOptions): { dispose(): void; 
     }
     // The prompt over the nearest one beaten.
     const c = catching ? null : catchable();
-    if (c) {
-      label.innerHTML = `<b style="border:1px solid rgba(255,255,255,.6);border-radius:4px;padding:0 6px;margin-right:6px">F</b>Catch ${c.sp.name}`;
-      bar.style.transform = `scaleX(${Math.max(0, 1 - (t - c.downAt!) / CATCH_WINDOW)})`;
-      prompt.style.display = 'block';
-    } else prompt.style.display = 'none';
+    prompt.set(c ? ['F'] : null, c ? `Catch ${c.sp.name}` : '', c ? 1 - (t - c.downAt!) / CATCH_WINDOW : undefined);
     // The circles of those fighting you (and those beaten by you, lying there), top right.
     const fighting = wilds.filter((w) => w.ai || (w.downAt !== null && t - w.downAt <= CATCH_WINDOW));
     const key = fighting.map((w) => wilds.indexOf(w) + ':' + w.sp.name).join(',');
@@ -211,7 +200,7 @@ export function wildPokemon(pf: Platformer, o: WildOptions): { dispose(): void; 
       window.removeEventListener('keydown', onKey);
       const i = pf.hitHooks.indexOf(hook); if (i >= 0) pf.hitHooks.splice(i, 1);
       for (const w of [...wilds]) drop(w);
-      prompt.remove();
+      prompt.dispose();
     },
   };
 }

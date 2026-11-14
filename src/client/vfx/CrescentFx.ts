@@ -183,6 +183,12 @@ export interface CrescentShot {
   tilt?: number;
   /** Its size (× WIDTH, and a set sweep's RADIUS). */
   scale?: number;
+  /** How wide its band is (× its width as sized): under 1, a thinner cut — a scratch, not a slash. */
+  width?: number;
+  /** How long it runs round (× its path's sweep — kept from the head back): under 1, a shorter cut. */
+  arc?: number;
+  /** How far it pushes out toward its foe as it forms (× H; default PUSH): further, it stands clear in front of the body. */
+  push?: number;
   /** Held at its full shape until this resolves (a look at it, still), then eroded as ever. */
   hold?: Promise<void>;
   /**
@@ -267,7 +273,7 @@ export class CrescentFx {
   cut(shot: CrescentShot): CrescentPlay {
     const scene = this.scene;
     const H = shot.height;
-    const W = WIDTH * H * (shot.scale ?? 1);
+    const W = WIDTH * H * (shot.scale ?? 1) * (shot.width ?? 1);
     const [, , lineC, fillC] = auraGlow(shot.element);
     const core: RGB = fillC.map((x) => 0.4 * x + 0.6) as RGB;
     const ink: RGB = lineC.map((x) => x * 0.25) as RGB;
@@ -417,14 +423,22 @@ export class CrescentFx {
         // Its path: where the part has been — no shorter than MIN_SWEEP, carried on back behind where it began.
         if (followed.length >= 2) {
           const run = followed.reduce((a, d, i) => (i ? a + angleOf(followed[i - 1], d) : 0), 0);
-          const dirs = followed.slice();
-          if (run < MIN_SWEEP) {
+          let dirs = followed.slice();
+          const arc = Math.min(1, shot.arc ?? 1), minSweep = MIN_SWEEP * arc;
+          if (run < minSweep) {
             const axis = Vector3.Cross(followed[1], followed[0]);
             if (axis.lengthSquared() > 1e-10) {
               axis.normalize();
-              const back = MIN_SWEEP - run, n = Math.ceil(back / 0.05);
+              const back = minSweep - run, n = Math.ceil(back / 0.05);
               for (let k = 1; k <= n; k++) dirs.unshift(followed[0].applyRotationQuaternion(Quaternion.RotationAxis(axis, (back * k) / n)).normalize());
             }
+          }
+          // (A shorter cut: only its run nearest its head kept — `arc` of it, its tail dropped.)
+          if (arc < 1 && dirs.length > 2) {
+            const total = dirs.reduce((a, d, i) => (i ? a + angleOf(dirs[i - 1], d) : 0), 0), keep = total * arc;
+            let acc = 0, from = dirs.length - 1;
+            while (from > 0 && acc + angleOf(dirs[from - 1], dirs[from]) <= keep) { acc += angleOf(dirs[from - 1], dirs[from]); from--; }
+            dirs = dirs.slice(Math.max(0, Math.min(from, dirs.length - 2)));
           }
           // Kept on its front half, the side facing its foe: the whole path turned about its side axis (square to its
           // front and to the vertical) — the least turn that puts all of it within FRONT of straight ahead (a path
@@ -438,10 +452,13 @@ export class CrescentFx {
             phi = i ? phi + (((a - phi) % (2 * Math.PI)) + 3 * Math.PI) % (2 * Math.PI) - Math.PI : a;
             lo = Math.min(lo, phi); hi = Math.max(hi, phi);
           });
-          const want = hi - lo > 2 * FRONT ? -(lo + hi) / 2 : hi > FRONT ? FRONT - hi : lo < -FRONT ? -FRONT - lo : 0;
+          // (A shorter cut — a scratch — centred on the way to its foe: square in front of it, facing what it strikes.)
+          const want = arc < 1 || hi - lo > 2 * FRONT ? -(lo + hi) / 2 : hi > FRONT ? FRONT - hi : lo < -FRONT ? -FRONT - lo : 0;
           turn += (want - turn) * Math.min(1, dt * TURN_EASE);
           const q = Quaternion.RotationAxis(axisSide, turn);
-          path.set(dirs.map((d) => d.applyRotationQuaternion(q).normalize()));
+          // (Laid flat in the side plane — the attack's plane, along the way it strikes: out in front of it toward its
+          // foe, never out toward the camera or back away from it.)
+          path.set(dirs.map((d) => { const r = d.applyRotationQuaternion(q); r.z = 0; return r.lengthSquared() > 1e-8 ? r.normalize() : new Vector3(facing, 0, 0); }));
         }
         // (Its swing over: its clock on from its full shape — held a beat, then eroded.)
         if (!following) t0 = now - SWING * 1000;
@@ -454,7 +471,7 @@ export class CrescentFx {
       if (shot.toward) {
         const to = shot.toward().subtract(c0);
         to.y *= PUSH_UP;
-        if (to.lengthSquared() > 1e-8) c = c0.add(to.normalize().scale(PUSH * H * formK));
+        if (to.lengthSquared() > 1e-8) c = c0.add(to.normalize().scale((shot.push ?? PUSH) * H * formK));
       }
       const head = easeOutCubic(t / SWING);
       const fadeK = Math.max(0, (t - SWING - HOLD) / FADE);

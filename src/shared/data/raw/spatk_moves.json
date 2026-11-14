@@ -1,5 +1,18 @@
 {
   "moves": {
+    "Ember": {
+      "category": "special",
+      "base_power": 40,
+      "move_type": "Fire",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "description": "A small flame shot at the target."
+    },
     "Thunderbolt": {
       "category": "special",
       "base_power": 90,

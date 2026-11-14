@@ -26,12 +26,13 @@ import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { Platform } from '../platformer/Fighter.ts';
-import { grassFur } from '../render/arenas/grassFur.ts';
+import { furField } from '../render/arenas/grassFur.ts';
 import { softGrass } from '../render/arenas/softGrass.ts';
 import { lowPolyTree, treeMaterial } from '../render/lowPolyTrees.ts';
 import { route1, ROUTE_GRASS } from './route1.ts';
 import { tallGrassPatch } from '../render/tallGrass.ts';
 import { bevelBox, bookParts } from '../render/lowPolyKit.ts';
+import { mergeByMaterial } from '../render/staticBatch.ts';
 import { curtain, drape, fabric, fringe, pillow } from '../render/clothKit.ts';
 import type { TreeKind } from '../render/lowPolyTrees.ts';
 
@@ -245,6 +246,8 @@ export function palletTown(scene: Scene): PalletTown {
   lawnMat.diffuseColor = new Color3(0.42, 0.7, 0.3);
   lawnMat.specularColor = Color3.Black();
   owned.push(lawnMat, softGrass(scene, lawnMat, 20, 20, 11));
+  /** The lawns, their fur grown over them all at once once they're laid (furField: a few draws, not 14 per lawn). */
+  const lawns: Mesh[] = [];
   const lawn = (name: string, x0: number, x1: number, y: number, z0: number, z1: number, seed: number, opts: { height?: number; clump?: number; tile?: number } = {}): void => {
     // (No grass on the path you roll along: its fur would grow up through it, over the Pokéball's foot — the lawn cut
     // either side of it.)
@@ -256,7 +259,7 @@ export function palletTown(scene: Scene): PalletTown {
     const g = MeshBuilder.CreateGround(name, { width: x1 - x0, height: z1 - z0, subdivisions: 2 }, scene);
     g.position.set((x0 + x1) / 2, y + 0.001, (z0 + z1) / 2);
     place(g, lawnMat);
-    owned.push(grassFur(scene, g, lawnMat, x1 - x0, z1 - z0, 1, seed, opts));
+    lawns.push(g); void seed; void opts;
   };
   const BACK = TREES_Z[1] + 3, FRONT_EDGE = FRONT - 8;
   /** The sandy path along the walk: from the beach to Route 1's tall grass (where the grass is meant to swallow you). */
@@ -281,6 +284,7 @@ export function palletTown(scene: Scene): PalletTown {
   lawn('lawnFrontLab', L.x0, L.x1, SOUTH_Y, FRONT_EDGE, FRONT, 14);
   lawn('lawnFrontHome', H.x0, H.x1, NORTH_Y, FRONT_EDGE, FRONT, 15);
   lawn('lawnFrontRival', RV.x0, RV.x1, NORTH_Y, FRONT_EDGE, FRONT, 16);
+  owned.push(furField(scene, lawns, lawnMat, { seed: 11 }));
   // (Route 1's tall grass, past the gate: tufts of thick strands over a soft lawn, all of it tall.)
   const tallMat = new StandardMaterial('pallet_tallGrass', scene);
   tallMat.diffuseColor = new Color3(0.26, 0.56, 0.22);
@@ -418,9 +422,11 @@ export function palletTown(scene: Scene): PalletTown {
       const vent = MeshBuilder.CreateCylinder(`${name}Vent`, { height: 0.24, diameter: 0.45, tessellation: 12 }, scene);
       vent.rotation.z = Math.PI / 2; vent.position.set(gx, y0 + rise * 0.42, zm); vent.material = C.trimDark; parts.push(vent);
     }
-    const merged = Mesh.MergeMeshes(parts, true, true, undefined, false, true)!;
-    merged.name = `${name}Roof`; merged.parent = root; merged.isPickable = false; merged.receiveShadows = true;
-    shadowGen?.addShadowCaster(merged);
+    // (One draw per material — its tiles' shades, its trim, its plaster — not one per tile.)
+    for (const merged of mergeByMaterial(parts, `${name}Roof`)) {
+      merged.parent = root; merged.isPickable = false; merged.receiveShadows = true;
+      shadowGen?.addShadowCaster(merged);
+    }
   };
   /** A chimney through its roof: stone, banded, a cap, a pot. */
   const chimney = (name: string, x: number, y: number) => {
@@ -447,10 +453,12 @@ export function palletTown(scene: Scene): PalletTown {
       if (b.lean) for (const m of ps) m.position.x += b.w / 2;
       parts.push(...ps); pivots.push(pivot);
     }
-    const merged = Mesh.MergeMeshes(parts, true, true, undefined, false, true)!;
+    const merged0 = mergeByMaterial(parts, `${name}Books`);
     for (const p of pivots) p.dispose();
-    merged.name = `${name}Books`; merged.parent = root; merged.isPickable = false; merged.receiveShadows = true;
-    shadowGen?.addShadowCaster(merged);
+    for (const merged of merged0) {
+      merged.parent = root; merged.isPickable = false; merged.receiveShadows = true;
+      shadowGen?.addShadowCaster(merged);
+    }
   };
   /** A bookcase: open-fronted (its sides, top, bottom, back and shelf boards), its books — varied, some leaning. */
   const shelf = (name: string, x0: number, x1: number, y0: number, y1: number, z1: number, solid = false) => {
@@ -567,7 +575,7 @@ export function palletTown(scene: Scene): PalletTown {
   // ── the buildings' front walls: up while you are outside, faded away while you are in (update) ──
   // (Kept apart from the scenery the camera fades of itself — these fade by where you are, the whole wall at once.)
   const facadeRoot = new TransformNode('palletFacades', scene);
-  const facades: { mesh: Mesh; x0: number; x1: number; y0: number; y1: number; vis: number }[] = [];
+  const facades: { meshes: Mesh[]; x0: number; x1: number; y0: number; y1: number; vis: number }[] = [];
   interface Storey { y: number; top: number; windows: number[]; wy?: [number, number] }
   const facade = (name: string, b: { x0: number; x1: number; y: number; top: number }, wall: StandardMaterial, storeys: Storey[],
     o: { shutters?: StandardMaterial; boxes?: boolean; sign?: boolean } = {}) => {
@@ -615,9 +623,9 @@ export function palletTown(scene: Scene): PalletTown {
       P(box(`${name}FacadeSignFace`, cx - 2.05, cx + 2.05, b.top - 1.12, b.top - 0.48, z0 - 0.12, z0 - 0.1, C.white));
       for (const [dx, w] of [[-1.5, 0.7], [-0.6, 0.9], [0.5, 0.5], [1.3, 0.5]]) P(box(`${name}FacadeLetters`, cx + dx - w / 2, cx + dx + w / 2, b.top - 0.9, b.top - 0.7, z0 - 0.13, z0 - 0.12, C.blue));
     }
-    const merged = Mesh.MergeMeshes(parts, true, true, undefined, false, true)!;
-    merged.name = `${name}Facade`; merged.parent = facadeRoot; merged.isPickable = false; merged.receiveShadows = true;
-    facades.push({ mesh: merged, x0: b.x0, x1: b.x1, y0: b.y - 0.3, y1: b.top + 0.5, vis: 1 });
+    const meshes = mergeByMaterial(parts, `${name}Facade`);
+    for (const m of meshes) { m.parent = facadeRoot; m.isPickable = false; m.receiveShadows = true; }
+    facades.push({ meshes, x0: b.x0, x1: b.x1, y0: b.y - 0.3, y1: b.top + 0.5, vis: 1 });
   };
 
   // ── Prof. Oak's Lab ──
@@ -913,7 +921,7 @@ export function palletTown(scene: Scene): PalletTown {
         // plaster over the shutters as the camera moves; fully up, it is drawn solid.)
         f.vis += ((inside ? 0 : 1) - f.vis) * k;
         if (f.vis > 0.995) f.vis = 1; else if (f.vis < 0.005) f.vis = 0;
-        f.mesh.visibility = f.vis; f.mesh.isVisible = f.vis > 0.02;
+        for (const m of f.meshes) { m.visibility = f.vis; m.isVisible = f.vis > 0.02; }
       }
     },
     dispose: () => { route.dispose(); for (const o of owned) o.dispose(); root.dispose(false, true); facadeRoot.dispose(false, true); for (const m of mats.values()) m.dispose(); },

@@ -5,12 +5,11 @@
  *   top         two slanted HP bars, mirrored, draining toward the middle — each with its name, its type badges, its HP
  *               in figures, ticks every tenth, and a damage trail: the HP just lost held a beat, then drained after it;
  *               a hit shakes it, low HP pulses. Between them the clock.
- *   bottom-left the move bar: U I J K L — each slot its key, its move, in its type's colour; cooling down, a radial
- *               sweep and the seconds left; ready again, a flash; its abuse (heat) in pips; a brace held, it glows.
+ *   bottom      the move bar is MoveBar's (shown whenever your Pokémon is out, not only here).
  *   middle      a clash's stopper (STOP U!, its number running 0 … 1000 and back up its gauge; then the number stopped on
  *               stamped with its multiplier, and
  *               how it went); callouts (COUNTER!, SUPER EFFECTIVE!, CLASH!…); the result, across a band.
- *   bottom-right the controls, as key caps.
+ *   bottom-right the controls (ControlsLegend, the UI kit's).
  */
 import { getMove, getTypeEffectiveness } from '../../shared/index.ts';
 import { RingGauge } from '../ui/RingGauge.ts';
@@ -178,13 +177,7 @@ export class Hud {
     right.root.style.visibility = 'hidden';
     top.append(left.root, this.clock, right.root);
     this.sides = [left, right];
-    // The move bar.
-    const moves = document.createElement('div');
-    moves.className = 'mvh-moves';
-    const kit = player.moves;
-    for (const [key, move, small] of [['U', kit.ranged], ['I', kit.close], ['J', kit.mobility], ['K', kit.control], ['L', 'Dash', true]] as [string, string | undefined, boolean?][]) {
-      const s = this.slot(key, move, !!small); moves.append(s.el); this.slots.push(s);
-    }
+    // (The move bar: the Platformer's own, MoveBar — shown whenever your Pokémon is out.)
     // The clash's stopper.
     this.clash = document.createElement('div'); this.clash.className = 'mvh-clash';
     this.clash.innerHTML = `<div class="mvh-say">STOP U!</div><div class="mvh-meter"></div><div class="mvh-note"></div>`;
@@ -197,7 +190,7 @@ export class Hud {
     this.clash.querySelector('.mvh-meter')!.append(this.ring.el);
     this.calls = document.createElement('div'); this.calls.className = 'mvh-calls';
     this.band = document.createElement('div'); this.band.className = 'mvh-band';
-    root.append(top, moves, this.clash, this.calls, this.band);
+    root.append(top, this.clash, this.calls, this.band);
     document.body.append(root);
   }
 

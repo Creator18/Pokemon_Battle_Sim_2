@@ -12,7 +12,7 @@ export const NATURAL_KITS: Record<string, MoveKit> = {
   // Kanto's starters.
   Bulbasaur: { ranged: 'Solar Beam', close: 'Take Down' },
   Ivysaur: { ranged: 'Solar Beam', close: 'Take Down' },
-  Charmander: { ranged: 'Flamethrower', close: 'Slash', control: 'Detect' },
+  Charmander: { ranged: 'Flamethrower', close: 'Scratch', control: 'Detect' },
   Charmeleon: { ranged: 'Flamethrower', close: 'Slash', mobility: 'Quick Attack', control: 'Detect' },
   Squirtle: { ranged: 'Hydro Pump', close: 'Iron Tail', mobility: 'Aqua Jet', control: 'Detect' },
   Wartortle: { ranged: 'Hydro Pump', close: 'Iron Tail', mobility: 'Aqua Jet', control: 'Detect' },

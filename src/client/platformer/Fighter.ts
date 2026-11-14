@@ -312,6 +312,15 @@ export const isQuickStrike = (move?: string | null): boolean => {
   return !!m && m.quickPriority && m.category === MoveCategory.PHYSICAL && !m.isRam && !BRACES.has(move!) && !BEHIND_STRIKES[move!];
 };
 /** A slash or a claw (Dragon Claw, Night Slash, Slash, Cut, X-Scissor, Leaf Blade…): its type, as the marks wear it. */
+/** A stat stage's multiplier, as the main series': +n → (2 + n) / 2, −n → 2 / (2 + n). */
+const stageMult = (n: number) => (n >= 0 ? (2 + n) / 2 : 2 / (2 - n));
+/** How long a stat stage lasts (s) before it wears off — real time standing in for the series' turns. */
+const STAGE_LIFE = 20;
+/** Growl: how far its cry carries (× its height), how far above or below its line a foe may be and still hear it (× its height). */
+const GROWL_REACH = 6, GROWL_UP = 1.6;
+/** A slash's look, by move (unlisted: the full crescent): Scratch the same cut, thinner and shorter — out in front of
+ *  the body, facing what it strikes. */
+const SLASH_LOOK: Record<string, { width: number; arc: number; push?: number }> = { Scratch: { width: 0.55, arc: 0.7, push: 0.75 } };
 const slashType = (move: string): string | null => CLOSE_MOVES[move] ?? clawFor(move)?.element ?? null;
 /** A plain contact blow (Close Combat, Thrash, Outrage, Iron Tail, Fire Fang…): a flurry, more and faster blows the stronger. */
 export const isFlurry = (move?: string | null): boolean => {
@@ -497,6 +506,15 @@ export class Fighter {
   private run: { move: string; k: number } | null = null; private runSeq = 0; private braceK = -1;
   /** Agility's boost: till when (its own clock). A plain dash under way: its cooldown's key. */
   private agilityUntil = -1; private dashK = -1;
+  /** Its Attack stage (−6 … +6: Growl's −1 a time) and when it wears off (its clock; STAGE_LIFE s after the last change). */
+  attackStage = 0; private stageUntil = -1;
+  /** Its Attack lowered (or raised) `by` stages: capped at ±6, worn off STAGE_LIFE s from now. Returns the change made. */
+  shiftAttack(by: number): number {
+    const was = this.attackStage;
+    this.attackStage = Math.max(-6, Math.min(6, this.attackStage + by));
+    this.stageUntil = this.time + STAGE_LIFE;
+    return this.attackStage - was;
+  }
   /** A brace gone off: the move it turned back — its cooldown's power, not its own. */
   private braceAgainst: string | null = null;
   /** Its beam's line, as a gaze (radians above level), while it pours: its head held on it. */
@@ -615,7 +633,7 @@ export class Fighter {
 
   /** A move's stat factor: a special move's, its Special Attack ÷ STAT_REF; a physical move's, its Attack ÷ STAT_REF; else 1. */
   private statFor(category: MoveCategory | string | undefined): number {
-    return category === MoveCategory.SPECIAL ? this.spAtk / STAT_REF : category === MoveCategory.PHYSICAL ? this.attack / STAT_REF : 1;
+    return category === MoveCategory.SPECIAL ? this.spAtk / STAT_REF : category === MoveCategory.PHYSICAL ? this.attack * stageMult(this.attackStage) / STAT_REF : 1;
   }
 
   /**
@@ -627,7 +645,7 @@ export class Fighter {
     const m = getMove(move);
     if (!m) return DAMAGE_UNKNOWN;
     const special = m.category === MoveCategory.SPECIAL;
-    const A = special ? realStat(this.spAtk, this.evs.spa) : realStat(this.attack, this.evs.atk);
+    const A = special ? realStat(this.spAtk, this.evs.spa) : realStat(this.attack, this.evs.atk) * stageMult(this.attackStage);
     const D = special ? realStat(on.spDef, on.evs.spd) : realStat(on.defense, on.evs.def);
     const base = Math.floor(Math.floor((Math.floor((2 * LEVEL) / 5) + 2) * m.basePower * A / D) / 50) + 2;
     return base * (this.types.includes(m.moveType) ? 1.5 : 1) * getTypeEffectiveness(m.moveType, on.types);
@@ -666,6 +684,8 @@ export class Fighter {
     if (dt <= 0) return;
     this.time += dt;
     this.arenaRef = arena;
+    // (A stat stage worn off.)
+    if (this.attackStage !== 0 && this.time >= this.stageUntil) { this.attackStage = 0; arena.onStatus?.(this, 'Attack back to normal', 0); }
     // Braced, and nothing came: open a moment.
     if (this.countering && this.time > this.counterUntil) {
       this.counterUntil = -1; this.end(); this.lagUntil = this.time + COUNTER_WHIFF; this.finishRun(this.braceK);
@@ -693,6 +713,7 @@ export class Fighter {
       if (it.ranged && this.ready(this.moves.ranged)) this.fire(arena);
       else if (it.close && this.ready(this.moves.close)) this.slash(arena);
       else if (it.mobility && isQuickStrike(this.moves.mobility)) this.quickAttack(arena, this.moves.mobility!);
+      else if (it.control && this.moves.control === 'Growl' && this.ready('Growl')) this.growl(arena);
       else if (it.control && BRACES.has(this.moves.control ?? '') && this.ready(this.moves.control)) this.brace();
       else if (it.mobility && this.moves.mobility === 'Dash') this.dash();
       else if (it.mobility && this.moves.mobility && BEHIND_STRIKES[this.moves.mobility]) this.strikeFromBehind(arena, this.moves.mobility);
@@ -1363,7 +1384,7 @@ export class Fighter {
       // (Asked as the blow falls: still there?)
       if (!near || !inReach(near)) return false;
       return near.takeHit(this, name, () => this.factory.playHitReact(near.node), arena);
-    }).then(() => { this.finishRun(k); this.end(); });
+    }, SLASH_LOOK[name]).then(() => { this.finishRun(k); this.end(); });
   }
 
   /**
@@ -1616,7 +1637,7 @@ export class Fighter {
       this.begin(move);
       const play = plain
         ? (onBlow: () => boolean) => this.factory.playStrike(this.node, foe.node.position.clone(), type, onBlow, { crescent: true })
-        : (onBlow: () => boolean) => this.factory.playCrescentSlash(this.node, foe.node.position.clone(), type, onBlow);
+        : (onBlow: () => boolean) => this.factory.playCrescentSlash(this.node, foe.node.position.clone(), type, onBlow, SLASH_LOOK[move]);
       void play(() => {
         const [l, r, b, t] = foe.box(), [ml, mr] = this.span();
         const close = Math.min(Math.abs(l - mr), Math.abs(ml - r)) < this.H * 0.6 && this.y < t && this.y + this.H > b;
@@ -1676,6 +1697,30 @@ export class Fighter {
   }
 
   /** Agility: its boost — AGILITY_TIME s of zippy dashes — a flash as it takes hold; its cooldown from now. */
+  /**
+   * Growl: a cry, sent out ahead (Earthquake's ripple through the air, GrowlFx) — every foe in front of it within
+   * GROWL_REACH, not far above or below its line, has its Attack lowered a stage as the ripple reaches it. No damage;
+   * it never misses; nothing blocks it.
+   */
+  private growl(arena: Arena): void {
+    this.face(this.facing, true);
+    this.begin('Growl');
+    const k = this.startRun('Growl');
+    const reach = GROWL_REACH * this.H, dir = this.facing;
+    // (Cut off at the floor under it: none of it below the ground.)
+    const floor = this.floorBelow(arena);
+    const play = this.factory.playGrowl(this.node, new Vector3(dir, 0, 0), reach, () => floor);
+    void play.reached.then(() => {
+      for (const f of this.foes(arena)) {
+        if (f.down || Math.sign(f.x - this.x) !== dir || Math.abs(f.x - this.x) > reach + f.W / 2 || Math.abs((f.y + f.H / 2) - (this.y + this.H / 2)) > GROWL_UP * this.H) continue;
+        const fell = f.shiftAttack(-1);
+        arena.onStatus?.(f, fell ? 'Attack fell' : "Attack won't go any lower", STAGE_LIFE);
+      }
+    });
+    // (Its cry over: free again, its cooldown from now.)
+    void play.done.then(() => { this.finishRun(k); this.end(); });
+  }
+
   private agility(): void {
     if (!this.ready('Agility')) return;
     const k = this.startRun('Agility');

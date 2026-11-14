@@ -22,10 +22,14 @@ export interface BallSpec {
   tornado?: boolean;
   /** Its burst on the target a sphere of flame (FireFx.FireSphere) instead of its noise swelling out (Fire Blast). */
   burst?: 'fire';
+  /** Not a ball at all: Flamethrower's starting egg, small, shot round-end first (EmberFx) — quick to throw. */
+  ember?: boolean;
 }
 
 export const BALL_MOVES: Record<string, BallSpec> = {
   'Shadow Ball': { element: 'Ghost' },
+  // Flamethrower's starting egg, small, shot at the foe — its round end leading, its tail streaming back.
+  'Ember': { element: 'Fire', ember: true },
   'Aeroblast': { element: 'Flying', tornado: true },
   'Moonblast': { element: 'Fairy', tornado: true },
   'Fire Blast': { element: 'Fire', tornado: true, burst: 'fire' },

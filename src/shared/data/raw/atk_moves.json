@@ -1,5 +1,21 @@
 {
   "moves": {
+    "Scratch": {
+      "category": "physical",
+      "base_power": 40,
+      "move_type": "Normal",
+      "is_ranged": false,
+      "requires_los": false,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": false,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "recoil_fraction": 0.0,
+      "self_debuff": {},
+      "skip_turn_on_hit": false,
+      "description": "Hard, pointed, sharp claws rake the target."
+    },
     "Quick Attack": {
       "category": "physical",
       "base_power": 40,

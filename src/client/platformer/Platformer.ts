@@ -30,6 +30,7 @@ import type { SpeciesDefinition } from '../../shared/index.ts';
 import { getMove } from '../../shared/index.ts';
 import { Fighter, DEFAULT_KIT, IDLE, hpStat, BODY_W } from './Fighter.ts';
 import { Hud } from './Hud.ts';
+import { MoveBar } from './MoveBar.ts';
 import { TeamHud } from './TeamHud.ts';
 import { kitFor } from './speciesMoves.ts';
 import { typeColor } from '../theme.ts';
@@ -45,14 +46,23 @@ export { DEFAULT_KIT } from './Fighter.ts';
 /** How long the foe's circles stay after a fight's won or lost (s), before they slide away. */
 /**
  * Floors — ground and earth, paths, lawns (and their grass), building floors, steps and the stone faces between
- * rises, the beach (by their meshes' names): never faded for a foe, nor when they only partly cover you; faded whole
- * only when you are properly hidden behind them (occlude).
+ * rises, the beach (by their meshes' names): never faded. When one would hide you, the camera moves round to you
+ * and up over it instead (cameraFix).
  */
 export const FLOORS = /earth|face|step|path|lawn|floor|beach|tier|seam|grass|ground|rug|mat\b/i;
 const ENCOUNTER_LINGER = 1.6;
 const SHAKE_MAX = 0.45, SHAKE_DECAY = 1.6;
 /** The camera: how far off the plane, how high above the body, how far it leads the way it faces, how quickly it follows. */
 const CAM_DIST = 15, CAM_UP = 2.2, CAM_LEAD = 2.5, CAM_EASE = 5;
+/** How high the camera may rise over ground that would hide you (tried in turn), and how fast it gets there. */
+const CAM_LIFTS = [0.75, 1.5, 2.5, 3.5, 5, 7], CAM_FIX_EASE = 4;
+/** Walking about (walkCam): how far you walk, or how long you face the other way, before its lead swings round, and
+ *  how fast it swings; its window across; how far over a jump it holds its height, how far below your ground before
+ *  it follows you down, its window round you flying; its lags (s) across, up and down, falling; how far from the
+ *  middle the push zone starts; how far you're moved before it simply snaps. */
+const CAM_TURN_DIST = 1.2, CAM_TURN_TIME = 0.7, CAM_LEAD_EASE = 2.2, CAM_WIN_X = 0.6;
+const CAM_WIN_UP = 2.6, CAM_WIN_DOWN = 0.4, CAM_WIN_FLY = 1.2;
+const CAM_SMOOTH_X = 0.28, CAM_SMOOTH_Y = 0.32, CAM_SMOOTH_FALL = 0.1, CAM_PUSH = 5, CAM_SNAP = 14;
 /** Framing two (a boss fight): pulled back till both fit across its view, with CAM_MARGIN to spare each side (world units); never nearer than CAM_DIST. */
 const CAM_MARGIN = 3;
 /** The platforms' depth (across the view) and their grass top's thickness. */
@@ -72,7 +82,7 @@ const LIT_SELF = 0.55;
  * Nothing hides the fighters: whatever lies between the camera and a fighter (rays from the eye to OCCLUDE_AT of its
  * height) fades to OCCLUDED, easing there and back at OCCLUDE_EASE (per s).
  */
-const OCCLUDE_AT = [0.25, 0.6, 0.95], OCCLUDED = 0.2, OCCLUDE_EASE = 8;
+const OCCLUDE_AT = [0.25, 0.6, 0.95], OCCLUDED = 0.2, OCCLUDE_EASE = 8, OCCLUDE_EVERY = 0.05;
 
 /** The first room: a floor with a pit, steps up to a high ledge, floating platforms, a wall to jump. */
 export const FIRST_ROOM: Platform[] = [
@@ -198,6 +208,8 @@ export class Platformer {
     if (o.cullRange && o.scenery) this.setUpCulling(o.scenery, o.cullRange);
     // (Your team, top left: you its first, unless you're a Pokéball still — no Pokémon yet: its circles empty.)
     this.team = new TeamHud();
+    // (Your moves, bottom centre, while your Pokémon is out — the attacks greyed where they can't be used.)
+    this.moveBar = new MoveBar(this.player, (m) => !!this.attacksAllowed && !this.attacksAllowed(this.player.x, this.player.y) && Platformer.isAttack(m));
     if (!o.ball) { this.addMember(o.species); for (const sp of o.team ?? []) this.addMember(sp); }
     this.start = o.start ?? { x: 0, y: 0 };
     const bossAt = this.spots.findIndex((s) => s.boss);
@@ -215,6 +227,11 @@ export class Platformer {
         this.note(`${by.name} ${move} → ${on.name} −${dmg} (${on.hp}/${on.maxHp})`);
         this.hud?.hit(by, on, move);
         if (on.hp <= 0) { this.note(`${on.name} fainted`); this.hud?.call('K.O.!', '#f43f5e'); }
+      },
+      onStatus: (on, status) => {
+        this.note(`${on.name}: ${status}`);
+        // (A stat stage's change called out, as the series' text: "Bulbasaur's Attack fell!")
+        if (/Attack/.test(status)) this.hud?.call(`${on.name.replace(/ \((you|boss)\)$/, '')}'s ${status}!`, '#93c5fd', true);
       },
       onBurst: (a, b, ma, mb) => {
         this.note(`point-blank: ${a.name} ${ma} × ${b.name} ${mb} — both burst, both knocked back`);
@@ -269,6 +286,7 @@ export class Platformer {
     for (const f of this.fighters) { f.beam?.play.cancel?.(true); f.beam = null; this.factory.remove(f.node); }
     this.hud?.dispose();
     this.team.dispose();
+    this.moveBar.dispose();
     this.foeTeam?.dispose();
   }
 
@@ -341,6 +359,7 @@ export class Platformer {
   private updateHud(dt: number): void {
     this.hud?.update(dt, this.time, this.result);
     this.team.update(dt);
+    this.moveBar.update();
     this.foeTeam?.update(dt);
   }
 
@@ -478,8 +497,8 @@ export class Platformer {
       m.computeWorldMatrix(true);
       const bb = m.getBoundingInfo().boundingBox;
       this.culled.push({ m, x0: bb.minimumWorld.x, x1: bb.maximumWorld.x, on: true });
-      // (Static: its transform worked out once, never again.)
-      m.freezeWorldMatrix();
+      // (Static: its transform worked out once, never again — but not the grass fur's shells: the wind sways them.)
+      if (!/furShell/.test(m.name)) m.freezeWorldMatrix();
     }
   }
   /** Each frame: the scenery within range of the camera shown, the rest hidden. */
@@ -494,9 +513,10 @@ export class Platformer {
 
   // ── where you may attack ──────────────────────────────
   private attacksAllowed: ((x: number, y: number) => boolean) | null = null;
+  private moveBar!: MoveBar;
   private onNoAttack: (() => void) | null = null;
   /** A move that deals damage (an attack): stopped where attacks aren't allowed. */
-  private static isAttack(move: string | undefined): boolean {
+  static isAttack(move: string | undefined): boolean {
     if (!move) return false;
     if (move === 'Thunderbolt') return true;
     return (getMove(move)?.basePower ?? 0) > 0;
@@ -733,10 +753,71 @@ export class Platformer {
     this.cull();
   }
 
+  /**
+   * The camera's goal walking about, side-scroller style (after Itay Keren's "Scroll Back", GDC 2015):
+   * - dual forward focus: it leads the way you face, but only swings round once you've truly turned — walked a
+   *   little the other way, or stood facing it a moment (Super Mario World) — and swings smoothly (Cave Story);
+   * - a camera window across: small moves inside it don't drag the view;
+   * - platform snapping up and down: it keeps its height through a jump, settling to your new ground when you land
+   *   (Super Mario World, Rayman); it follows you up past a jump's height, and down at once when you fall below
+   *   your last ground (a window pushed) — flying, a window round you;
+   * - eased by a critically damped spring (no lag-then-jerk; Never Alone's "physics smoothing"), quicker when you're
+   *   near the edge of view (a push zone, Super Mario Bros.) or falling; across, aimed ahead by your speed (projected
+ *   focus) so it leads you running; snapped when you're moved far (placed).
+   */
+  private camLeadDir = 1;
+  private camLead = CAM_LEAD;
+  private camTurn: { x: number; t: number } | null = null;
+  private camGoal: { x: number; y: number } | null = null;
+  private camVel: [number, number] = [0, 0];
+  private walkCam(dt: number): void {
+    const f = this.player, p = f.node.position;
+    // (Its lead side: switched once you've turned for real.)
+    if (f.facing !== this.camLeadDir) {
+      this.camTurn ??= { x: p.x, t: 0 };
+      this.camTurn.t += dt;
+      if (Math.abs(p.x - this.camTurn.x) > CAM_TURN_DIST || this.camTurn.t > CAM_TURN_TIME) { this.camLeadDir = f.facing; this.camTurn = null; }
+    } else this.camTurn = null;
+    this.camLead += (this.camLeadDir * CAM_LEAD - this.camLead) * (1 - Math.exp(-dt * CAM_LEAD_EASE));
+    const fx = p.x + this.camLead;
+    // (Back from a fight's framing or a close look: on from where the view is.)
+    this.camGoal ??= { x: this.camAt.x, y: this.camAt.y };
+    if (Math.abs(fx - this.camGoal.x) > CAM_SNAP || Math.abs(p.y + CAM_UP - this.camGoal.y) > CAM_SNAP) {
+      // (Placed somewhere new: straight there.)
+      this.camGoal = { x: fx, y: p.y + CAM_UP };
+      this.camAt.set(fx, p.y + CAM_UP, 0); this.camVel = [0, 0];
+      return;
+    }
+    const g = this.camGoal;
+    // Across: a window round its goal.
+    if (fx > g.x + CAM_WIN_X) g.x = fx - CAM_WIN_X; else if (fx < g.x - CAM_WIN_X) g.x = fx + CAM_WIN_X;
+    // Up and down: snapped to your ground; pushed by a window off it.
+    const y = p.y + CAM_UP, flying = f.flying;
+    let falling = false;
+    if (flying) { if (y > g.y + CAM_WIN_FLY) g.y = y - CAM_WIN_FLY; else if (y < g.y - CAM_WIN_FLY) g.y = y + CAM_WIN_FLY; }
+    else if (f.grounded) g.y = y;
+    else if (y > g.y + CAM_WIN_UP) g.y = y - CAM_WIN_UP;
+    else if (y < g.y - CAM_WIN_DOWN) { g.y = y + CAM_WIN_DOWN; falling = true; }
+    // Eased there: a damped spring, quicker toward the edge of view, or falling.
+    // (Across, aimed where you'll be by the time it gets there — your speed times its lag: running, it still leads you,
+    // not trails. Not up and down: jumps don't extrapolate.)
+    const edge = Math.abs(p.x - this.camAt.x) > CAM_PUSH, lag = edge ? CAM_SMOOTH_X * 0.45 : CAM_SMOOTH_X;
+    this.camAt.x = this.smoothDamp(this.camAt.x, g.x + f.vx * lag, 0, lag, dt);
+    this.camAt.y = this.smoothDamp(this.camAt.y, g.y, 1, falling ? CAM_SMOOTH_FALL : CAM_SMOOTH_Y, dt);
+    this.camAt.z = 0;
+  }
+  /** A critically damped spring from `cur` toward `to` (its velocity kept in camVel[`axis`]); `time` ≈ its lag (s). */
+  private smoothDamp(cur: number, to: number, axis: 0 | 1, time: number, dt: number): number {
+    const w = 2 / time, x = w * dt, e = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    const change = cur - to, temp = (this.camVel[axis] + w * change) * dt;
+    this.camVel[axis] = (this.camVel[axis] - w * temp) * e;
+    return to + (change + temp) * e;
+  }
+
   /** The camera off to the side, level with the player, leading the way it faces — or, in a boss fight, framing both. */
   private follow(dt: number): void {
     const p = this.player.node.position;
-    let goal: Vector3, dist = CAM_DIST;
+    let goal: Vector3 | null, dist = CAM_DIST;
     if (this.boss) {
       const b = this.boss.node.position;
       goal = new Vector3((p.x + b.x) / 2, Math.max(p.y, b.y) * 0.6 + Math.min(p.y, b.y) * 0.4 + CAM_UP, 0);
@@ -747,10 +828,11 @@ export class Platformer {
     } else if (this.focus) {
       goal = this.focus.at.clone(); dist = this.focus.dist;
     } else {
-      goal = new Vector3(p.x + this.player.facing * CAM_LEAD, p.y + CAM_UP, 0);
+      this.walkCam(dt);
+      goal = null as unknown as Vector3;
     }
     const k = 1 - Math.exp(-dt * CAM_EASE);
-    Vector3.LerpToRef(this.camAt, goal, k, this.camAt);
+    if (goal) { Vector3.LerpToRef(this.camAt, goal, k, this.camAt); this.camVel[0] = this.camVel[1] = 0; this.camGoal = null; }
     this.camDist += (dist - this.camDist) * k;
     const cam = this.camera as unknown as { setTarget?: (v: Vector3) => void; setPosition?: (v: Vector3) => void; position: Vector3 };
     // (Shaken: trauma squared, in smooth noise — target and eye together, the view jolting, not swinging round.)
@@ -759,47 +841,96 @@ export class Platformer {
     const amp = this.trauma * this.trauma * SHAKE_MAX;
     const n = (k: number) => Math.sin(this.shakeT * 37 + k) * 0.6 + Math.sin(this.shakeT * 61 + k * 2.3) * 0.4;
     const jolt = new Vector3(n(1.1) * amp, n(4.7) * amp, 0);
-    const at = this.camAt.add(jolt);
-    const eye = at.add(new Vector3(0, 0.6, -this.camDist));
+    // (Hidden behind floor — ground between the eye and you, as at a rise's foot: the camera brought round to you,
+    // then up over it, eased; back again once it's clear.)
+    this.camFixAge += dt;
+    if (this.camFixAge >= OCCLUDE_EVERY) { this.camFixAge = 0; this.camFixGoal = this.focus ? [0, 0] : this.cameraFix(this.camAt, this.camDist); }
+    const kf = 1 - Math.exp(-dt * CAM_FIX_EASE);
+    this.camFix[0] += (this.camFixGoal[0] - this.camFix[0]) * kf; this.camFix[1] += (this.camFixGoal[1] - this.camFix[1]) * kf;
+    const at = this.camAt.add(jolt).addInPlaceFromFloats(this.camFix[0], 0, 0);
+    const eye = at.add(new Vector3(0, 0.6 + this.camFix[1], -this.camDist));
     cam.setTarget?.(at);
     if (cam.setPosition) cam.setPosition(eye); else cam.position.copyFrom(eye);
     this.occlude(eye, dt);
   }
 
-  /** Whatever stands between the eye and a fighter, faded out of the way; what no longer does, back. */
-  private occlude(eye: Vector3, dt: number): void {
+  /**
+   * What may come between the eye and a fighter (the scenery; the floors apart) — worked out once and kept while the
+   * scene's meshes stay the same, not asked of every mesh in the scene for every ray of every frame (that was most of
+   * a frame's time).
+   */
+  private occluders: { at: number; ball: AbstractMesh | null; scenery: AbstractMesh[]; floors: AbstractMesh[] } | null = null;
+  private occluderLists(): { scenery: AbstractMesh[]; floors: AbstractMesh[] } {
+    const ball = this.pokeball ?? null;
+    if (this.occluders && this.occluders.at === this.scene.meshes.length && this.occluders.ball === ball) return this.occluders;
+    const own = new Set<AbstractMesh>(this.meshes), scenery: AbstractMesh[] = [], floors: AbstractMesh[] = [];
+    for (const m of this.scene.meshes) {
+      if (this.standIns.has(m)) { scenery.push(m); continue; }
+      // (Scenery only — its own platforms and hills, the backdrop's meshes — never a fighter or an effect; nor the
+      // Pokéball you are: it is a fighter's body, though it is one of the level's own meshes.)
+      if (m === ball || (ball && m.isDescendantOf(ball))) continue;
+      if (!own.has(m) && !(this.scenery && m.isDescendantOf(this.scenery))) continue;
+      if ((m.metadata as { noOcclude?: boolean } | null)?.noOcclude) continue;
+      (FLOORS.test(m.name) ? floors : scenery).push(m);
+    }
+    this.occluders = { at: this.scene.meshes.length, ball, scenery, floors };
+    return this.occluders;
+  }
+
+  /** Every mesh of `list` the segment from `eye` to `to` passes through (its box first: most are nowhere near). */
+  private through(eye: Vector3, to: Vector3, list: AbstractMesh[], lift = false): AbstractMesh[] {
+    const d = to.subtract(eye), len = d.length();
+    const ray = new Ray(eye, d.scale(1 / len), len - 0.05);
+    const x0 = Math.min(eye.x, to.x), x1 = Math.max(eye.x, to.x), out: AbstractMesh[] = [];
+    for (const m of list) {
+      if (!m.isVisible || !m.isEnabled()) continue;
+      const bb = m.getBoundingInfo().boundingBox;
+      if (bb.maximumWorld.x < x0 || bb.minimumWorld.x > x1 || (lift && bb.maximumWorld.y <= 0.05)) continue;
+      if (!ray.intersectsBox(bb)) continue;
+      if (m.intersects(ray, false).hit) out.push(m);
+    }
+    return out;
+  }
+
+  /** The camera's shift toward you and its rise (now; wanted), when floor would hide you; how long since looked. */
+  private camFix: [number, number] = [0, 0];
+  private camFixGoal: [number, number] = [0, 0];
+  private camFixAge = Infinity;
+  /** The least the camera must move — toward you first, then up — for no floor to hide you (your middle and top). */
+  private cameraFix(at: Vector3, dist: number): [number, number] {
+    const { floors } = this.occluderLists();
+    const p = this.player, toward = p.x - at.x;
+    const seen = (dx: number, lift: number) => {
+      const eye = new Vector3(at.x + dx, at.y + 0.6 + lift, at.z - dist);
+      return [0.6, 0.95].every((h) => !this.through(eye, p.node.position.add(new Vector3(0, p.H * h, 0)), floors).length);
+    };
+    const tries: [number, number][] = [[0, 0], [toward * 0.5, 0], [toward, 0], ...CAM_LIFTS.map((l) => [toward, l] as [number, number])];
+    return tries.find(([dx, l]) => seen(dx, l)) ?? tries[tries.length - 1];
+  }
+
+  private inWay = new Set<AbstractMesh>();
+  private occludeAge = Infinity;
+  private findInWay(eye: Vector3): Set<AbstractMesh> {
+    this.occludeAge = 0;
     const inWay = new Set<AbstractMesh>();
-    // (Scenery only — its own platforms and hills, the backdrop's meshes — never a fighter or an effect; and not the
-    // ground the fighters stand on, which a ray to their feet would graze.)
-    const own = new Set<AbstractMesh>(this.meshes);
-    // (Nor the Pokéball you are: it is a fighter's body, though it is one of the level's own meshes.)
-    const ball = this.pokeball;
-    const scenery = (m: AbstractMesh) => this.standIns.has(m) || (m !== ball && !(ball && m.isDescendantOf(ball)) && !(m.metadata as { noOcclude?: boolean } | null)?.noOcclude && !FLOORS.test(m.name) && m.isEnabled() && m.isVisible
-      && (own.has(m) || (!!this.scenery && m.isDescendantOf(this.scenery))) && m.getBoundingInfo().boundingBox.maximumWorld.y > 0.05);
+    const { scenery, floors } = this.occluderLists();
+    // (Not the ground the fighters stand on, which a ray to their feet would graze; and not those out of range, unseen.)
     for (const f of this.fighters) {
+      if (this.cullRange && Math.abs(f.x - this.camAt.x) > this.cullRange) continue;
       for (const k of OCCLUDE_AT) {
-        const to = f.node.position.add(new Vector3(0, f.H * k, 0));
-        const d = to.subtract(eye), len = d.length();
-        const hits = this.scene.multiPickWithRay(new Ray(eye, d.scale(1 / len), len - 0.05), scenery) ?? [];
-        for (const h of hits) if (h.pickedMesh) inWay.add(this.standIns.get(h.pickedMesh) ?? h.pickedMesh);
+        for (const m of this.through(eye, f.node.position.add(new Vector3(0, f.H * k, 0)), scenery, true)) inWay.add(this.standIns.get(m) ?? m);
       }
     }
-    // Floors: faded whole too — but only for you (never for a foe), and only when you're properly hidden: every point
-    // sampled across your body (low, middle, high; either side) blocked by floor.
-    const floor = (m: AbstractMesh) => FLOORS.test(m.name) && m !== ball && !(ball && m.isDescendantOf(ball)) && m.isEnabled() && m.isVisible
-      && (own.has(m) || (!!this.scenery && m.isDescendantOf(this.scenery)));
-    const p = this.player, hw = p.W * 0.35;
-    const samples = [...OCCLUDE_AT.map((h) => [0, h]), [-hw, 0.6], [hw, 0.6]] as [number, number][];
-    const hidden = new Set<AbstractMesh>();
-    let all = true;
-    for (const [dx, h] of samples) {
-      const to = p.node.position.add(new Vector3(dx, p.H * h, 0));
-      const d = to.subtract(eye), len = d.length();
-      const hits = (this.scene.multiPickWithRay(new Ray(eye, d.scale(1 / len), len - 0.05), floor) ?? []).filter((x) => x.pickedMesh);
-      if (!hits.length) { all = false; break; }
-      for (const x of hits) hidden.add(this.standIns.get(x.pickedMesh!) ?? x.pickedMesh!);
-    }
-    if (all) for (const m of hidden) inWay.add(m);
+    // (Floors never fade: when one hides you, the camera moves instead — cameraFix.)
+    this.inWay = inWay;
+    return inWay;
+  }
+
+  /** Whatever stands between the eye and a fighter, faded out of the way; what no longer does, back. */
+  private occlude(eye: Vector3, dt: number): void {
+    // (Who's in the way looked again only so often — the fades ease in over longer than that anyway.)
+    this.occludeAge += dt;
+    const inWay = this.occludeAge < OCCLUDE_EVERY ? this.inWay : this.findInWay(eye);
     const k = 1 - Math.exp(-dt * OCCLUDE_EASE);
     for (const m of inWay) if (!this.faded.has(m)) this.faded.set(m, { own: m.visibility, shown: this.standInFor(m) });
     for (const [m, f] of this.faded) {
