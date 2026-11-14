@@ -44,7 +44,9 @@ import { arcTo, KNOCK_TIME, KNOCK_ARC, KNOCK_MIN_ARC } from './unitFactory.ts';
 import { clashBallRadius, TARGET_BODY, type BeamFx, type BeamClash } from '../vfx/beam/BeamFx.ts';
 import { throwBall, evolveAura, BALL_TO_CLASH, NOISE_FIRST, ballNoiseColours } from '../vfx/beam/BallFx.ts';
 import { throwEmber } from '../vfx/beam/EmberFx.ts';
+import { Beam3Fx } from '../vfx/beam/Beam3Fx.ts';
 import { GrowlFx } from '../vfx/GrowlFx.ts';
+import { SmokeFx } from '../vfx/SmokeFx.ts';
 import type { DashRings } from '../vfx/DashRings.ts';
 import { ImpactFrame } from '../vfx/ImpactFrame.ts';
 import type { PulseFx, PulseSpec } from '../vfx/PulseFx.ts';
@@ -297,6 +299,12 @@ interface RecipeModel {
 
 interface Unit {
   model: RecipeModel;
+  /**
+   * Each of its meshes' true visibility, as it was made: what every hiding and fading of it (its teleports, quick steps,
+   * vanishes, its blink when struck) puts it back to - never what it happened to be as that began (another under way
+   * then - a blink mid-teleport - left it hidden, or faded, for good).
+   */
+  baseVis?: number[];
   down: boolean;
   skin: SkinSampler;
   /** Hover height above the tile (world units): where it is heading, and where it is now. */
@@ -739,6 +747,7 @@ export class RecipeFactory implements UnitFactory {
       this.hideParts(model, species.name);
       const u: Unit = { model, down: false, skin: new SkinSampler(model.meshes, model.skeleton), hoverTarget: 0, hover: 0, clamp: 0, lookAt: null, moving: false, types: species.types,
         strikeParts: new Map(), strikeRegions: new Map(), skinCounts: new Map(), species: species.name, upkeep: null, feet: feetOf(model) };
+      u.baseVis = model.meshes.map((m) => m.visibility);
       this.units.set(model.root, u);
       this.fx?.register(model.root, model.meshes, model.skeleton, model.props.map((p) => p.mesh));
       u.upkeep = this.scene.onBeforeRenderObservable.add(() => this.updateHeight(model.root, u));
@@ -1089,7 +1098,7 @@ export class RecipeFactory implements UnitFactory {
     burst(start.add(lift).add(new Vector3(0, H * 0.45, 0)).subtract(way.scale(H * 0.25)), H * QS_LAUNCH_BURST);
     if (!airborne) fx.dust(start, H);
 
-    const shown = u.model.meshes.map((m) => m.visibility);
+    const shown = this.trueVis(u);
     for (const m of u.model.meshes) m.visibility = 0;
     fx.streaks(start.add(lift), land.add(lift), H, QS_DASH);
     // Across, leaving its pose behind as it goes.
@@ -1262,7 +1271,7 @@ export class RecipeFactory implements UnitFactory {
       const mid = new Vector3(0, H * 0.45, 0);
       burst(start.add(lift).add(mid).subtract(w.scale(H * 0.25)), w, H * QS_LAUNCH_BURST);
       if (!airborne) fx.dust(start, H);
-      const shown = u.model.meshes.map((m) => m.visibility);
+      const shown = this.trueVis(u);
       for (const m of u.model.meshes) m.visibility = 0;
       u.lookHold = true;
       const hits = [hit1, hit2];
@@ -1497,7 +1506,7 @@ export class RecipeFactory implements UnitFactory {
     if (!u) { node.position.copyFrom(to); return; }
     const fx = (this.quickStep ??= new QuickStepFx(this.scene));
     const H = this.heightOf(node);
-    const shown = u.model.meshes.map((m) => m.visibility);
+    const shown = this.trueVis(u);
     const show = (on: boolean) => u.model.meshes.forEach((m, i) => { m.visibility = on ? shown[i] : 0; });
     const middle = () => base.add(new Vector3(0, H * 0.5 + u.hover + u.clamp, 0));
     const frame = () => new Promise<void>((r) => { this.scene.onAfterRenderObservable.addOnce(() => r()); });
@@ -1634,7 +1643,7 @@ export class RecipeFactory implements UnitFactory {
   blink(node: TransformNode, seconds: number): void {
     const u = this.units.get(node);
     if (!u) return;
-    const shown = u.model.meshes.map((m) => m.visibility);
+    const shown = this.trueVis(u);
     let t = 0;
     const obs = this.scene.onBeforeRenderObservable.add(() => {
       t += Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
@@ -1899,6 +1908,41 @@ export class RecipeFactory implements UnitFactory {
       toward: () => targetPos.add(new Vector3(0, H * 0.5, 0)) });
   }
   private crescents: CrescentFx | null = null;
+
+  /** Every beam, ball and ember still alive, gone at once - a fight's end, nothing of it left drawn. */
+  killEffects(): void { this.beams?.killAll(); }
+
+  /** Its meshes' true visibility (Unit.baseVis): what its hidings and fadings put it back to. */
+  private trueVis(u: Unit): number[] {
+    if (!u.baseVis || u.baseVis.length !== u.model.meshes.length) u.baseVis = u.model.meshes.map(() => 1);
+    return u.baseVis;
+  }
+
+  /** Whether any of its meshes is drawn fainter than it truly is now (hidden or see-through). */
+  visibilityOff(node: TransformNode): boolean {
+    const u = this.units.get(node);
+    if (!u || u.down) return false;
+    const base = this.trueVis(u);
+    // (A part it keeps switched off - a form's, a prop - is not hidden: only what it draws, drawn fainter than it is.)
+    return u.model.meshes.some((m, i) => m.isEnabled() && (m.visibility < base[i] - 0.05 || m.layerMask === 0)) || !node.isEnabled();
+  }
+
+  /**
+   * Shown as it should be: a unit not down put back to its true visibility (each mesh, its node) - the last guard
+   * against one left invisible or see-through (Platformer's watcher). Returns whether it had to.
+   */
+  restoreVisibility(node: TransformNode): boolean {
+    const u = this.units.get(node);
+    if (!u || u.down) return false;
+    const base = this.trueVis(u);
+    let fixed = false;
+    u.model.meshes.forEach((m, i) => {
+      if (Math.abs(m.visibility - base[i]) > 0.02) { m.visibility = base[i]; fixed = true; }
+      if (m.layerMask === 0) { m.layerMask = 0x0fffffff; fixed = true; }
+    });
+    if (!node.isEnabled()) { node.setEnabled(true); fixed = true; }
+    return fixed;
+  }
 
   /** Keep it from turning to watch what it looks at (true), or let it again (false): its facing is then the caller's. */
   holdLook(node: TransformNode, on: boolean): void {
@@ -2382,7 +2426,10 @@ export class RecipeFactory implements UnitFactory {
     const aimEach = meet ? (clash ? () => (clash.over?.() ? meet() : clash.at() ?? meet()) : meet) : aimAt;
     // Twins (or triplets) start level with each other (BeamShot.twin).
     const twin = muzzles ? { fwd: () => new Vector3(Math.sin(node.rotation.y), 0, Math.cos(node.rotation.y)), reach: new Map<number, number>() } : undefined;
-    const handles = sources.map((from, i) => this.beams!.fire({ ...spec, height, mouth: from, target: aimEach,
+    // (Beam 3: beam 2 underneath, unseen — its timing, reach, hits and clashes — and its own look drawn in its place:
+    // its blast, rings and core, Beam3Fx, below.)
+    const beam3 = spec.style === 3;
+    const handles = sources.map((from, i) => this.beams!.fire({ ...spec, style: (beam3 ? 2 : spec.style) as 1 | 2 | undefined, unseen: beam3, pace: spec.pace, height, mouth: from, target: aimEach,
       exactTarget: !!meet || !!spec.exactTarget,
       thickness: (spec.thickness ?? 1) * (muzzles ? CANNON_THICKNESS[muzzles.length] ?? 0.5 : 1),
       twin,
@@ -2430,6 +2477,12 @@ export class RecipeFactory implements UnitFactory {
     const orCancel = <T>(p: Promise<T>) => Promise.race([p, cancelP]);
     let launchedNow = () => {};
     const launched = new Promise<void>((r) => { launchedNow = r; });
+    // Beam 3's blast in it — following its first beam, gone as it lets go (or is cut off).
+    if (beam3) {
+      // (From the mouth itself — its unseen beam 2 leaves from a ball ahead of it — to that beam's front.)
+      const b3 = (this.beam3 ??= new Beam3Fx(this.scene)).attach({ origin: sources[0], end: () => handles[0].end(), launched }, { element: spec.element, palette: spec.palette, height, thickness: spec.thickness });
+      void contactEnds.then(() => b3.release());
+    }
     // A bolt off the body (Thunderbolt): its Electric aura, lightning earthing off
     // it to the ground, from the start of its charge until it lets go.
     if (auraBolt) {
@@ -2521,6 +2574,11 @@ export class RecipeFactory implements UnitFactory {
       // It pours a beat past the hit — or for as long as it is held.
       await orCancel(holdUntil ?? sleep(BEAM_HOLD));
       if (cancelled) return cutOff();
+      // (A beam 3 held for a look at it — Beam3Fx.persist: its user held in its pose, pouring, till it's let go.)
+      // (Any beam held so - holdBeams: pouring on, its user in its pose, till it's let go.)
+      const heldNow = () => this.holdBeams || (beam3 && !!this.beam3?.persist);
+      if (heldNow()) await orCancel(new Promise<void>((r) => { const w = setInterval(() => { if (!heldNow()) { clearInterval(w); r(); } }, 100); }));
+      if (cancelled) return cutOff();
       let endDur = 0.6;
       if (u && player && chain) {
         const end = this.act(u, 'beamEnd');
@@ -2576,8 +2634,8 @@ export class RecipeFactory implements UnitFactory {
     const aimAt = target ? () => this.middleOf(target) : () => targetPos;
     // (Ember: Flamethrower's starting egg, small, shot round-end first — EmberFx — sized up a little on a small one.)
     const ball = spec.ember ? throwEmber(this.beams, { element: spec.element, height, from: this.mouthOf(node), target: aimAt,
-      targetSize: () => (target ? this.heightOf(target) : point ? 0 : height), scale: Math.max(1, Math.pow(CUT_MIN_H / Math.max(height, 0.1), 0.5)) })
-    : throwBall(this.beams, { element: spec.element, colours: spec.colours, height, from: this.mouthOf(node), target: aimAt,
+      targetSize: () => (target ? this.heightOf(target) : point ? 0 : height), scale: Math.max(1, Math.pow(CUT_MIN_H / Math.max(height, 0.1), 0.5)), pace: spec.pace })
+    : throwBall(this.beams, { element: spec.element, colours: spec.colours, height, from: this.mouthOf(node), target: aimAt, pace: spec.pace,
       targetSize: () => (target ? this.heightOf(target) : point ? 0 : height),
       // No wind spiral round the feet of a unit in the air.
       feet: () => (u && this.aloft(u, 0.05) ? null : node.position),
@@ -2636,6 +2694,45 @@ export class RecipeFactory implements UnitFactory {
     return { reached: g.then((x) => x.reached), done: g.then((x) => x.done) };
   }
   private growls: GrowlFx | null = null;
+  private beam3: Beam3Fx | null = null;
+  /** Every beam held, pouring, its user in its pose, till this is turned off (for a look at it). */
+  get holdBeams(): boolean { return this._holdBeams; }
+  set holdBeams(on: boolean) { this._holdBeams = on; if (this.beams) this.beams.holding = on; }
+  private _holdBeams = false;
+
+  /**
+   * Smokescreen: a status move, sprayed in a ranged attack's pose — its beam wind-up, the pose held while the smoke
+   * pours out of its mouth (a cloud of it thrown at `to`, SmokeFx, sitting on `floor`), then let go. (No beam clips:
+   * its ranged clip.) `gathered` as the cloud has settled there; `cover()` what it covers now.
+   */
+  playSmoke(node: TransformNode, to: Vector3, floor: number): { gathered: Promise<void>; done: Promise<void>; cover: () => { at: Vector3; radius: number } } {
+    const u = this.units.get(node);
+    const H = this.heightOf(node);
+    const fx = (this.smokes ??= new SmokeFx(this.scene));
+    const player = u?.model.player;
+    const chain = !!player && ['beamStart', 'beamLoop', 'beamEnd'].every((a) => player.has(this.act(u!, a)));
+    let play: ReturnType<SmokeFx['play']> | null = null;
+    const p = (async () => {
+      if (u && player && chain) {
+        // (Wound up as for a beam, then held in its pose while it sprays.)
+        await player.play(this.act(u, 'beamStart'), { fade: 0.12 });
+        void player.play(this.act(u, 'beamLoop'), { fade: 0.06 });
+      } else if (u) await sleep(this.oneShot(u, this.act(u, 'ranged'), 0.3, 0.35));
+      const smoke = (play = fx.play({ height: H, from: this.mouthOf(node)(), to, floor }));
+      if (u && player && chain) {
+        // (Its spray over: let go, back to its idle.)
+        void sleep(SmokeFx.SPRAY * 1000).then(() => {
+          const end = this.act(u, 'beamEnd');
+          void player.play(end, { fade: 0.08 }).then(() => {
+            if (!u.down && player.active?.action === end) void player.play(this.act(u, 'idle'), { fade: 0.25 });
+          });
+        });
+      }
+      return smoke;
+    })();
+    return { gathered: p.then((x) => x.gathered), done: p.then((x) => x.done), cover: () => play?.cover() ?? { at: to, radius: 0 } };
+  }
+  private smokes: SmokeFx | null = null;
 
   /**
    * A ram's burst (as playRunInto's) — at its set-off (`launch`, behind it) or its impact (`hit`, ahead of it), facing
@@ -3073,7 +3170,8 @@ export class RecipeFactory implements UnitFactory {
     // (Normal's soft too, its streaks drifting squares.)
     const grass = element === 'Grass';
     const coat = this.wind.coat(follow, element, WIND_COAT_SHAPE, WIND_COAT_CEL && !grass && element !== 'Normal',
-      this.fx ? (mesh) => this.fx!.addOver(mesh, node) : undefined, this.fx ? (mesh) => this.fx!.addBack(mesh, node) : undefined);
+      this.fx ? (mesh) => this.fx!.addOver(mesh, node) : undefined, this.fx ? (mesh) => this.fx!.addBack(mesh, node) : undefined,
+      () => this.units.get(node) === u && !node.isDisposed());
     const leaves = grass ? this.leaves(() => sphere, node) : null;
     return {
       release: () => { void leaves?.release(); return coat.release(); },
@@ -3410,8 +3508,12 @@ export class RecipeFactory implements UnitFactory {
         await sleep(u ? this.oneShot(u, this.act(u, 'ranged'), 0.5, 0.8) : 0.4);
       }
       ball.launch();
-      await half.front;
+      // (Its front at the clash - or the clash over before its ball got there: either way, on. Waiting on a front that
+      // never came left its half of the clash's ball drawn for good.)
+      await Promise.race([half.front, holdUntil]);
       await holdUntil;
+      this.scene.onBeforeRenderObservable.remove(meets);
+      ball.vanish();
       if (loop && !u!.down) letGo();
       endContact();
       await Promise.all([half.release(0.5), flyOn.then((p) => p)]);

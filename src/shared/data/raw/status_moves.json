@@ -2,7 +2,7 @@
   "_meta": {
     "version": 1,
     "description": "Status, buff, debuff, and utility moves for Hex Battle Simulator. All moves have base_power 0. Effects are applied by the TurnEngine at resolution. Status moves count toward the terrain compulsion rule only if they are terrain moves — pure status moves do not satisfy the terrain requirement.",
-    "move_count": 10
+    "move_count": 11
   },
   "moves": {
     "Calm Mind": {
@@ -224,6 +224,30 @@
       "duration_turns": 0,
       "range": 3,
       "description": "The user growls in an endearing way, making the foes in front of it less wary. Lowers their Attack by 1 stage."
+    },
+    "Smokescreen": {
+      "category": "status",
+      "base_power": 0,
+      "move_type": "Normal",
+      "is_ranged": true,
+      "requires_los": true,
+      "bypasses_los": false,
+      "aoe_radius": 0,
+      "always_hits": true,
+      "needs_momentum": false,
+      "quick_priority": false,
+      "target": "opponent",
+      "effect_type": "stat_drop",
+      "stat_changes": [
+        [
+          "accuracy",
+          -1
+        ]
+      ],
+      "status_applied": null,
+      "duration_turns": 0,
+      "range": 3,
+      "description": "The user releases an obscuring cloud of smoke or ink. Lowers the accuracy of foes it covers by 1 stage."
     }
   }
 }

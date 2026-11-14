@@ -68,6 +68,7 @@ import type { BeamSpec } from '../vfx/beam/beamMoves.ts';
 import { getMove, getTypeEffectiveness, MoveCategory } from '../../shared/index.ts';
 import { ballFor, type BallSpec } from '../vfx/beam/ballMoves.ts';
 import { clawFor } from '../vfx/slashMoves.ts';
+import { moveAccuracy } from './moveAccuracy.ts';
 import { QUICK_COATED, isPunch, coatOf } from '../vfx/moveCoats.ts';
 import { canDoubleJump } from '../../shared/data/weights.ts';
 
@@ -245,7 +246,7 @@ const COUNTER_DOUBLE = 2;
  *   its abuse:  1 + ABUSE_STEP × its heat — each use of it adds 1 heat, halving every ABUSE_HALF s.
  */
 const SLOT_COOL = { ranged: 1.2, close: 0.45, mobility: 0.5, control: 2.5 } as const;
-const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 9, 'Dash': 0.5, 'Back Dash': 0.5, 'Teleport': 7,
+const BASE_COOL: Record<string, number> = { 'Quick Attack': 0.4, 'Agility': 9, 'Dash': 1.5, 'Back Dash': 1.5, 'Teleport': 7,
   // (The braces turn back the blow that comes — their strength the incoming move's — so they cool longer, and gone off,
   // by the power of the move they turned back: cooldownFor.)
   'Sucker Punch': 5, 'Counter': 5, 'Detect': 5,
@@ -318,6 +319,8 @@ const stageMult = (n: number) => (n >= 0 ? (2 + n) / 2 : 2 / (2 - n));
 const STAGE_LIFE = 20;
 /** Growl: how far its cry carries (× its height), how far above or below its line a foe may be and still hear it (× its height). */
 const GROWL_REACH = 6, GROWL_UP = 1.6;
+/** Smokescreen: how far it's thrown at most (× its height). */
+const SMOKE_REACH = 6;
 /** A slash's look, by move (unlisted: the full crescent): Scratch the same cut, thinner and shorter — out in front of
  *  the body, facing what it strikes. */
 const SLASH_LOOK: Record<string, { width: number; arc: number; push?: number }> = { Scratch: { width: 0.55, arc: 0.7, push: 0.75 } };
@@ -347,7 +350,7 @@ export function beamFor(move: string | null | undefined): BeamSpec | null {
   if (own || !move || lightningFor(move)?.kind !== 'bolt') return own;
   return { element: getMove(move)?.moveType ?? 'Electric', bolt: true, eggless: true };
 }
-export function beamReach(spec: BeamSpec): number { return spec.range ?? (spec.style === 2 ? BEAM2_REACH : BEAM_REACH); }
+export function beamReach(spec: BeamSpec): number { return spec.range ?? ((spec.style ?? 1) >= 2 ? BEAM2_REACH : BEAM_REACH); }
 const FOE_NEAR = 0.3;
 /** A beam move not in the move table: its type (for a clash's type effectiveness), from its look. */
 const BEAM_TYPES: Record<string, string> = {};
@@ -365,7 +368,9 @@ export const LEVEL = 100, IV = 31, EV_TOTAL = 510, EV_MAX = 252, EV_EVEN = 85;
 export interface Evs { hp: number; atk: number; def: number; spa: number; spd: number; spe: number }
 export const EVEN_EVS: Evs = { hp: EV_EVEN, atk: EV_EVEN, def: EV_EVEN, spa: EV_EVEN, spd: EV_EVEN, spe: EV_EVEN };
 /** A real stat from its base and its EVs at LEVEL: HP's, and the others'. */
-export const hpStat = (base: number, ev = EV_EVEN, level = LEVEL) => Math.floor(((2 * base + IV + Math.floor(ev / 4)) * level) / 100) + level + 10;
+/** Every Pokémon's HP × this: the main series' figure ten times over, so battles last longer. */
+export const HP_SCALE = 10;
+export const hpStat = (base: number, ev = EV_EVEN, level = LEVEL) => (Math.floor(((2 * base + IV + Math.floor(ev / 4)) * level) / 100) + level + 10) * HP_SCALE;
 export const realStat = (base: number, ev = EV_EVEN, level = LEVEL) => Math.floor(((2 * base + IV + Math.floor(ev / 4)) * level) / 100) + 5;
 /** A move's power scales with its user's Attack (physical) or Special Attack (special), against this (a stat of 100: × 1). */
 const STAT_REF = 100;
@@ -423,6 +428,8 @@ interface Firing { id: number; play: BeamPlay; move: string; spec: BeamSpec; at:
   launchedAt: number; pouring: boolean; struck: Set<Fighter>;
   /** Where its end is (the very point the beam pours to — moved, it follows), and how far it reaches at most (to the foe it was fired at, or its range). */
   end: Vector3; reach: number;
+  /** How fast it travels (its user's accuracy as it fired - a dexterity): its front out over FRONT_TIME / pace. */
+  pace: number;
   /** Its front on a foe now (a beam 2 forms its end ball only then). */
   connected: boolean;
   /** Who it is on now (its front on that one), none while it strikes nothing. */
@@ -508,6 +515,34 @@ export class Fighter {
   private agilityUntil = -1; private dashK = -1;
   /** Its Attack stage (−6 … +6: Growl's −1 a time) and when it wears off (its clock; STAGE_LIFE s after the last change). */
   attackStage = 0; private stageUntil = -1;
+  /**
+   * Its accuracy stage (Smokescreen's −1 a time) — a dexterity: how fast its moves travel from where they start to where
+   * they end (pace: the main series' accuracy stages, +n → (3 + n) / 3, −n → 3 / (3 + n)). Worn off as its Attack's.
+   */
+  accuracyStage = 0; private accUntil = -1;
+  /** Its Speed stage: its cooldowns, with its Speed stat (cooldownFor) - its Speed × the stage's multiplier. */
+  speedStage = 0; private speUntil = -1;
+  /** Its evasion stage: its base movement speed (running, flying - the same for every Pokémon, else) × (3 + n) / 3 raised,
+   *  3 / (3 + n) lowered. */
+  evasionStage = 0; private evaUntil = -1;
+  /** Its Speed or evasion raised or lowered `by` stages: capped at ±6, worn off STAGE_LIFE s from now. Returns the change made. */
+  shiftSpeed(by: number): number { const was = this.speedStage; this.speedStage = Math.max(-6, Math.min(6, was + by)); this.speUntil = this.time + STAGE_LIFE; return this.speedStage - was; }
+  shiftEvasion(by: number): number { const was = this.evasionStage; this.evasionStage = Math.max(-6, Math.min(6, was + by)); this.evaUntil = this.time + STAGE_LIFE; return this.evasionStage - was; }
+  /** Its base movement speed now, × the same for all (its evasion stage: 1 at none). */
+  get stride(): number { const n = this.evasionStage; return n >= 0 ? (3 + n) / 3 : 3 / (3 - n); }
+  /** How fast its moves travel now (its accuracy stage: 1 at none). */
+  get pace(): number { const n = this.accuracyStage; return n >= 0 ? (3 + n) / 3 : 3 / (3 - n); }
+  /** How fast `move` travels from it now: the move's own accuracy (Fire Blast's 85%: 0.85) × its accuracy stage's pace. */
+  paceOf(move: string): number { return moveAccuracy(move) * this.pace; }
+  /** Its accuracy lowered (or raised) `by` stages: capped at ±6, worn off STAGE_LIFE s from now. Returns the change made. */
+  shiftAccuracy(by: number): number {
+    const was = this.accuracyStage;
+    this.accuracyStage = Math.max(-6, Math.min(6, this.accuracyStage + by));
+    this.accUntil = this.time + STAGE_LIFE;
+    return this.accuracyStage - was;
+  }
+  /** Its smoke clouds hanging (Smokescreen): each foe that comes into one has its accuracy lowered, once a cloud. */
+  private clouds: { cover: () => { at: Vector3; radius: number }; caught: Set<Fighter>; on: boolean }[] = [];
   /** Its Attack lowered (or raised) `by` stages: capped at ±6, worn off STAGE_LIFE s from now. Returns the change made. */
   shiftAttack(by: number): number {
     const was = this.attackStage;
@@ -598,7 +633,8 @@ export class Fighter {
     const slot = (Object.keys(SLOT_COOL) as (keyof typeof SLOT_COOL)[]).find((k) => this.moves[k] === move);
     const base = BASE_COOL[move] ?? (slot ? SLOT_COOL[slot] : SLOT_COOL.mobility);
     const clamp = (v: number, [lo, hi]: [number, number]) => Math.max(lo, Math.min(hi, v));
-    const speedK = clamp(Math.sqrt(STAT_REF / Math.max(1, this.speed)), SPEED_K);
+    // (Its Speed stat - and its Speed stage on it - sets how long its moves take to cool: faster, sooner.)
+    const speedK = clamp(Math.sqrt(STAT_REF / Math.max(1, this.speed * stageMult(this.speedStage))), SPEED_K);
     // (A brace gone off: by the power of the move it turned back.)
     const bp = getMove(BRACES.has(move) && this.braceAgainst ? this.braceAgainst : move)?.basePower ?? 0;
     const powerK = bp > 0 ? clamp(Math.sqrt(bp / POWER_REF), POWER_K) : 1;
@@ -686,6 +722,11 @@ export class Fighter {
     this.arenaRef = arena;
     // (A stat stage worn off.)
     if (this.attackStage !== 0 && this.time >= this.stageUntil) { this.attackStage = 0; arena.onStatus?.(this, 'Attack back to normal', 0); }
+    if (this.accuracyStage !== 0 && this.time >= this.accUntil) { this.accuracyStage = 0; arena.onStatus?.(this, 'accuracy back to normal', 0); }
+    if (this.speedStage !== 0 && this.time >= this.speUntil) { this.speedStage = 0; arena.onStatus?.(this, 'Speed back to normal', 0); }
+    if (this.evasionStage !== 0 && this.time >= this.evaUntil) { this.evasionStage = 0; arena.onStatus?.(this, 'evasiveness back to normal', 0); }
+    // (Its smoke clouds: a foe in one, not caught by it yet, has its accuracy lowered.)
+    for (const c of this.clouds) if (c.on) this.smokeOver(c, arena);
     // Braced, and nothing came: open a moment.
     if (this.countering && this.time > this.counterUntil) {
       this.counterUntil = -1; this.end(); this.lagUntil = this.time + COUNTER_WHIFF; this.finishRun(this.braceK);
@@ -714,6 +755,7 @@ export class Fighter {
       else if (it.close && this.ready(this.moves.close)) this.slash(arena);
       else if (it.mobility && isQuickStrike(this.moves.mobility)) this.quickAttack(arena, this.moves.mobility!);
       else if (it.control && this.moves.control === 'Growl' && this.ready('Growl')) this.growl(arena);
+      else if (it.control && this.moves.control === 'Smokescreen' && this.ready('Smokescreen')) this.smokescreen(arena);
       else if (it.control && BRACES.has(this.moves.control ?? '') && this.ready(this.moves.control)) this.brace();
       else if (it.mobility && this.moves.mobility === 'Dash') this.dash();
       else if (it.mobility && this.moves.mobility && BEHIND_STRIKES[this.moves.mobility]) this.strikeFromBehind(arena, this.moves.mobility);
@@ -748,19 +790,19 @@ export class Fighter {
       this.vx = this.facing * DASH_SPEED; this.vy = 0;
       this.ghostT -= dt;
       if (this.ghostT <= 0) { this.factory.afterimage(this.node, DASH_GHOST); this.ghostT = DASH_GHOST_EVERY; }
-      if (this.dashT <= 0) { this.vx = this.facing * (this.flying ? FLY_SPEED : RUN_SPEED) * (want ? 1 : 0.3); this.finishRun(this.dashK); }
+      if (this.dashT <= 0) { this.vx = this.facing * (this.flying ? FLY_SPEED : RUN_SPEED) * this.stride * (want ? 1 : 0.3); this.finishRun(this.dashK); }
     } else if (this.flying) {
       const ease = (v: number, to: number, a: number) => v + Math.max(-a * dt, Math.min(a * dt, to - v));
-      this.vx = ease(this.vx, want * FLY_SPEED, AIR_ACCEL);
+      this.vx = ease(this.vx, want * FLY_SPEED * this.stride, AIR_ACCEL);
       this.vy = ease(this.vy, this.jumpHeld ? FLY_RISE : it.sink ? -FLY_SINK : -FLY_GLIDE, FLY_ACCEL);
       // (No higher than FLY_CAP over its nearest foe: held there — above it, eased back down to it.)
       const cap = this.flyCap(arena);
       if (this.y >= cap) this.vy = Math.min(this.vy, (cap - this.y) * 4);
     } else {
       const accel = this.grounded ? RUN_ACCEL : AIR_ACCEL;
-      this.vx += Math.max(-accel * dt, Math.min(accel * dt, want * RUN_SPEED - this.vx));
+      this.vx += Math.max(-accel * dt, Math.min(accel * dt, want * RUN_SPEED * this.stride - this.vx));
       // (Stepping away from one it can't yet turn its back on: at once at full pace, so it turns as soon as it can.)
-      if (want && want !== this.facing) this.vx = want * Math.max(Math.abs(this.vx), RUN_SPEED);
+      if (want && want !== this.facing) this.vx = want * Math.max(Math.abs(this.vx), RUN_SPEED * this.stride);
       // Its second jump, pressed in the air (past its grace off a ledge): a flier takes off — once it may again (out
       // of the sky, not for FLY_RELOCK s after it lands); else a light one jumps again, once till it lands.
       if (!this.grounded && this.sinceGround > COYOTE && this.sinceJumpPress <= dt + 1e-6) {
@@ -975,9 +1017,11 @@ export class Fighter {
     // (Its outline kept above the arena's floor — not the height it stands at: fired down off a platform or from the air,
     // it goes down with its core.)
     const floored: BeamSpec = { ...spec, groundY: 0 };
+    // (Its pace: the move's own accuracy, by its user's accuracy stage — slower lowered, faster raised.)
+    floored.pace = this.paceOf(name);
     const play = this.factory.playBeam(this.node, null, at, spec.bolt ? { ...floored, onto: () => (conn.on && conn.onto && !conn.onto.down ? conn.onto.node : null) }
-      : spec.style === 2 ? { ...floored, endBall: () => conn.on } : floored);
-    const mine: Firing = { id: ++beamIds, play, move: name, spec, at: ahead, pressedAt: this.time, launched: false, from, dir,
+      : (spec.style ?? 1) >= 2 ? { ...floored, endBall: () => conn.on } : floored);
+    const mine: Firing = { id: ++beamIds, play, move: name, spec, at: ahead, pressedAt: this.time, launched: false, from, dir, pace: this.paceOf(name),
       range: hit ? hit.d + 0.3 : wall ?? range, launchedAt: Infinity, pouring: true, struck: new Set(), end: at, reach: Math.max(1, range),
       get connected() { return conn.on; }, set connected(v: boolean) { conn.on = v; },
       get onto() { return conn.onto; }, set onto(v: Fighter | null) { conn.onto = v; } };
@@ -1211,11 +1255,11 @@ export class Fighter {
     // past it struck.)
     const wall = Fighter.nearer(Fighter.pillarAlong(arena, b.from, b.dir, b.reach), Fighter.groundAlong(arena, b.from, b.dir, b.reach));
     const full = wall === null ? b.reach : Math.min(b.reach, wall);
-    const k = Math.min(1, Math.max(0, (this.time - b.launchedAt) / FRONT_TIME));
+    const k = Math.min(1, Math.max(0, (this.time - b.launchedAt) / (FRONT_TIME / b.pace)));
     const reach = Math.min(full, b.range * (1 - (1 - k) * (1 - k) * (1 - k)));
     if (reach < 0.2) return;
     // (A foe braced to counter in its line: set off just before the front reaches it — the beam never lands.)
-    const ka = Math.min(1, Math.max(0, (this.time + COUNTER_SENSE - b.launchedAt) / FRONT_TIME));
+    const ka = Math.min(1, Math.max(0, (this.time + COUNTER_SENSE - b.launchedAt) / (FRONT_TIME / b.pace)));
     const reachSoon = b.range * (1 - (1 - ka) * (1 - ka) * (1 - ka));
     for (const f of this.foes(arena)) {
       if (!f.countering || f.down || f.invulnerable || b.struck.has(f) || !f.setsOff(b.move)) continue;
@@ -1322,7 +1366,7 @@ export class Fighter {
     this.clashing = meter(ms, -1);
     // (Every bolt — Thunderbolt off the body, Ice Beam, Psybeam — clashes on beam 2's clash ball, the one made for them,
     // never beam 1's.)
-    const onBall = (s: BeamSpec): BeamSpec => ({ ...(s.bolt && s.style !== 2 ? { ...s, style: 2 as const } : s), groundY: 0 });
+    const onBall = (s: BeamSpec): BeamSpec => ({ ...(s.bolt && (s.style ?? 1) < 2 ? { ...s, style: 2 as const } : s), groundY: 0 });
     const play = this.factory.playClash(rival.node, this.node, onBall(theirs.spec), onBall(spec), null, 0, undefined, fromRival, struggle);
     for (const f of [this, rival]) { f.firing = true; f.using = f === this ? name : theirs.move; f.usingSince = f.time; }
     this.beam = null; rival.beam = null;
@@ -1698,6 +1742,38 @@ export class Fighter {
 
   /** Agility: its boost — AGILITY_TIME s of zippy dashes — a flash as it takes hold; its cooldown from now. */
   /**
+   * Smokescreen: a cloud of smoke thrown at its nearest foe ahead in reach (none: SMOKE_REACH ahead) — every foe it
+   * covers as it settles, and any that comes into it while it hangs, has its accuracy lowered a stage (once a cloud).
+   */
+  private smokescreen(arena: Arena): void {
+    this.face(this.facing, true);
+    this.begin('Smokescreen');
+    const k = this.startRun('Smokescreen');
+    const dir = this.facing, reach = SMOKE_REACH * this.H;
+    const foe = this.foes(arena).filter((f) => !f.down && Math.sign(f.x - this.x) === dir && Math.abs(f.x - this.x) <= reach && Math.abs(f.y - this.y) < 2 * this.H)
+      .sort((a, b) => Math.abs(a.x - this.x) - Math.abs(b.x - this.x))[0];
+    const to = foe ? new Vector3(foe.x, foe.y + foe.H * 0.4, 0) : new Vector3(this.x + dir * reach * 0.7, this.y + this.H * 0.4, 0);
+    const play = this.factory.playSmoke(this.node, to, this.floorBelow(arena));
+    const cloud = { cover: play.cover, caught: new Set<Fighter>(), on: false };
+    this.clouds.push(cloud);
+    void play.gathered.then(() => { cloud.on = true; this.smokeOver(cloud, arena); this.finishRun(k); this.end(); });
+    void play.done.then(() => { this.clouds = this.clouds.filter((c) => c !== cloud); });
+  }
+
+  /** A smoke cloud's foes: each in it now, not caught by it yet, has its accuracy lowered. */
+  private smokeOver(cloud: { cover: () => { at: Vector3; radius: number }; caught: Set<Fighter> }, arena: Arena): void {
+    const { at, radius } = cloud.cover();
+    if (radius <= 0) return;
+    for (const f of this.foes(arena)) {
+      if (f.down || cloud.caught.has(f)) continue;
+      if (Math.hypot(f.x - at.x, f.y + f.H / 2 - at.y) > radius + f.W / 2) continue;
+      cloud.caught.add(f);
+      const fell = f.shiftAccuracy(-1);
+      arena.onStatus?.(f, fell ? 'accuracy fell' : "accuracy won't go any lower", STAGE_LIFE);
+    }
+  }
+
+  /**
    * Growl: a cry, sent out ahead (Earthquake's ripple through the air, GrowlFx) — every foe in front of it within
    * GROWL_REACH, not far above or below its line, has its Attack lowered a stage as the ripple reaches it. No damage;
    * it never misses; nothing blocks it.
@@ -1848,7 +1924,7 @@ export class Fighter {
     this.lineGaze = Math.atan2(dir[1], Math.abs(dir[0]));
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
     const k = this.startRun(name);
-    const play = this.factory.playBall(this.node, homing?.node ?? null, end, spec, { point: !homing });
+    const play = this.factory.playBall(this.node, homing?.node ?? null, end, { ...spec, pace: this.paceOf(name) }, { point: !homing });
     const t: Thrown = { play, move: name, homing, launched: false, done: false, passed: new Set(), from, dir, pressedAt: this.time, spec: clashSpec };
     this.balls.push(t);
     void play.launched?.then(() => {

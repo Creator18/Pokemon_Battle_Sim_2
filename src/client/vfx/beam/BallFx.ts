@@ -123,6 +123,8 @@ void main(void) {
 }`;
 
 export interface BallShot {
+  /** How fast it flies (1 as ever; its user's accuracy - a dexterity): its flight takes 1 / pace as long. */
+  pace?: number;
   element: string;
   /** Its own colours (ballMoves), over the type's. */
   colours?: BallColours;
@@ -230,6 +232,7 @@ class Orb implements BallHandle {
   private finished = false;
 
   constructor(private readonly fx: BeamFx, private readonly shot: BallShot) {
+    fx.live.add({ kill: () => this.finish() });
     const scene = fx.scene, H = shot.height;
     const col = coloursFor(shot.element);
     this.hit = new Promise((r) => { this.resolveHit = r; });
@@ -358,7 +361,7 @@ class Orb implements BallHandle {
     this.launchT = this.time;
     this.start.copyFrom(this.at);
     const end = this.aimPoint(this.start);
-    this.flyDur = Math.min(ORB_MAX_FLY, Math.max(ORB_MIN_FLY, Vector3.Distance(this.start, end) / (ORB_SPEED * this.shot.height)));
+    this.flyDur = Math.min(ORB_MAX_FLY, Math.max(ORB_MIN_FLY, Vector3.Distance(this.start, end) / (ORB_SPEED * this.shot.height))) / Math.max(0.1, this.shot.pace ?? 1);
     this.fx.options.shake?.(0.12, 200);
   }
 

@@ -24,6 +24,8 @@ export interface BallSpec {
   burst?: 'fire';
   /** Not a ball at all: Flamethrower's starting egg, small, shot round-end first (EmberFx) — quick to throw. */
   ember?: boolean;
+  /** How fast it flies (its user's accuracy - a dexterity; set by the fighter as it throws). */
+  pace?: number;
 }
 
 export const BALL_MOVES: Record<string, BallSpec> = {

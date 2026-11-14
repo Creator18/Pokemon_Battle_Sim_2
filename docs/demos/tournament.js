@@ -68,11 +68,13 @@
     const ranged = pick(PORT.ball, types, n) ?? types.map((t) => RANGED[t]).find(Boolean) ?? 'Tri Attack';
     const close = pick(PORT.close, types, n) ?? 'Slash';
     // (Its guard: Detect, Counter or Sucker Punch in turn — a brace counts as its one mobility move.)
-    const control = ['Detect', 'Counter', 'Sucker Punch'][n % 3];
+    // (Its guard - or its status move: Growl, Smokescreen - in turn. A brace counts as its one mobility move; Detect and
+    // the status moves leave room for one.)
+    const control = ['Detect', 'Counter', 'Sucker Punch', 'Growl', 'Smokescreen'][n % 5];
     const kit = { ranged, close, control };
-    if (control === 'Detect') kit.mobility = pick(PORT.mobility, types, n) ?? 'Quick Attack';
+    if (!['Counter', 'Sucker Punch'].includes(control)) kit.mobility = pick(PORT.mobility, types, n) ?? 'Quick Attack';
     // (Any move the data lacks: told, not played blind.)
-    for (const [slot, m] of Object.entries(kit)) if (!S.getMove(m) && !['Detect', 'Teleport', 'Agility'].includes(m)) kit[slot] = { ranged: 'Tri Attack', close: 'Slash', mobility: 'Quick Attack', control: 'Detect' }[slot];
+    for (const [slot, m] of Object.entries(kit)) if (!S.getMove(m) && !['Detect', 'Teleport', 'Agility', 'Growl', 'Smokescreen'].includes(m)) kit[slot] = { ranged: 'Tri Attack', close: 'Slash', mobility: 'Quick Attack', control: 'Detect' }[slot];
     return kit;
   };
   const state = { running: false, tournament: 0, battle: 0, total: 0, done: 0, startedAt: 0, error: null };

@@ -53,6 +53,8 @@ export interface EmberShot {
   targetSize?(): number;
   /** Its size, × the usual. */
   scale?: number;
+  /** How fast it flies (1 as ever; its user's accuracy - a dexterity). */
+  pace?: number;
 }
 
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
@@ -118,6 +120,7 @@ export function throwEmber(fx: BeamFx, shot: EmberShot): BallHandle {
   const finish = () => {
     if (finished) return;
     finished = true;
+    fx.live.delete(life);
     resolveHit();
     scene.onBeforeRenderObservable.remove(tick);
     fx.light.intensity = 0;
@@ -138,6 +141,9 @@ export function throwEmber(fx: BeamFx, shot: EmberShot): BallHandle {
     fx.options.shake?.(0.08, 140);
   };
 
+  // (Gone at once if its fight ends under it: BeamFx.killAll.)
+  const life = { kill: () => finish() };
+  fx.live.add(life);
   const tick: Observer<Scene> = scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(0.1, scene.getEngine().getDeltaTime() / 1000);
     time += dt;
@@ -235,7 +241,7 @@ export function throwEmber(fx: BeamFx, shot: EmberShot): BallHandle {
       flyT = 0;
       launchSize = Math.max(size0(), 0.05);
       start.copyFrom(at);
-      flyDur = Math.min(MAX_FLY, Math.max(MIN_FLY, Vector3.Distance(start, aimPoint(start)) / (SPEED * H)));
+      flyDur = Math.min(MAX_FLY, Math.max(MIN_FLY, Vector3.Distance(start, aimPoint(start)) / (SPEED * H))) / Math.max(0.1, shot.pace ?? 1);
     },
     position: () => at.clone(),
     vanish: finish,

@@ -1,0 +1,4123 @@
+{
+ "savedAt": "2026-11-13",
+ "settings": {
+  "bots": 10,
+  "battles": 45,
+  "kits": "port",
+  "limitS": 240,
+  "speed": 3
+ },
+ "summary": {
+  "battles": 45,
+  "errors": 0,
+  "ko": 36,
+  "timeouts": 9,
+  "avgLength": 93.6,
+  "agents": {
+   "Berserker": {
+    "w": 5,
+    "l": 4,
+    "d": 0,
+    "ko": 5,
+    "time": 769.5,
+    "n": 9
+   },
+   "Turtle": {
+    "w": 1,
+    "l": 8,
+    "d": 0,
+    "ko": 1,
+    "time": 625.5,
+    "n": 9
+   },
+   "Sniper": {
+    "w": 5,
+    "l": 4,
+    "d": 0,
+    "ko": 5,
+    "time": 899.2,
+    "n": 9
+   },
+   "Balanced": {
+    "w": 6,
+    "l": 2,
+    "d": 1,
+    "ko": 6,
+    "time": 818.8000000000001,
+    "n": 9
+   },
+   "Counterpuncher": {
+    "w": 6,
+    "l": 3,
+    "d": 0,
+    "ko": 5,
+    "time": 1002.9,
+    "n": 9
+   },
+   "Reckless": {
+    "w": 3,
+    "l": 6,
+    "d": 0,
+    "ko": 3,
+    "time": 768.1,
+    "n": 9
+   },
+   "Jumper": {
+    "w": 4,
+    "l": 5,
+    "d": 0,
+    "ko": 4,
+    "time": 902.6,
+    "n": 9
+   },
+   "Slowpoke": {
+    "w": 5,
+    "l": 4,
+    "d": 0,
+    "ko": 4,
+    "time": 885.4,
+    "n": 9
+   },
+   "Quickdraw": {
+    "w": 1,
+    "l": 8,
+    "d": 0,
+    "ko": 1,
+    "time": 730.1999999999999,
+    "n": 9
+   },
+   "Clash King": {
+    "w": 8,
+    "l": 0,
+    "d": 1,
+    "ko": 2,
+    "time": 1026.2,
+    "n": 9
+   }
+  },
+  "species": {
+   "Charizard": {
+    "w": 5,
+    "l": 4,
+    "d": 0,
+    "ko": 0,
+    "time": 769.5,
+    "n": 9
+   },
+   "Pikachu": {
+    "w": 1,
+    "l": 8,
+    "d": 0,
+    "ko": 0,
+    "time": 625.5,
+    "n": 9
+   },
+   "Zeraora": {
+    "w": 5,
+    "l": 4,
+    "d": 0,
+    "ko": 0,
+    "time": 899.2,
+    "n": 9
+   },
+   "Glaceon": {
+    "w": 6,
+    "l": 2,
+    "d": 1,
+    "ko": 0,
+    "time": 818.8000000000001,
+    "n": 9
+   },
+   "Garchomp": {
+    "w": 6,
+    "l": 3,
+    "d": 0,
+    "ko": 0,
+    "time": 1002.9,
+    "n": 9
+   },
+   "Gengar": {
+    "w": 3,
+    "l": 6,
+    "d": 0,
+    "ko": 0,
+    "time": 768.1,
+    "n": 9
+   },
+   "Lucario": {
+    "w": 4,
+    "l": 5,
+    "d": 0,
+    "ko": 0,
+    "time": 902.6,
+    "n": 9
+   },
+   "Dragonite": {
+    "w": 5,
+    "l": 4,
+    "d": 0,
+    "ko": 0,
+    "time": 885.4,
+    "n": 9
+   },
+   "Scyther": {
+    "w": 1,
+    "l": 8,
+    "d": 0,
+    "ko": 0,
+    "time": 730.1999999999999,
+    "n": 9
+   },
+   "Chandelure": {
+    "w": 8,
+    "l": 0,
+    "d": 1,
+    "ko": 0,
+    "time": 1026.2,
+    "n": 9
+   }
+  },
+  "moves": {
+   "Fire Blast": {
+    "hits": 74,
+    "dmg": 14433
+   },
+   "Flare Blitz": {
+    "hits": 79,
+    "dmg": 9013
+   },
+   "Flare Blitz recoil": {
+    "hits": 79,
+    "dmg": 2969
+   },
+   "Wild Charge": {
+    "hits": 27,
+    "dmg": 1928
+   },
+   "Wild Charge recoil": {
+    "hits": 26,
+    "dmg": 483
+   },
+   "Thunderbolt": {
+    "hits": 145,
+    "dmg": 17672
+   },
+   "Volt Tackle": {
+    "hits": 56,
+    "dmg": 9087
+   },
+   "Volt Tackle recoil": {
+    "hits": 52,
+    "dmg": 3033
+   },
+   "Ice Shard": {
+    "hits": 32,
+    "dmg": 1619
+   },
+   "Ice Fang": {
+    "hits": 92,
+    "dmg": 2289
+   },
+   "Ice Beam": {
+    "hits": 86,
+    "dmg": 17934
+   },
+   "Dragon Pulse": {
+    "hits": 73,
+    "dmg": 7338
+   },
+   "Dragon Rush": {
+    "hits": 208,
+    "dmg": 29794
+   },
+   "Quick Attack": {
+    "hits": 18,
+    "dmg": 439
+   },
+   "Shadow Ball": {
+    "hits": 161,
+    "dmg": 29003
+   },
+   "Shadow Claw": {
+    "hits": 115,
+    "dmg": 8053
+   },
+   "Close Combat": {
+    "hits": 130,
+    "dmg": 2425
+   },
+   "Aura Sphere": {
+    "hits": 88,
+    "dmg": 11485
+   },
+   "Aeroblast": {
+    "hits": 108,
+    "dmg": 12097
+   },
+   "First Impression": {
+    "hits": 28,
+    "dmg": 2420
+   },
+   "X-Scissor": {
+    "hits": 20,
+    "dmg": 1884
+   }
+  },
+  "flags": {
+   "blow landed for 25 s": 8,
+   "beam meshes left shown": 12,
+   "busy > 5 s": 3
+  }
+ },
+ "choiceTotals": {
+  "ranged: Fire Blast": 109,
+  "strike": 2296,
+  "close in": 1258,
+  "control: Detect": 54,
+  "close: Flare Blitz": 140,
+  "dodge: jump": 312,
+  "dodge: rise": 215,
+  "sink to foe": 160,
+  "ranged: Thunderbolt": 279,
+  "wait out the sucker punch": 25,
+  "dash in": 57,
+  "watch": 62,
+  "dodge: back dash": 386,
+  "close: Wild Charge": 47,
+  "close: Volt Tackle": 83,
+  "ranged: Ice Beam": 145,
+  "mobility: Ice Shard in": 38,
+  "control: Growl": 68,
+  "back off": 127,
+  "close: Ice Fang": 46,
+  "ranged: Dragon Pulse": 125,
+  "close: Dragon Rush": 287,
+  "control: Smokescreen": 87,
+  "chase up": 14,
+  "mobility: Quick Attack in": 21,
+  "ranged: Shadow Ball": 282,
+  "close: Shadow Claw": 165,
+  "ranged: Aura Sphere": 154,
+  "close: Close Combat": 53,
+  "retreat: back dash": 9,
+  "ranged: Aeroblast": 260,
+  "mobility: First Impression in": 32,
+  "close: X-Scissor": 32,
+  "dodge: jump the Shadow Ball": 2,
+  "dodge: jump the Aeroblast": 4
+ },
+ "statusTotals": {
+  "Attack fell": 68,
+  "Attack back to normal": 28,
+  "accuracy fell": 86,
+  "accuracy back to normal": 46
+ },
+ "watchers": {
+  "visFixes": [],
+  "invisible": [],
+  "translucent": [],
+  "strays": [
+   {
+    "t": 156.7,
+    "who": "Chandelure (you) v Glaceon (boss)",
+    "names": [
+     "tornado"
+    ]
+   },
+   {
+    "t": 28,
+    "who": "Lucario (you) v Gengar (boss)",
+    "names": [
+     "tornado"
+    ]
+   }
+  ],
+  "afterTour": "8 tornado aura coats (16 meshes) still drawn in the idle arena - leak"
+ },
+ "battles": [
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 46.3,
+   "hp": {
+    "a": 0.62,
+    "b": 0
+   },
+   "hits": {
+    "A:Fire Blast": [
+     5,
+     1251
+    ],
+    "A:Flare Blitz": [
+     6,
+     1184
+    ],
+    "A:Flare Blitz recoil": [
+     6,
+     392
+    ],
+    "B:Wild Charge": [
+     2,
+     328
+    ],
+    "B:Wild Charge recoil": [
+     2,
+     82
+    ],
+    "B:Thunderbolt": [
+     4,
+     486
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Fire Blast": 5,
+     "strike": 14,
+     "close in": 4,
+     "control: Detect": 3,
+     "close: Flare Blitz": 9,
+     "dodge: jump": 1,
+     "dodge: rise": 1,
+     "sink to foe": 4
+    },
+    "b": {
+     "ranged: Thunderbolt": 9,
+     "strike": 11,
+     "close in": 9,
+     "wait out the sucker punch": 1,
+     "dash in": 1,
+     "watch": 4,
+     "dodge: back dash": 5,
+     "dodge: jump": 3,
+     "dodge: rise": 2,
+     "close: Wild Charge": 2
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 86.7,
+   "hp": {
+    "a": 0,
+    "b": 0
+   },
+   "hits": {
+    "B:Fire Blast": [
+     9,
+     2088
+    ],
+    "A:Thunderbolt": [
+     7,
+     1584
+    ],
+    "B:Flare Blitz": [
+     6,
+     817
+    ],
+    "B:Flare Blitz recoil": [
+     6,
+     271
+    ],
+    "A:Volt Tackle": [
+     4,
+     1395
+    ],
+    "A:Volt Tackle recoil": [
+     4,
+     465
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 16,
+     "strike": 25,
+     "close in": 5,
+     "dodge: jump": 2,
+     "dodge: rise": 1,
+     "dodge: back dash": 3,
+     "close: Volt Tackle": 9,
+     "wait out the sucker punch": 1
+    },
+    "b": {
+     "ranged: Fire Blast": 11,
+     "strike": 25,
+     "close in": 9,
+     "control: Detect": 5,
+     "close: Flare Blitz": 14,
+     "dodge: jump": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 47.4,
+   "hp": {
+    "a": 0.81,
+    "b": 0
+   },
+   "hits": {
+    "A:Fire Blast": [
+     6,
+     2069
+    ],
+    "A:Flare Blitz": [
+     7,
+     932
+    ],
+    "A:Flare Blitz recoil": [
+     7,
+     308
+    ],
+    "B:Ice Shard": [
+     4,
+     176
+    ],
+    "B:Ice Fang": [
+     2,
+     36
+    ],
+    "B:Ice Beam": [
+     1,
+     80
+    ]
+   },
+   "statuses": [
+    "12.01 A Attack fell",
+    "23.45 A Attack fell",
+    "43.49 A Attack back to normal"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Fire Blast": 8,
+     "strike": 17,
+     "close: Flare Blitz": 9,
+     "control: Detect": 2
+    },
+    "b": {
+     "close in": 10,
+     "dash in": 2,
+     "dodge: jump": 4,
+     "ranged: Ice Beam": 9,
+     "strike": 15,
+     "dodge: back dash": 2,
+     "mobility: Ice Shard in": 5,
+     "control: Growl": 2,
+     "dodge: rise": 2,
+     "wait out the sucker punch": 3,
+     "back off": 1,
+     "close: Ice Fang": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 122.7,
+   "hp": {
+    "a": 0.78,
+    "b": 0
+   },
+   "hits": {
+    "A:Dragon Pulse": [
+     12,
+     1252
+    ],
+    "A:Dragon Rush": [
+     11,
+     1684
+    ],
+    "B:Fire Blast": [
+     6,
+     359
+    ],
+    "B:Flare Blitz": [
+     8,
+     457
+    ],
+    "B:Flare Blitz recoil": [
+     8,
+     150
+    ],
+    "A:Quick Attack": [
+     5,
+     260
+    ]
+   },
+   "statuses": [
+    "10.68 B accuracy fell",
+    "16.28 B accuracy fell",
+    "36.29 B accuracy back to normal",
+    "40.11 B accuracy fell",
+    "60.11 B accuracy back to normal",
+    "64.8 B accuracy fell",
+    "74.96 B accuracy fell",
+    "94.98 B accuracy back to normal",
+    "99.09 B accuracy fell",
+    "119.09 B accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "dash in": 1,
+     "close in": 8,
+     "ranged: Dragon Pulse": 15,
+     "strike": 36,
+     "close: Dragon Rush": 15,
+     "dodge: back dash": 6,
+     "control: Smokescreen": 6,
+     "dodge: jump": 7,
+     "dodge: rise": 1,
+     "sink to foe": 3,
+     "chase up": 1,
+     "watch": 1,
+     "mobility: Quick Attack in": 6,
+     "wait out the sucker punch": 11
+    },
+    "b": {
+     "ranged: Fire Blast": 17,
+     "strike": 41,
+     "close: Flare Blitz": 24,
+     "close in": 11,
+     "chase up": 1,
+     "watch": 1,
+     "control: Detect": 8,
+     "dodge: jump": 6
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 54.6,
+   "hp": {
+    "a": 0.67,
+    "b": 0
+   },
+   "hits": {
+    "A:Fire Blast": [
+     7,
+     1750
+    ],
+    "B:Shadow Ball": [
+     3,
+     357
+    ],
+    "B:Shadow Claw": [
+     4,
+     320
+    ],
+    "A:Flare Blitz": [
+     7,
+     1086
+    ],
+    "A:Flare Blitz recoil": [
+     7,
+     358
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Fire Blast": 8,
+     "strike": 19,
+     "close in": 5,
+     "close: Flare Blitz": 11
+    },
+    "b": {
+     "ranged: Shadow Ball": 12,
+     "strike": 16,
+     "close in": 12,
+     "close: Shadow Claw": 4,
+     "control: Detect": 2,
+     "dodge: jump": 1,
+     "back off": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 30.8,
+   "hp": {
+    "a": 0,
+    "b": 0.81
+   },
+   "hits": {
+    "B:Fire Blast": [
+     4,
+     1643
+    ],
+    "B:Flare Blitz": [
+     5,
+     1436
+    ],
+    "B:Flare Blitz recoil": [
+     5,
+     473
+    ],
+    "A:Close Combat": [
+     7,
+     98
+    ],
+    "A:Aura Sphere": [
+     1,
+     32
+    ],
+    "B:Quick Attack": [
+     1,
+     20
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Aura Sphere": 7,
+     "strike": 8,
+     "close in": 6,
+     "dodge: jump": 4,
+     "dodge: rise": 4,
+     "dodge: back dash": 2,
+     "close: Close Combat": 1,
+     "retreat: back dash": 3,
+     "back off": 1
+    },
+    "b": {
+     "ranged: Fire Blast": 5,
+     "strike": 13,
+     "close in": 2,
+     "dash in": 1,
+     "close: Flare Blitz": 7,
+     "mobility: Quick Attack in": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 175.4,
+   "hp": {
+    "a": 0,
+    "b": 0.09
+   },
+   "hits": {
+    "A:Fire Blast": [
+     18,
+     1999
+    ],
+    "A:Quick Attack": [
+     1,
+     32
+    ],
+    "A:Flare Blitz": [
+     19,
+     1084
+    ],
+    "A:Flare Blitz recoil": [
+     19,
+     354
+    ],
+    "B:Dragon Rush": [
+     17,
+     2651
+    ],
+    "B:Aeroblast": [
+     2,
+     219
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Fire Blast": 26,
+     "strike": 57,
+     "mobility: Quick Attack in": 1,
+     "close: Flare Blitz": 30,
+     "control: Detect": 6,
+     "dodge: jump": 4,
+     "close in": 5,
+     "dodge: rise": 2,
+     "sink to foe": 4,
+     "dash in": 1
+    },
+    "b": {
+     "close in": 10,
+     "dodge: jump": 3,
+     "ranged: Aeroblast": 24,
+     "strike": 55,
+     "close: Dragon Rush": 31,
+     "wait out the sucker punch": 5,
+     "dodge: back dash": 8,
+     "dash in": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "b": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 35.3,
+   "hp": {
+    "a": 0,
+    "b": 0.86
+   },
+   "hits": {
+    "B:Fire Blast": [
+     4,
+     2039
+    ],
+    "B:Flare Blitz": [
+     4,
+     1012
+    ],
+    "B:Flare Blitz recoil": [
+     4,
+     333
+    ],
+    "A:First Impression": [
+     2,
+     76
+    ],
+    "A:Aeroblast": [
+     1,
+     47
+    ]
+   },
+   "statuses": [
+    "23.98 B Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Aeroblast": 8,
+     "strike": 10,
+     "close in": 5,
+     "dodge: jump": 1,
+     "mobility: First Impression in": 2,
+     "dash in": 1,
+     "control: Growl": 1
+    },
+    "b": {
+     "ranged: Fire Blast": 6,
+     "strike": 10,
+     "close in": 5,
+     "close: Flare Blitz": 4,
+     "control: Detect": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Berserker",
+    "species": "Charizard",
+    "kit": {
+     "ranged": "Fire Blast",
+     "close": "Flare Blitz",
+     "control": "Detect",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "B",
+   "decided": "time",
+   "t": 170.3,
+   "hp": {
+    "a": 0.04,
+    "b": 0.21
+   },
+   "hits": {
+    "A:Fire Blast": [
+     15,
+     1235
+    ],
+    "B:Shadow Ball": [
+     15,
+     1794
+    ],
+    "B:Shadow Claw": [
+     13,
+     936
+    ],
+    "A:Flare Blitz": [
+     17,
+     1005
+    ],
+    "A:Flare Blitz recoil": [
+     17,
+     330
+    ],
+    "A:Quick Attack": [
+     1,
+     0
+    ]
+   },
+   "statuses": [
+    "32.1 A accuracy fell",
+    "41.23 A accuracy fell",
+    "61.24 A accuracy back to normal",
+    "64.68 A accuracy fell",
+    "74.37 A accuracy fell",
+    "94.39 A accuracy back to normal",
+    "99.55 A accuracy fell",
+    "119.55 A accuracy back to normal",
+    "127.87 A accuracy fell",
+    "147.88 A accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Fire Blast": 23,
+     "strike": 56,
+     "close in": 12,
+     "close: Flare Blitz": 32,
+     "control: Detect": 4,
+     "dodge: jump": 1,
+     "dash in": 1,
+     "mobility: Quick Attack in": 1
+    },
+    "b": {
+     "close in": 22,
+     "dash in": 2,
+     "ranged: Shadow Ball": 32,
+     "strike": 50,
+     "dodge: back dash": 7,
+     "close: Shadow Claw": 18,
+     "back off": 13,
+     "dodge: jump": 5,
+     "control: Smokescreen": 6,
+     "watch": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 170.28,
+     "what": "no blow landed for 25 s"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 99.9,
+   "hp": {
+    "a": 0.89,
+    "b": 0
+   },
+   "hits": {
+    "A:Thunderbolt": [
+     13,
+     1738
+    ],
+    "A:Volt Tackle": [
+     5,
+     660
+    ],
+    "A:Volt Tackle recoil": [
+     5,
+     221
+    ],
+    "B:Thunderbolt": [
+     4,
+     126
+    ],
+    "B:Wild Charge": [
+     1,
+     33
+    ],
+    "B:Wild Charge recoil": [
+     1,
+     8
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 17,
+     "strike": 22,
+     "close in": 17,
+     "dash in": 3,
+     "close: Volt Tackle": 5,
+     "dodge: back dash": 11
+    },
+    "b": {
+     "ranged: Thunderbolt": 16,
+     "strike": 17,
+     "close in": 12,
+     "dodge: back dash": 15,
+     "dodge: jump": 5,
+     "dodge: rise": 5,
+     "close: Wild Charge": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 62.3,
+   "hp": {
+    "a": 0,
+    "b": 0.81
+   },
+   "hits": {
+    "B:Ice Beam": [
+     7,
+     2156
+    ],
+    "A:Thunderbolt": [
+     6,
+     450
+    ],
+    "A:Wild Charge": [
+     3,
+     94
+    ],
+    "A:Wild Charge recoil": [
+     3,
+     24
+    ],
+    "B:Ice Shard": [
+     2,
+     136
+    ],
+    "B:Ice Fang": [
+     3,
+     81
+    ]
+   },
+   "statuses": [
+    "8.02 A Attack fell",
+    "20.9 A Attack fell",
+    "40.9 A Attack back to normal",
+    "45.12 A Attack fell",
+    "48.5 A Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 13,
+     "strike": 16,
+     "close in": 4,
+     "close: Wild Charge": 3,
+     "dodge: back dash": 3,
+     "dodge: jump": 4,
+     "dodge: rise": 3
+    },
+    "b": {
+     "close in": 13,
+     "ranged: Ice Beam": 9,
+     "strike": 12,
+     "control: Growl": 4,
+     "dodge: jump": 5,
+     "mobility: Ice Shard in": 2,
+     "dodge: back dash": 1,
+     "close: Ice Fang": 1,
+     "back off": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 62.34,
+     "what": "11 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 41,
+   "hp": {
+    "a": 1,
+    "b": 0
+   },
+   "hits": {
+    "B:Thunderbolt": [
+     4,
+     0
+    ],
+    "A:Dragon Pulse": [
+     3,
+     375
+    ],
+    "A:Dragon Rush": [
+     9,
+     2098
+    ],
+    "B:Wild Charge": [
+     1,
+     0
+    ]
+   },
+   "statuses": [
+    "13.6 B accuracy fell",
+    "33.62 B accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "close in": 9,
+     "dodge: jump": 4,
+     "ranged: Dragon Pulse": 4,
+     "strike": 13,
+     "watch": 2,
+     "dodge: back dash": 4,
+     "close: Dragon Rush": 9,
+     "control: Smokescreen": 1
+    },
+    "b": {
+     "ranged: Thunderbolt": 9,
+     "strike": 12,
+     "dodge: jump": 4,
+     "dodge: rise": 2,
+     "close in": 6,
+     "close: Wild Charge": 3,
+     "dodge: back dash": 6
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 78.1,
+   "hp": {
+    "a": 0,
+    "b": 0.79
+   },
+   "hits": {
+    "B:Shadow Ball": [
+     9,
+     1857
+    ],
+    "A:Thunderbolt": [
+     7,
+     443
+    ],
+    "B:Shadow Claw": [
+     4,
+     492
+    ],
+    "A:Wild Charge": [
+     2,
+     159
+    ],
+    "A:Wild Charge recoil": [
+     2,
+     40
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 15,
+     "strike": 20,
+     "close in": 15,
+     "watch": 4,
+     "dodge: back dash": 1,
+     "close: Wild Charge": 5,
+     "dodge: jump": 6,
+     "dodge: rise": 3
+    },
+    "b": {
+     "ranged: Shadow Ball": 16,
+     "strike": 22,
+     "dash in": 1,
+     "close in": 16,
+     "close: Shadow Claw": 6,
+     "control: Detect": 5,
+     "dodge: jump": 2,
+     "back off": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 88.9,
+   "hp": {
+    "a": 0.59,
+    "b": 0
+   },
+   "hits": {
+    "A:Aura Sphere": [
+     8,
+     1442
+    ],
+    "A:Close Combat": [
+     21,
+     924
+    ],
+    "B:Wild Charge": [
+     5,
+     411
+    ],
+    "B:Wild Charge recoil": [
+     5,
+     102
+    ],
+    "B:Thunderbolt": [
+     10,
+     838
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "close in": 26,
+     "ranged: Aura Sphere": 11,
+     "strike": 20,
+     "dash in": 1,
+     "close: Close Combat": 9,
+     "back off": 1,
+     "dodge: back dash": 8,
+     "dodge: jump": 13,
+     "dodge: rise": 12
+    },
+    "b": {
+     "ranged: Thunderbolt": 17,
+     "strike": 28,
+     "close in": 12,
+     "dodge: back dash": 6,
+     "close: Wild Charge": 11,
+     "dodge: jump": 4,
+     "dodge: rise": 3,
+     "watch": 4,
+     "dash in": 1,
+     "retreat: back dash": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 37,
+   "hp": {
+    "a": 0,
+    "b": 0.88
+   },
+   "hits": {
+    "A:Thunderbolt": [
+     6,
+     288
+    ],
+    "B:Dragon Rush": [
+     9,
+     2132
+    ],
+    "B:Aeroblast": [
+     4,
+     208
+    ],
+    "A:Wild Charge": [
+     2,
+     118
+    ],
+    "A:Wild Charge recoil": [
+     2,
+     30
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 9,
+     "strike": 12,
+     "dodge: back dash": 6,
+     "close in": 9,
+     "dodge: jump": 2,
+     "close: Wild Charge": 3
+    },
+    "b": {
+     "close in": 5,
+     "close: Dragon Rush": 11,
+     "strike": 16,
+     "ranged: Aeroblast": 5,
+     "dodge: back dash": 1,
+     "dash in": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "b": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 99,
+   "hp": {
+    "a": 0,
+    "b": 0.22
+   },
+   "hits": {
+    "B:Thunderbolt": [
+     15,
+     2482
+    ],
+    "A:X-Scissor": [
+     4,
+     824
+    ],
+    "B:Wild Charge": [
+     7,
+     542
+    ],
+    "B:Wild Charge recoil": [
+     7,
+     135
+    ],
+    "A:First Impression": [
+     3,
+     693
+    ],
+    "A:Aeroblast": [
+     4,
+     152
+    ]
+   },
+   "statuses": [
+    "2.09 B Attack fell",
+    "5.35 B Attack fell",
+    "25.37 B Attack back to normal",
+    "45.69 B Attack fell",
+    "48.63 B Attack fell",
+    "68.64 B Attack back to normal",
+    "70.86 B Attack fell",
+    "75.46 B Attack fell",
+    "95.47 B Attack back to normal",
+    "97 B Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "close in": 35,
+     "dodge: jump": 12,
+     "control: Growl": 7,
+     "dodge: back dash": 10,
+     "dash in": 1,
+     "dodge: rise": 10,
+     "sink to foe": 23,
+     "close: X-Scissor": 7,
+     "strike": 20,
+     "ranged: Aeroblast": 10,
+     "mobility: First Impression in": 3,
+     "watch": 1,
+     "back off": 1
+    },
+    "b": {
+     "ranged: Thunderbolt": 17,
+     "strike": 26,
+     "close in": 19,
+     "dash in": 1,
+     "dodge: back dash": 5,
+     "close: Wild Charge": 9,
+     "watch": 5,
+     "dodge: jump": 1,
+     "dodge: rise": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 27.19,
+     "what": "Quickdraw busy > 5 s (X-Scissor)"
+    },
+    {
+     "t": 42.71,
+     "what": "Quickdraw busy > 5 s (stunned)"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Turtle",
+    "species": "Pikachu",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Wild Charge",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 73,
+   "hp": {
+    "a": 0,
+    "b": 0.76
+   },
+   "hits": {
+    "B:Shadow Claw": [
+     11,
+     1210
+    ],
+    "A:Wild Charge": [
+     4,
+     243
+    ],
+    "A:Wild Charge recoil": [
+     4,
+     62
+    ],
+    "A:Thunderbolt": [
+     8,
+     429
+    ],
+    "B:Shadow Ball": [
+     7,
+     1160
+    ]
+   },
+   "statuses": [
+    "2.01 A accuracy fell",
+    "13.69 A accuracy fell",
+    "33.7 A accuracy back to normal",
+    "38.15 A accuracy fell",
+    "42.98 A accuracy fell",
+    "63 A accuracy back to normal",
+    "69.56 A accuracy fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 15,
+     "strike": 25,
+     "close in": 12,
+     "watch": 4,
+     "dodge: jump": 2,
+     "dodge: rise": 1,
+     "close: Wild Charge": 10,
+     "dash in": 1
+    },
+    "b": {
+     "close in": 27,
+     "control: Smokescreen": 5,
+     "dodge: jump": 4,
+     "dodge: rise": 3,
+     "sink to foe": 6,
+     "close: Shadow Claw": 12,
+     "strike": 22,
+     "ranged: Shadow Ball": 10,
+     "dodge: back dash": 8,
+     "back off": 4
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "b": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 137.7,
+   "hp": {
+    "a": 0.31,
+    "b": 0
+   },
+   "hits": {
+    "A:Ice Beam": [
+     12,
+     2549
+    ],
+    "B:Volt Tackle": [
+     9,
+     982
+    ],
+    "B:Volt Tackle recoil": [
+     9,
+     328
+    ],
+    "B:Thunderbolt": [
+     9,
+     1037
+    ],
+    "A:Ice Fang": [
+     21,
+     378
+    ],
+    "A:Ice Shard": [
+     4,
+     180
+    ]
+   },
+   "statuses": [
+    "13.83 B Attack fell",
+    "18.67 B Attack fell",
+    "38.67 B Attack back to normal",
+    "88.26 B Attack fell",
+    "106.74 B Attack fell",
+    "126.76 B Attack back to normal"
+   ],
+   "choices": {
+    "a": {
+     "close in": 19,
+     "ranged: Ice Beam": 23,
+     "strike": 36,
+     "dodge: back dash": 9,
+     "dodge: jump": 9,
+     "dodge: rise": 5,
+     "control: Growl": 4,
+     "watch": 2,
+     "dash in": 4,
+     "close: Ice Fang": 7,
+     "mobility: Ice Shard in": 6,
+     "back off": 1
+    },
+    "b": {
+     "ranged: Thunderbolt": 23,
+     "strike": 37,
+     "close in": 11,
+     "close: Volt Tackle": 14,
+     "dodge: back dash": 7,
+     "dodge: jump": 7,
+     "dodge: rise": 2,
+     "watch": 4
+    }
+   },
+   "flags": [
+    {
+     "t": 137.68,
+     "what": "7 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 120.2,
+   "hp": {
+    "a": 0,
+    "b": 1
+   },
+   "hits": {
+    "A:Volt Tackle": [
+     4,
+     0
+    ],
+    "B:Dragon Pulse": [
+     12,
+     1503
+    ],
+    "A:Thunderbolt": [
+     5,
+     0
+    ],
+    "B:Dragon Rush": [
+     12,
+     1800
+    ],
+    "B:Quick Attack": [
+     2,
+     106
+    ]
+   },
+   "statuses": [
+    "13.24 A accuracy fell",
+    "21.19 A accuracy fell",
+    "41.2 A accuracy back to normal",
+    "47.22 A accuracy fell",
+    "66.39 A accuracy fell",
+    "86.44 A accuracy back to normal",
+    "105.41 A accuracy fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 24,
+     "strike": 34,
+     "close: Volt Tackle": 10,
+     "dodge: back dash": 6,
+     "watch": 3,
+     "close in": 5,
+     "dash in": 1,
+     "dodge: jump": 4,
+     "dodge: rise": 4,
+     "chase up": 1
+    },
+    "b": {
+     "close in": 15,
+     "dodge: jump": 9,
+     "dodge: rise": 19,
+     "sink to foe": 22,
+     "ranged: Dragon Pulse": 13,
+     "strike": 27,
+     "watch": 1,
+     "control: Smokescreen": 5,
+     "close: Dragon Rush": 12,
+     "dodge: back dash": 10,
+     "mobility: Quick Attack in": 2
+    }
+   },
+   "flags": [
+    {
+     "t": 120.2,
+     "what": "23 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "b": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 106.1,
+   "hp": {
+    "a": 0,
+    "b": 0.03
+   },
+   "hits": {
+    "A:Shadow Ball": [
+     14,
+     2149
+    ],
+    "B:Thunderbolt": [
+     12,
+     1241
+    ],
+    "B:Volt Tackle": [
+     9,
+     1644
+    ],
+    "B:Volt Tackle recoil": [
+     9,
+     550
+    ],
+    "A:Shadow Claw": [
+     7,
+     581
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Shadow Ball": 21,
+     "strike": 30,
+     "close in": 34,
+     "control: Detect": 3,
+     "back off": 3,
+     "dodge: jump": 2,
+     "watch": 1,
+     "close: Shadow Claw": 9,
+     "retreat: back dash": 1,
+     "dash in": 1
+    },
+    "b": {
+     "ranged: Thunderbolt": 23,
+     "strike": 32,
+     "close in": 9,
+     "dodge: jump": 1,
+     "close: Volt Tackle": 9
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 120.7,
+   "hp": {
+    "a": 0,
+    "b": 0.07
+   },
+   "hits": {
+    "B:Aura Sphere": [
+     14,
+     2517
+    ],
+    "A:Volt Tackle": [
+     9,
+     1583
+    ],
+    "A:Volt Tackle recoil": [
+     9,
+     528
+    ],
+    "A:Thunderbolt": [
+     10,
+     1226
+    ],
+    "B:Close Combat": [
+     12,
+     348
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 21,
+     "strike": 33,
+     "close in": 6,
+     "close: Volt Tackle": 12,
+     "dodge: jump": 2,
+     "dodge: rise": 2,
+     "dodge: back dash": 1
+    },
+    "b": {
+     "ranged: Aura Sphere": 22,
+     "strike": 25,
+     "dash in": 3,
+     "close in": 19,
+     "dodge: jump": 11,
+     "dodge: back dash": 18,
+     "back off": 1,
+     "dodge: rise": 14,
+     "close: Close Combat": 3
+    }
+   },
+   "flags": [
+    {
+     "t": 120.71,
+     "what": "4 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 103.6,
+   "hp": {
+    "a": 0,
+    "b": 0.46
+   },
+   "hits": {
+    "B:Thunderbolt": [
+     13,
+     2079
+    ],
+    "A:Dragon Rush": [
+     8,
+     1288
+    ],
+    "B:Volt Tackle": [
+     10,
+     1491
+    ],
+    "B:Volt Tackle recoil": [
+     10,
+     497
+    ],
+    "A:Aeroblast": [
+     1,
+     38
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Aeroblast": 14,
+     "strike": 30,
+     "dash in": 1,
+     "close: Dragon Rush": 16,
+     "dodge: back dash": 7,
+     "close in": 2,
+     "dodge: jump": 2
+    },
+    "b": {
+     "ranged: Thunderbolt": 16,
+     "strike": 31,
+     "close in": 5,
+     "close: Volt Tackle": 15,
+     "watch": 1,
+     "dodge: back dash": 2,
+     "dodge: jump": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 103.57,
+     "what": "2 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 49,
+   "hp": {
+    "a": 0.8,
+    "b": 0
+   },
+   "hits": {
+    "A:Thunderbolt": [
+     9,
+     2841
+    ],
+    "A:Volt Tackle": [
+     2,
+     699
+    ],
+    "A:Volt Tackle recoil": [
+     2,
+     233
+    ],
+    "B:First Impression": [
+     2,
+     310
+    ],
+    "B:Aeroblast": [
+     4,
+     125
+    ]
+   },
+   "statuses": [
+    "27.63 A Attack fell",
+    "34.48 A Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Thunderbolt": 10,
+     "strike": 12,
+     "close in": 7,
+     "close: Volt Tackle": 2,
+     "dodge: jump": 1,
+     "watch": 1
+    },
+    "b": {
+     "ranged: Aeroblast": 9,
+     "strike": 11,
+     "dash in": 1,
+     "close in": 10,
+     "mobility: First Impression in": 2,
+     "control: Growl": 2,
+     "dodge: back dash": 2,
+     "dodge: jump": 4,
+     "dodge: rise": 1,
+     "sink to foe": 6
+    }
+   },
+   "flags": [
+    {
+     "t": 48.98,
+     "what": "2 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "b": {
+    "agent": "Sniper",
+    "species": "Zeraora",
+    "kit": {
+     "ranged": "Thunderbolt",
+     "close": "Volt Tackle",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "A",
+   "decided": "time",
+   "t": 75.3,
+   "hp": {
+    "a": 0.64,
+    "b": 0.51
+   },
+   "hits": {
+    "B:Thunderbolt": [
+     3,
+     384
+    ],
+    "A:Shadow Ball": [
+     6,
+     1285
+    ],
+    "B:Volt Tackle": [
+     4,
+     633
+    ],
+    "B:Volt Tackle recoil": [
+     4,
+     211
+    ],
+    "A:Shadow Claw": [
+     2,
+     148
+    ]
+   },
+   "statuses": [
+    "1.79 B accuracy fell",
+    "8.29 B accuracy fell",
+    "28.31 B accuracy back to normal",
+    "33.6 B accuracy fell",
+    "37.74 B accuracy fell",
+    "57.75 B accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "dash in": 1,
+     "control: Smokescreen": 4,
+     "close in": 8,
+     "dodge: jump": 3,
+     "ranged: Shadow Ball": 11,
+     "strike": 13,
+     "dodge: back dash": 3,
+     "back off": 1,
+     "close: Shadow Claw": 2
+    },
+    "b": {
+     "ranged: Thunderbolt": 9,
+     "strike": 16,
+     "close in": 1,
+     "close: Volt Tackle": 7,
+     "dodge: jump": 1,
+     "dodge: rise": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 75.3,
+     "what": "no blow landed for 25 s"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "b": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 60.5,
+   "hp": {
+    "a": 0.58,
+    "b": 0
+   },
+   "hits": {
+    "A:Ice Beam": [
+     7,
+     3852
+    ],
+    "B:Dragon Rush": [
+     11,
+     833
+    ],
+    "B:Dragon Pulse": [
+     5,
+     384
+    ],
+    "B:Quick Attack": [
+     1,
+     21
+    ]
+   },
+   "statuses": [
+    "1.81 A accuracy fell",
+    "7.05 B Attack fell",
+    "8.96 A accuracy fell",
+    "13.53 B Attack fell",
+    "28.96 A accuracy back to normal",
+    "33.53 B Attack back to normal",
+    "34.68 A accuracy fell",
+    "36.85 A accuracy fell",
+    "37.27 B Attack fell",
+    "43.72 B Attack fell",
+    "56.86 A accuracy back to normal",
+    "59.75 A accuracy fell"
+   ],
+   "choices": {
+    "a": {
+     "close in": 14,
+     "ranged: Ice Beam": 13,
+     "strike": 15,
+     "control: Growl": 4,
+     "watch": 4,
+     "dodge: back dash": 6,
+     "dodge: jump": 4,
+     "dodge: rise": 3,
+     "mobility: Ice Shard in": 2
+    },
+    "b": {
+     "close in": 11,
+     "control: Smokescreen": 5,
+     "dodge: jump": 5,
+     "dodge: rise": 3,
+     "sink to foe": 6,
+     "close: Dragon Rush": 12,
+     "strike": 18,
+     "ranged: Dragon Pulse": 5,
+     "dodge: back dash": 6,
+     "mobility: Quick Attack in": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "b": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 82.2,
+   "hp": {
+    "a": 0,
+    "b": 0.98
+   },
+   "hits": {
+    "B:Ice Beam": [
+     12,
+     2257
+    ],
+    "B:Ice Fang": [
+     15,
+     315
+    ],
+    "A:Shadow Claw": [
+     1,
+     62
+    ],
+    "B:Ice Shard": [
+     7,
+     371
+    ]
+   },
+   "statuses": [
+    "64.72 A Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Shadow Ball": 4,
+     "strike": 7,
+     "close in": 5,
+     "back off": 1,
+     "close: Shadow Claw": 3
+    },
+    "b": {
+     "close in": 10,
+     "dodge: jump": 1,
+     "dodge: rise": 1,
+     "ranged: Ice Beam": 12,
+     "strike": 24,
+     "close: Ice Fang": 5,
+     "dodge: back dash": 6,
+     "mobility: Ice Shard in": 7,
+     "back off": 2,
+     "control: Growl": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 24.19,
+     "what": "Reckless busy > 5 s (Shadow Claw)"
+    },
+    {
+     "t": 82.19,
+     "what": "5 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "b": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 81.2,
+   "hp": {
+    "a": 0,
+    "b": 0.84
+   },
+   "hits": {
+    "B:Aura Sphere": [
+     10,
+     3354
+    ],
+    "A:Ice Beam": [
+     5,
+     368
+    ],
+    "A:Ice Fang": [
+     13,
+     130
+    ]
+   },
+   "statuses": [
+    "39.06 B Attack fell",
+    "47.41 B Attack fell",
+    "67.42 B Attack back to normal"
+   ],
+   "choices": {
+    "a": {
+     "dash in": 2,
+     "close in": 10,
+     "dodge: jump": 5,
+     "ranged: Ice Beam": 14,
+     "strike": 19,
+     "close: Ice Fang": 5,
+     "control: Growl": 2,
+     "dodge: back dash": 2,
+     "dodge: rise": 1
+    },
+    "b": {
+     "ranged: Aura Sphere": 11,
+     "strike": 15,
+     "close in": 17,
+     "dodge: back dash": 8,
+     "dodge: jump": 5,
+     "dodge: rise": 6,
+     "close: Close Combat": 4,
+     "back off": 1,
+     "dash in": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 81.18,
+     "what": "7 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 53.7,
+   "hp": {
+    "a": 0,
+    "b": 0.39
+   },
+   "hits": {
+    "A:Dragon Rush": [
+     14,
+     1231
+    ],
+    "B:Ice Fang": [
+     17,
+     1054
+    ],
+    "A:Aeroblast": [
+     8,
+     536
+    ],
+    "B:Ice Beam": [
+     8,
+     2280
+    ],
+    "B:Ice Shard": [
+     2,
+     312
+    ]
+   },
+   "statuses": [
+    "29.97 A Attack fell",
+    "37.73 A Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "close in": 9,
+     "close: Dragon Rush": 18,
+     "strike": 26,
+     "ranged: Aeroblast": 8,
+     "dodge: back dash": 1,
+     "watch": 1
+    },
+    "b": {
+     "close in": 9,
+     "ranged: Ice Beam": 15,
+     "strike": 23,
+     "close: Ice Fang": 6,
+     "dodge: back dash": 4,
+     "dash in": 1,
+     "back off": 1,
+     "control: Growl": 2,
+     "mobility: Ice Shard in": 2,
+     "dodge: jump": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "b": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 53.7,
+   "hp": {
+    "a": 0.78,
+    "b": 0
+   },
+   "hits": {
+    "A:Ice Beam": [
+     7,
+     2572
+    ],
+    "A:Ice Shard": [
+     4,
+     264
+    ],
+    "B:Aeroblast": [
+     5,
+     306
+    ],
+    "B:First Impression": [
+     3,
+     234
+    ],
+    "A:Ice Fang": [
+     9,
+     199
+    ],
+    "B:X-Scissor": [
+     1,
+     104
+    ]
+   },
+   "statuses": [
+    "18.6 B Attack fell",
+    "20.31 B Attack fell",
+    "28.31 A Attack fell",
+    "40.34 B Attack back to normal",
+    "40.77 A Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "close in": 12,
+     "ranged: Ice Beam": 8,
+     "strike": 16,
+     "mobility: Ice Shard in": 4,
+     "dodge: back dash": 2,
+     "control: Growl": 2,
+     "close: Ice Fang": 4,
+     "dash in": 1,
+     "back off": 1
+    },
+    "b": {
+     "close in": 8,
+     "ranged: Aeroblast": 11,
+     "strike": 15,
+     "dodge: jump": 2,
+     "dodge: rise": 2,
+     "sink to foe": 4,
+     "mobility: First Impression in": 3,
+     "back off": 2,
+     "control: Growl": 2,
+     "dodge: back dash": 2,
+     "close: X-Scissor": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "b": {
+    "agent": "Balanced",
+    "species": "Glaceon",
+    "kit": {
+     "ranged": "Ice Beam",
+     "close": "Ice Fang",
+     "control": "Growl",
+     "mobility": "Ice Shard"
+    }
+   },
+   "winner": "draw",
+   "decided": "time",
+   "t": 240.1,
+   "hp": {
+    "a": 0.26,
+    "b": 0.26
+   },
+   "hits": {
+    "B:Ice Beam": [
+     27,
+     1820
+    ],
+    "A:Shadow Claw": [
+     30,
+     1077
+    ],
+    "A:Shadow Ball": [
+     13,
+     1080
+    ],
+    "B:Ice Shard": [
+     9,
+     180
+    ],
+    "B:Ice Fang": [
+     12,
+     96
+    ]
+   },
+   "statuses": [
+    "1.83 B accuracy fell",
+    "7.42 B accuracy fell",
+    "7.88 A Attack fell",
+    "24.47 A Attack fell",
+    "27.44 B accuracy back to normal",
+    "31.69 B accuracy fell",
+    "38.86 B accuracy fell",
+    "44.47 A Attack back to normal",
+    "47.76 A Attack fell",
+    "58.87 B accuracy back to normal",
+    "67.78 A Attack back to normal",
+    "68.07 A Attack fell",
+    "68.27 B accuracy fell",
+    "72.84 A Attack fell",
+    "82.08 B accuracy fell",
+    "92.85 A Attack back to normal",
+    "102.11 B accuracy back to normal",
+    "107.36 B accuracy fell",
+    "111.53 A Attack fell",
+    "112.09 B accuracy fell",
+    "118.04 A Attack fell",
+    "132.1 B accuracy back to normal",
+    "134.54 B accuracy fell",
+    "138.04 A Attack back to normal",
+    "138.85 B accuracy fell",
+    "139.6 A Attack fell",
+    "158.87 B accuracy back to normal",
+    "159.65 A Attack back to normal",
+    "163.99 B accuracy fell",
+    "168.6 A Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "close in": 126,
+     "control: Smokescreen": 16,
+     "dodge: back dash": 29,
+     "dodge: jump": 14,
+     "close: Shadow Claw": 39,
+     "strike": 64,
+     "ranged: Shadow Ball": 25,
+     "back off": 19,
+     "watch": 1,
+     "dodge: rise": 3,
+     "sink to foe": 8,
+     "chase up": 1
+    },
+    "b": {
+     "close in": 46,
+     "dash in": 3,
+     "back off": 9,
+     "ranged: Ice Beam": 42,
+     "strike": 68,
+     "control: Growl": 12,
+     "close: Ice Fang": 17,
+     "mobility: Ice Shard in": 10,
+     "dodge: back dash": 7,
+     "dodge: jump": 8,
+     "dodge: rise": 3,
+     "chase up": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 105.6,
+   "hp": {
+    "a": 0.51,
+    "b": 0
+   },
+   "hits": {
+    "B:Shadow Ball": [
+     11,
+     1558
+    ],
+    "A:Dragon Rush": [
+     11,
+     1972
+    ],
+    "A:Dragon Pulse": [
+     10,
+     855
+    ],
+    "B:Shadow Claw": [
+     4,
+     276
+    ],
+    "A:Quick Attack": [
+     3,
+     0
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "close in": 11,
+     "ranged: Dragon Pulse": 14,
+     "strike": 36,
+     "mobility: Quick Attack in": 4,
+     "close: Dragon Rush": 18,
+     "dodge: back dash": 3,
+     "wait out the sucker punch": 4,
+     "dodge: jump": 2,
+     "dodge: rise": 1,
+     "sink to foe": 3,
+     "chase up": 1
+    },
+    "b": {
+     "ranged: Shadow Ball": 24,
+     "strike": 33,
+     "close in": 36,
+     "control: Detect": 7,
+     "close: Shadow Claw": 9,
+     "back off": 3,
+     "chase up": 1,
+     "retreat: back dash": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 160,
+   "hp": {
+    "a": 0.41,
+    "b": 0
+   },
+   "hits": {
+    "A:Aura Sphere": [
+     21,
+     3600
+    ],
+    "B:Dragon Rush": [
+     18,
+     1424
+    ],
+    "A:Close Combat": [
+     11,
+     275
+    ],
+    "B:Dragon Pulse": [
+     8,
+     360
+    ]
+   },
+   "statuses": [
+    "8.17 A accuracy fell",
+    "20.06 A accuracy fell",
+    "40.06 A accuracy back to normal",
+    "47.77 A accuracy fell",
+    "56.08 A accuracy fell",
+    "76.09 A accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Aura Sphere": 28,
+     "strike": 36,
+     "dodge: back dash": 24,
+     "close in": 38,
+     "back off": 2,
+     "close: Close Combat": 8,
+     "dodge: jump": 14,
+     "dodge: rise": 17,
+     "dash in": 1,
+     "watch": 1
+    },
+    "b": {
+     "close in": 9,
+     "dash in": 1,
+     "ranged: Dragon Pulse": 22,
+     "strike": 43,
+     "control: Smokescreen": 4,
+     "dodge: jump": 4,
+     "close: Dragon Rush": 21,
+     "dodge: back dash": 1,
+     "watch": 1,
+     "dodge: rise": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 160,
+     "what": "16 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 103.3,
+   "hp": {
+    "a": 0.07,
+    "b": 0
+   },
+   "hits": {
+    "B:Aeroblast": [
+     8,
+     1635
+    ],
+    "B:Dragon Rush": [
+     7,
+     1876
+    ],
+    "A:Dragon Rush": [
+     9,
+     2299
+    ],
+    "A:Dragon Pulse": [
+     8,
+     1302
+    ]
+   },
+   "statuses": [
+    "8.8 B accuracy fell",
+    "28.8 B accuracy back to normal",
+    "50.23 B accuracy fell",
+    "70.24 B accuracy back to normal",
+    "78.44 B accuracy fell",
+    "90.38 B accuracy fell"
+   ],
+   "choices": {
+    "a": {
+     "close in": 5,
+     "ranged: Dragon Pulse": 15,
+     "strike": 29,
+     "control: Smokescreen": 4,
+     "close: Dragon Rush": 14,
+     "dodge: jump": 3,
+     "dodge: rise": 2,
+     "dodge: back dash": 1,
+     "chase up": 1,
+     "sink to foe": 1
+    },
+    "b": {
+     "ranged: Aeroblast": 13,
+     "strike": 29,
+     "close in": 8,
+     "close: Dragon Rush": 16,
+     "dodge: jump": 6,
+     "dodge: back dash": 4,
+     "chase up": 4,
+     "sink to foe": 5,
+     "dodge: rise": 1,
+     "watch": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 103.29,
+     "what": "15 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "b": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "winner": "B",
+   "decided": "time",
+   "t": 148.6,
+   "hp": {
+    "a": 0.2,
+    "b": 0.49
+   },
+   "hits": {
+    "A:X-Scissor": [
+     4,
+     464
+    ],
+    "A:Aeroblast": [
+     12,
+     948
+    ],
+    "B:Dragon Rush": [
+     16,
+     1500
+    ],
+    "B:Dragon Pulse": [
+     9,
+     905
+    ],
+    "A:First Impression": [
+     4,
+     516
+    ]
+   },
+   "statuses": [
+    "6.96 A accuracy fell",
+    "8.12 B Attack fell",
+    "25.87 A accuracy fell",
+    "27.03 B Attack fell",
+    "45.89 A accuracy back to normal",
+    "47.04 B Attack back to normal",
+    "49.89 B Attack fell",
+    "69.9 B Attack back to normal",
+    "82.91 A accuracy fell",
+    "84.06 B Attack fell",
+    "87.78 B Attack fell",
+    "102.91 A accuracy back to normal",
+    "107.81 B Attack back to normal",
+    "108.43 A accuracy fell",
+    "110.58 B Attack fell",
+    "120.14 B Attack fell",
+    "128.43 A accuracy back to normal",
+    "140.14 B Attack back to normal"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Aeroblast": 28,
+     "strike": 36,
+     "close: X-Scissor": 4,
+     "control: Growl": 7,
+     "dodge: back dash": 16,
+     "back off": 2,
+     "dodge: jump": 8,
+     "close in": 19,
+     "dodge: rise": 27,
+     "sink to foe": 27,
+     "mobility: First Impression in": 4,
+     "chase up": 1
+    },
+    "b": {
+     "close in": 7,
+     "dodge: jump": 8,
+     "dodge: rise": 11,
+     "sink to foe": 12,
+     "ranged: Dragon Pulse": 18,
+     "strike": 37,
+     "control: Smokescreen": 4,
+     "close: Dragon Rush": 18,
+     "mobility: Quick Attack in": 1,
+     "dodge: back dash": 3
+    }
+   },
+   "flags": [
+    {
+     "t": 148.57,
+     "what": "no blow landed for 25 s"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Counterpuncher",
+    "species": "Garchomp",
+    "kit": {
+     "ranged": "Dragon Pulse",
+     "close": "Dragon Rush",
+     "control": "Smokescreen",
+     "mobility": "Quick Attack"
+    }
+   },
+   "b": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 141,
+   "hp": {
+    "a": 0,
+    "b": 0.24
+   },
+   "hits": {
+    "B:Shadow Ball": [
+     17,
+     3685
+    ],
+    "A:Dragon Rush": [
+     12,
+     1732
+    ],
+    "A:Dragon Pulse": [
+     6,
+     402
+    ],
+    "B:Shadow Claw": [
+     5,
+     310
+    ],
+    "A:Quick Attack": [
+     4,
+     0
+    ]
+   },
+   "statuses": [
+    "1.83 A accuracy fell",
+    "2.07 B accuracy fell",
+    "11.53 A accuracy fell",
+    "22.09 B accuracy back to normal",
+    "31.54 A accuracy back to normal",
+    "32.98 B accuracy fell",
+    "53.02 B accuracy back to normal",
+    "60.85 A accuracy fell",
+    "61.28 B accuracy fell",
+    "70.66 A accuracy fell",
+    "81.3 B accuracy back to normal",
+    "90.67 A accuracy back to normal",
+    "92.5 A accuracy fell",
+    "112.52 A accuracy back to normal",
+    "113.02 A accuracy fell",
+    "123.41 A accuracy fell"
+   ],
+   "choices": {
+    "a": {
+     "close in": 11,
+     "control: Smokescreen": 4,
+     "ranged: Dragon Pulse": 19,
+     "strike": 37,
+     "close: Dragon Rush": 14,
+     "dodge: back dash": 2,
+     "dodge: jump": 4,
+     "dodge: jump the Shadow Ball": 2,
+     "mobility: Quick Attack in": 4,
+     "dodge: rise": 1,
+     "sink to foe": 2,
+     "retreat: back dash": 1
+    },
+    "b": {
+     "close in": 14,
+     "control: Smokescreen": 7,
+     "ranged: Shadow Ball": 27,
+     "strike": 35,
+     "dodge: back dash": 21,
+     "dodge: jump": 6,
+     "back off": 5,
+     "close: Shadow Claw": 8,
+     "watch": 1,
+     "chase up": 1,
+     "dash in": 1,
+     "dodge: rise": 1,
+     "sink to foe": 3
+    }
+   },
+   "flags": [
+    {
+     "t": 141.03,
+     "what": "16 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 73.8,
+   "hp": {
+    "a": 0,
+    "b": 1
+   },
+   "hits": {
+    "B:Shadow Ball": [
+     13,
+     1902
+    ],
+    "A:Aura Sphere": [
+     8,
+     0
+    ],
+    "A:Close Combat": [
+     6,
+     6
+    ],
+    "B:Shadow Claw": [
+     13,
+     1118
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Aura Sphere": 14,
+     "strike": 22,
+     "close in": 14,
+     "close: Close Combat": 8,
+     "dash in": 1,
+     "back off": 3,
+     "dodge: back dash": 1,
+     "dodge: jump": 2,
+     "retreat: back dash": 1
+    },
+    "b": {
+     "ranged: Shadow Ball": 13,
+     "strike": 29,
+     "close in": 24,
+     "close: Shadow Claw": 16,
+     "dodge: jump": 1,
+     "back off": 4,
+     "dash in": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "b": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "B",
+   "decided": "time",
+   "t": 112.5,
+   "hp": {
+    "a": 0.2,
+    "b": 0.43
+   },
+   "hits": {
+    "A:Shadow Ball": [
+     9,
+     1697
+    ],
+    "B:Dragon Rush": [
+     11,
+     1867
+    ],
+    "A:Shadow Claw": [
+     4,
+     276
+    ],
+    "B:Aeroblast": [
+     3,
+     398
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Shadow Ball": 16,
+     "strike": 20,
+     "close in": 30,
+     "back off": 4,
+     "close: Shadow Claw": 4,
+     "control: Detect": 4,
+     "dodge: jump": 2,
+     "retreat: back dash": 1
+    },
+    "b": {
+     "dash in": 1,
+     "ranged: Aeroblast": 14,
+     "strike": 26,
+     "close: Dragon Rush": 12,
+     "close in": 3,
+     "watch": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 112.55,
+     "what": "no blow landed for 25 s"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "b": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 92.9,
+   "hp": {
+    "a": 0,
+    "b": 0.92
+   },
+   "hits": {
+    "B:Shadow Ball": [
+     14,
+     2872
+    ],
+    "B:Shadow Claw": [
+     6,
+     381
+    ],
+    "A:Aeroblast": [
+     3,
+     156
+    ],
+    "A:X-Scissor": [
+     2,
+     80
+    ]
+   },
+   "statuses": [
+    "51.09 B Attack fell",
+    "60.02 B Attack fell",
+    "80.03 B Attack back to normal",
+    "84.5 B Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Aeroblast": 19,
+     "strike": 26,
+     "dash in": 1,
+     "close in": 5,
+     "close: X-Scissor": 6,
+     "control: Growl": 3,
+     "back off": 2,
+     "dodge: back dash": 4,
+     "mobility: First Impression in": 1
+    },
+    "b": {
+     "ranged: Shadow Ball": 15,
+     "strike": 24,
+     "close in": 28,
+     "close: Shadow Claw": 9,
+     "back off": 5,
+     "dodge: jump": 1,
+     "control: Detect": 3,
+     "dash in": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 92.87,
+     "what": "2 beam meshes left shown"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Reckless",
+    "species": "Gengar",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Detect",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "b": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "B",
+   "decided": "time",
+   "t": 62.3,
+   "hp": {
+    "a": 0.04,
+    "b": 0.85
+   },
+   "hits": {
+    "B:Shadow Ball": [
+     5,
+     2525
+    ],
+    "B:Shadow Claw": [
+     1,
+     171
+    ],
+    "A:Shadow Ball": [
+     2,
+     410
+    ]
+   },
+   "statuses": [
+    "15.16 A accuracy fell",
+    "23.98 A accuracy fell",
+    "43.98 A accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Shadow Ball": 8,
+     "strike": 9,
+     "close in": 8,
+     "control: Detect": 1,
+     "dodge: jump": 1,
+     "back off": 1,
+     "close: Shadow Claw": 1
+    },
+    "b": {
+     "close in": 9,
+     "ranged: Shadow Ball": 7,
+     "strike": 9,
+     "dash in": 1,
+     "close: Shadow Claw": 2,
+     "dodge: back dash": 2,
+     "control: Smokescreen": 2,
+     "back off": 1,
+     "dodge: jump": 2,
+     "watch": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 62.32,
+     "what": "no blow landed for 25 s"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 126.9,
+   "hp": {
+    "a": 0.69,
+    "b": 0
+   },
+   "hits": {
+    "A:Aeroblast": [
+     11,
+     1649
+    ],
+    "B:Aura Sphere": [
+     9,
+     319
+    ],
+    "A:Dragon Rush": [
+     17,
+     1462
+    ],
+    "B:Close Combat": [
+     61,
+     732
+    ]
+   },
+   "statuses": [],
+   "choices": {
+    "a": {
+     "ranged: Aeroblast": 20,
+     "strike": 46,
+     "close in": 8,
+     "close: Dragon Rush": 26,
+     "dash in": 1,
+     "dodge: back dash": 4,
+     "dodge: jump": 2,
+     "watch": 2
+    },
+    "b": {
+     "ranged: Aura Sphere": 21,
+     "strike": 32,
+     "close in": 22,
+     "back off": 8,
+     "dodge: back dash": 12,
+     "close: Close Combat": 12,
+     "dodge: jump": 8,
+     "dodge: rise": 8,
+     "watch": 4
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "b": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "winner": "B",
+   "decided": "KO",
+   "t": 138.6,
+   "hp": {
+    "a": 0,
+    "b": 0.91
+   },
+   "hits": {
+    "B:Aeroblast": [
+     20,
+     2475
+    ],
+    "B:First Impression": [
+     12,
+     492
+    ],
+    "A:Aura Sphere": [
+     10,
+     221
+    ],
+    "A:Close Combat": [
+     8,
+     38
+    ],
+    "B:X-Scissor": [
+     5,
+     180
+    ]
+   },
+   "statuses": [
+    "30.96 A Attack fell",
+    "39.88 A Attack fell",
+    "59.9 A Attack back to normal",
+    "62.23 A Attack fell",
+    "70.42 A Attack fell",
+    "90.44 A Attack back to normal",
+    "93.82 A Attack fell",
+    "106.45 A Attack fell",
+    "126.45 A Attack back to normal",
+    "128.91 A Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Aura Sphere": 30,
+     "strike": 34,
+     "close in": 36,
+     "dodge: jump": 10,
+     "dodge: rise": 10,
+     "dodge: jump the Aeroblast": 4,
+     "dodge: back dash": 6,
+     "close: Close Combat": 4,
+     "back off": 2,
+     "dash in": 1,
+     "watch": 1
+    },
+    "b": {
+     "ranged: Aeroblast": 24,
+     "strike": 44,
+     "close in": 19,
+     "dash in": 1,
+     "mobility: First Impression in": 12,
+     "close: X-Scissor": 8,
+     "control: Growl": 7,
+     "dodge: back dash": 5,
+     "back off": 1,
+     "dodge: jump": 1,
+     "dodge: rise": 1,
+     "sink to foe": 4
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "b": {
+    "agent": "Jumper",
+    "species": "Lucario",
+    "kit": {
+     "ranged": "Aura Sphere",
+     "close": "Close Combat",
+     "control": "Counter"
+    }
+   },
+   "winner": "A",
+   "decided": "time",
+   "t": 81.7,
+   "hp": {
+    "a": 1,
+    "b": 0.52
+   },
+   "hits": {
+    "B:Aura Sphere": [
+     7,
+     0
+    ],
+    "A:Shadow Claw": [
+     5,
+     385
+    ],
+    "A:Shadow Ball": [
+     6,
+     1070
+    ],
+    "B:Close Combat": [
+     4,
+     4
+    ]
+   },
+   "statuses": [
+    "2.45 B accuracy fell",
+    "8.64 B accuracy fell",
+    "28.65 B accuracy back to normal",
+    "32.74 B accuracy fell",
+    "41.68 B accuracy fell",
+    "61.71 B accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "close in": 26,
+     "control: Smokescreen": 4,
+     "close: Shadow Claw": 10,
+     "strike": 18,
+     "dodge: back dash": 2,
+     "dodge: jump": 4,
+     "ranged: Shadow Ball": 8,
+     "back off": 5
+    },
+    "b": {
+     "ranged: Aura Sphere": 10,
+     "strike": 14,
+     "close in": 9,
+     "close: Close Combat": 4,
+     "dodge: jump": 1,
+     "dodge: rise": 2,
+     "dodge: back dash": 5,
+     "back off": 4
+    }
+   },
+   "flags": [
+    {
+     "t": 81.71,
+     "what": "no blow landed for 25 s"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "b": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "winner": "A",
+   "decided": "KO",
+   "t": 51.8,
+   "hp": {
+    "a": 0.85,
+    "b": 0
+   },
+   "hits": {
+    "A:Aeroblast": [
+     9,
+     2391
+    ],
+    "A:Dragon Rush": [
+     7,
+     699
+    ],
+    "B:X-Scissor": [
+     4,
+     232
+    ],
+    "B:Aeroblast": [
+     5,
+     210
+    ],
+    "B:First Impression": [
+     1,
+     65
+    ]
+   },
+   "statuses": [
+    "10.66 A Attack fell",
+    "30.67 A Attack back to normal",
+    "33.29 A Attack fell",
+    "37.07 A Attack fell"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Aeroblast": 11,
+     "strike": 20,
+     "dash in": 1,
+     "close: Dragon Rush": 9,
+     "close in": 3,
+     "watch": 2
+    },
+    "b": {
+     "ranged: Aeroblast": 11,
+     "strike": 17,
+     "close in": 7,
+     "dodge: jump": 3,
+     "control: Growl": 3,
+     "dodge: back dash": 2,
+     "dodge: rise": 4,
+     "sink to foe": 10,
+     "close: X-Scissor": 5,
+     "mobility: First Impression in": 1,
+     "back off": 1
+    }
+   },
+   "flags": []
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "b": {
+    "agent": "Slowpoke",
+    "species": "Dragonite",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "Dragon Rush",
+     "control": "Sucker Punch"
+    }
+   },
+   "winner": "A",
+   "decided": "time",
+   "t": 121.2,
+   "hp": {
+    "a": 0.41,
+    "b": 0.23
+   },
+   "hits": {
+    "A:Shadow Ball": [
+     13,
+     2323
+    ],
+    "B:Aeroblast": [
+     6,
+     420
+    ],
+    "A:Shadow Claw": [
+     5,
+     310
+    ],
+    "B:Dragon Rush": [
+     9,
+     1246
+    ]
+   },
+   "statuses": [
+    "16.17 B accuracy fell",
+    "28.02 B accuracy fell",
+    "48.02 B accuracy back to normal",
+    "52.08 B accuracy fell",
+    "60.01 B accuracy fell",
+    "80.04 B accuracy back to normal",
+    "93.85 B accuracy fell",
+    "113.88 B accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "dash in": 1,
+     "close in": 16,
+     "ranged: Shadow Ball": 16,
+     "strike": 27,
+     "dodge: back dash": 7,
+     "close: Shadow Claw": 11,
+     "control: Smokescreen": 5,
+     "back off": 4,
+     "dodge: jump": 2
+    },
+    "b": {
+     "ranged: Aeroblast": 15,
+     "strike": 30,
+     "close: Dragon Rush": 15,
+     "close in": 3,
+     "dash in": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 121.23,
+     "what": "no blow landed for 25 s"
+    }
+   ]
+  },
+  {
+   "tour": 1,
+   "a": {
+    "agent": "Quickdraw",
+    "species": "Scyther",
+    "kit": {
+     "ranged": "Aeroblast",
+     "close": "X-Scissor",
+     "control": "Growl",
+     "mobility": "First Impression"
+    }
+   },
+   "b": {
+    "agent": "Clash King",
+    "species": "Chandelure",
+    "kit": {
+     "ranged": "Shadow Ball",
+     "close": "Shadow Claw",
+     "control": "Smokescreen",
+     "mobility": "Shadow Sneak"
+    }
+   },
+   "winner": "B",
+   "decided": "time",
+   "t": 61.3,
+   "hp": {
+    "a": 0.58,
+    "b": 0.92
+   },
+   "hits": {
+    "B:Shadow Ball": [
+     4,
+     1279
+    ],
+    "A:Aeroblast": [
+     2,
+     184
+    ],
+    "A:First Impression": [
+     1,
+     34
+    ]
+   },
+   "statuses": [
+    "15.18 A accuracy fell",
+    "25.69 A accuracy fell",
+    "28.08 B Attack fell",
+    "45.69 A accuracy back to normal",
+    "48.08 B Attack back to normal",
+    "101.53 A accuracy fell",
+    "118.93 A accuracy fell",
+    "120.89 B Attack fell",
+    "125 B Attack fell",
+    "138.93 A accuracy back to normal",
+    "141.04 A accuracy fell",
+    "145.01 B Attack back to normal",
+    "161.04 A accuracy back to normal"
+   ],
+   "choices": {
+    "a": {
+     "ranged: Aeroblast": 16,
+     "strike": 21,
+     "close in": 4,
+     "dash in": 1,
+     "mobility: First Impression in": 4,
+     "control: Growl": 3,
+     "dodge: jump": 1,
+     "dodge: rise": 2,
+     "sink to foe": 7,
+     "back off": 2,
+     "dodge: back dash": 2,
+     "close: X-Scissor": 1
+    },
+    "b": {
+     "close in": 21,
+     "ranged: Shadow Ball": 17,
+     "strike": 19,
+     "back off": 2,
+     "dodge: jump": 3,
+     "control: Smokescreen": 5,
+     "dodge: back dash": 3,
+     "close: Shadow Claw": 2,
+     "watch": 1
+    }
+   },
+   "flags": [
+    {
+     "t": 61.27,
+     "what": "no blow landed for 25 s"
+    }
+   ]
+  }
+ ]
+}

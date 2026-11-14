@@ -50,9 +50,13 @@ export interface BeamSpec {
    * Which beam it is: 1 (the default) the layered beam — core, body and torn
    * skin, swirled; 2 the aura beam — its white core alone, rimmed in its
    * type's spiking aura outline, rings of stars streaming along it (BeamFx:
-   * OUTLINE, RINGS). Both charge, launch and release alike.
+   * OUTLINE, RINGS); 3 beam 2 with a "kamehameha" blast in it — a raymarched body swelling toward its front, its
+   * colours crackling under spinning lights, a double ring and a hot core at the mouth (Beam3Fx). All charge, launch
+   * and release alike (beam 3 as beam 2 does).
    */
-  style?: 1 | 2;
+  style?: 1 | 2 | 3;
+  /** How fast it travels (its user's accuracy - a dexterity; set by the fighter as it fires). */
+  pace?: number;
   /**
    * The floor's height, if the caller knows it (the side-on arena's: 0). Its outline is kept above it. Unset: the height
    * its user stands at — wrong on a platform, or aloft over the floor: fired down from there, its outline was held up
@@ -74,6 +78,7 @@ function swapped(element: string): BeamPalette {
 export const BEAM_MOVES: Record<string, BeamSpec> = {
   // Beam 2, the aura beam (its outlined white core, its spikes, rings of stars and bands): Dragon Pulse, Hyper Beam,
   // Solar Beam, Flash Cannon, Steel Beam.
+  // (Beam 3 — Beam3Fx — is on the back burner: no move uses it for now.)
   'Dragon Pulse': { element: 'Dragon', style: 2 },
   'Hyper Beam': { element: 'Normal', style: 2 },
   // An icy thunderbolt, out of a beam's starting egg.

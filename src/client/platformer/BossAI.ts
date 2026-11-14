@@ -19,6 +19,9 @@
  *   - Stone Edge (ranged): raised at a grounded foe at mid range — or, a beam charging at it, raised as a wall; the
  *     foe's Stone Edge on its way — it jumps it (its pillar too wide to step out of in time)
  *   - a beam into a Stone Edge pillar: held — over it (up) or, with Earthquake, shattering it
+ *   - Growl / Smokescreen (control): at a foe in front, in reach, its Attack / accuracy not already well down (STATUS)
+ *   - its dashes: a back dash out of a blow coming at it (no Detect), out of reach when hurt and the foe close; a dash
+ *     in from afar
  *   - Detect (control): braced as a blow comes at it (a tell in reach, a beam charging at it) — DETECT of the time
  *   - its foe braced (Sucker Punch, Counter, Detect): waited out (WARY), then punished while its brace cools (PUNISH s)
  *
@@ -68,9 +71,19 @@ export interface Thought { t: number; saw: string; chose: string }
  * slashes a foe in reach, meets a beam with its own, braces Detect, jumps an Earthquake, waits out a brace, how long
  * its beams cool (s), how often it raises Stone Edge as a wall, how near the top it stops its clash number.
  */
+/**
+ * Its status moves and dashes: how often it uses Growl / Smokescreen when it can (STATUS), how far off (x its height),
+ * how many stages down before it stops (STATUS_STACK); hurt below LOW_HP of its HP with the foe close, how often it
+ * back-dashes out (RETREAT); further than DASH_IN x its height off, how often it dashes in (DASH_IN_P); a blow coming
+ * and no Detect, a back dash out of it - DASH_DODGE of its dodging.
+ */
+const STATUS = 0.55, STATUS_REACH = 5.5, STATUS_STACK = 2, LOW_HP = 0.3, RETREAT = 0.35, DASH_IN = 3.5, DASH_IN_P = 0.12, DASH_DODGE = 0.45;
+
 export interface AIStyle {
   think: [number, number]; dodge: number; slash: number; contest: number; detect: number; jumpQuake: number;
   wary: number; beamCool: [number, number]; edgeWall: number; aiStop: [number, number];
+  /** How often it uses its status move (Growl, Smokescreen) when it can, backs off hurt with a dash, dashes in from afar. */
+  status: number; retreat: number; dashIn: number;
 }
 
 export class BossAI {
@@ -92,7 +105,7 @@ export class BossAI {
   readonly style: AIStyle;
   constructor(readonly me: Fighter, readonly foe: Fighter, style: Partial<AIStyle> = {}) {
     this.style = { think: THINK, dodge: DODGE, slash: SLASH, contest: CONTEST, detect: DETECT, jumpQuake: JUMP_QUAKE,
-      wary: WARY, beamCool: BEAM_COOL, edgeWall: EDGE_WALL, aiStop: AI_STOP, ...style };
+      wary: WARY, beamCool: BEAM_COOL, edgeWall: EDGE_WALL, aiStop: AI_STOP, status: STATUS, retreat: RETREAT, dashIn: DASH_IN_P, ...style };
   }
 
   private rnd(r: [number, number]): number { return r[0] + Math.random() * (r[1] - r[0]); }
@@ -126,7 +139,7 @@ export class BossAI {
       return go;
     }
     // (Presses last one frame; held keys last till its next thought.)
-    if (t < this.next) return { ...this.hold, ranged: false, close: false, mobility: false, jumpPressed: false };
+    if (t < this.next) return { ...this.hold, ranged: false, close: false, mobility: false, control: false, dash: false, jumpPressed: false };
     this.next = t + this.rnd(this.style.think);
     const dx = foe.x - me.x, dir = Math.sign(dx) || me.facing, dist = Math.abs(dx);
     const dy = foe.y - me.y;
@@ -150,6 +163,7 @@ export class BossAI {
     // (Its kit.)
     const kit = me.moves;
     const hasQuake = kit.close === 'Earthquake', hasEdge = kit.ranged === 'Stone Edge', hasDetect = kit.control === 'Detect';
+    const status = kit.control === 'Growl' || kit.control === 'Smokescreen' ? kit.control : null;
     const beamRanged = !!kit.ranged && !hasEdge;
     // (Its foe's brace: waited out; once over — its cooldown running — pressed while it can't brace again.)
     if (this.foeBraced && !foe.countering && foe.moves.control && !foe.ready(foe.moves.control)) this.punishTill = t + PUNISH;
@@ -185,6 +199,11 @@ export class BossAI {
       // A ball flying at it: braced — Detect zips it clear as it touches.
       i = { ...i, control: true };
       chose = `control: Detect (${ballAtMe.move} coming)`;
+    } else if (!hasDetect && foeMove && !isBall(foeMove) && foeMove !== 'Earthquake' && dist <= foe.reachWith(foeMove) + me.reachOf().back + 0.6
+      && me.grounded && me.ready('Back Dash') && Math.random() < this.style.dodge * DASH_DODGE) {
+      // A blow coming at it, no Detect to brace: back-dashed out of its reach.
+      i = { ...i, want: 0, dash: true };
+      chose = `dodge: back dash (${foeMove} coming)`;
     } else if (ballAtMe && !ballAtMe.homing && Math.random() < this.style.dodge) {
       // A ball flying at it: over it.
       i = { ...i, jumpPressed: true, jumpHeld: true };
@@ -253,6 +272,19 @@ export class BossAI {
     } else if (facingFoe && level && isQuickStrike(me.moves.mobility) && me.ready(me.moves.mobility) && gap <= QUICK_DIST * me.H && gap > 0.6 && Math.random() < 0.5) {
       i = { ...i, mobility: true };
       chose = `mobility: ${me.moves.mobility} in`;
+    } else if (status && me.ready(status) && facingFoe && dist <= STATUS_REACH * me.H && Math.abs(dy) < me.H * 1.4
+      && (status === 'Growl' ? foe.attackStage > -STATUS_STACK : foe.accuracyStage > -STATUS_STACK) && Math.random() < this.style.status) {
+      // Its status move: Growl at a foe whose Attack isn't already well down; Smokescreen at one still seeing straight.
+      i = { ...i, control: true };
+      chose = `control: ${status}`;
+    } else if (me.hp < me.maxHp * LOW_HP && dist <= reachClose + me.H && me.ready('Back Dash') && me.grounded && Math.random() < this.style.retreat) {
+      // Hurt and the foe close: out of its reach.
+      i = { ...i, want: 0, dash: true };
+      chose = 'retreat: back dash';
+    } else if (gap > DASH_IN * me.H && me.ready('Dash') && (me.grounded || me.flying) && facingFoe && Math.random() < this.style.dashIn) {
+      // Far off: in fast.
+      i = { ...i, want: dir, dash: true };
+      chose = 'dash in';
     } else if (gap > 0.3) {
       i = { ...i, want: dir };
       chose = 'close in';

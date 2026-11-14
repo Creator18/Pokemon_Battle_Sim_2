@@ -54,6 +54,8 @@ const ENCOUNTER_LINGER = 1.6;
 const SHAKE_MAX = 0.45, SHAKE_DECAY = 1.6;
 /** The camera: how far off the plane, how high above the body, how far it leads the way it faces, how quickly it follows. */
 const CAM_DIST = 15, CAM_UP = 2.2, CAM_LEAD = 2.5, CAM_EASE = 5;
+/** A Pokémon left hidden or see-through longer than this (s) - longer than any blink, teleport or vanish - is shown again. */
+const STUCK_HIDE = 1.2;
 /** How high the camera may rise over ground that would hide you (tried in turn), and how fast it gets there. */
 const CAM_LIFTS = [0.75, 1.5, 2.5, 3.5, 5, 7], CAM_FIX_EASE = 4;
 /** Walking about (walkCam): how far you walk, or how long you face the other way, before its lead swings round, and
@@ -231,7 +233,8 @@ export class Platformer {
       onStatus: (on, status) => {
         this.note(`${on.name}: ${status}`);
         // (A stat stage's change called out, as the series' text: "Bulbasaur's Attack fell!")
-        if (/Attack/.test(status)) this.hud?.call(`${on.name.replace(/ \((you|boss)\)$/, '')}'s ${status}!`, '#93c5fd', true);
+        const who = on.name.replace(/ \((you|boss)\)$/, '');
+        if (/Attack|accuracy|Speed|evasiveness/.test(status)) this.hud?.call(`${who}'s ${status}!`, '#93c5fd', true);
       },
       onBurst: (a, b, ma, mb) => {
         this.note(`point-blank: ${a.name} ${ma} × ${b.name} ${mb} — both burst, both knocked back`);
@@ -284,6 +287,8 @@ export class Platformer {
     for (const [m, f] of this.faded) this.unfade(m, f);
     // (Its fighters gone with it: a new level brings its own — a beam one was charging or pouring, gone too.)
     for (const f of this.fighters) { f.beam?.play.cancel?.(true); f.beam = null; this.factory.remove(f.node); }
+    // (And every beam, ball and clash of theirs still alive - a clash's halves, a ball in flight: gone, never left drawn.)
+    this.factory.killEffects();
     this.hud?.dispose();
     this.team.dispose();
     this.moveBar.dispose();
@@ -747,6 +752,7 @@ export class Platformer {
       if (this.result) { const hud = this.foeTeam; setTimeout(() => { if (this.foeTeam === hud) this.endEncounter(); }, ENCOUNTER_LINGER * 1000); }
     }
     this.updateHud(dt);
+    this.watchVisibility();
     if (this.player.ball && !this.pokeball) this.makePokeball();
     if (this.pokeball?.isEnabled()) this.rollPokeball();
     this.follow(dt);
@@ -812,6 +818,32 @@ export class Platformer {
     const change = cur - to, temp = (this.camVel[axis] + w * change) * dt;
     this.camVel[axis] = (this.camVel[axis] - w * temp) * e;
     return to + (change + temp) * e;
+  }
+
+  /**
+   * The visibility watcher: a Pokémon that should be seen - not down, not a Poké Ball, not turning into one or out of
+   * one - left hidden or see-through longer than any of its own hidings or fadings last (STUCK_HIDE: a blink, a
+   * teleport, a vanish) is shown again at once, and told of (the console; window.__visFixes, for the logs).
+   */
+  private fadedSince = new Map<Fighter, number>();
+  private watchVisibility(): void {
+    for (const f of this.fighters) {
+      const should = !f.down && !f.ball && !(f === this.player && this.morphing);
+      if (!should || !this.factory.visibilityOff(f.node)) { this.fadedSince.delete(f); continue; }
+      const since = this.fadedSince.get(f);
+      if (since === undefined) { this.fadedSince.set(f, this.clock); continue; }
+      if (this.clock - since < STUCK_HIDE) continue;
+      this.fadedSince.delete(f);
+      if (this.factory.restoreVisibility(f.node)) {
+        const fix = { t: +this.clock.toFixed(2), who: f.name, using: f.using, quick: !!f.quick, clashing: !!f.clashing, hidFor: +(this.clock - since).toFixed(2),
+          events: this.events.slice(-3).map((e) => `${e.t} ${e.text}`) };
+        console.warn('[visibility] shown again:', fix);
+        const w = window as unknown as { __visFixes?: unknown[] };
+        (w.__visFixes ??= []).push(fix);
+        if ((w.__visFixes as unknown[]).length > 200) (w.__visFixes as unknown[]).shift();
+        this.note(`${f.name}: shown again (left hidden ${fix.hidFor}s)`);
+      }
+    }
   }
 
   /** The camera off to the side, level with the player, leading the way it faces — or, in a boss fight, framing both. */

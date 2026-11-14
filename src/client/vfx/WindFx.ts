@@ -727,7 +727,7 @@ export class WindFx {
    */
   coat(follow: (dt: number) => { moving: boolean; still: CoatPlace; move: CoatPlace }, element = 'Flying',
     shape: 'sphere' | 'tornado' = 'sphere', cel = false, overAuras?: (mesh: Mesh) => () => void,
-    underAuras?: (mesh: Mesh) => () => void): { release: () => Promise<void>; burst: () => Promise<void> } {
+    underAuras?: (mesh: Mesh) => () => void, alive?: () => boolean): { release: () => Promise<void>; burst: () => Promise<void> } {
     const undos: (() => void)[] = [];
     const st = windStyle(element);
     const tones = COAT_TONES[element];
@@ -766,6 +766,14 @@ export class WindFx {
     // The wipe's front, in the frame (y -1 ... TOP), from just under its foot to past its head.
     const front = (u: number) => -1 - COAT_WIPE_EDGE + (TOP + 1 + 2 * COAT_WIPE_EDGE) * (u * u * (3 - 2 * u));
     const obs = this.scene.onBeforeRenderObservable.add(() => {
+      // (Its wearer gone - taken off the field mid-move, its fight over: gone with it at once, never left standing.)
+      if (alive && !alive()) {
+        this.scene.onBeforeRenderObservable.remove(obs);
+        for (const u of undos) u();
+        for (const h of [...still.halves, ...move.halves]) this.dispose(h);
+        gone();
+        return;
+      }
       const dt = Math.min(0.1, this.scene.getEngine().getDeltaTime() / 1000);
       const f = follow(dt);
       if (f.moving !== moving) {
