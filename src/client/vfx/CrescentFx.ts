@@ -78,6 +78,8 @@ const MIN_R = 0.6, MAX_R = 1.15, MIN_SWEEP = 2.2, STEP = 0.02, FAST = 3, END_SPE
 const GROW_FROM = 0.55, GROW_T = 0.16, PUSH = 0.35, PUSH_UP = 0.3;
 /** Its front half: how far round from straight ahead (radians, up or down) all of its path is kept; how fast its turn there eases (per s). */
 const FRONT = 1.35, TURN_EASE = 30;
+/** A followed part's way from the middle, flattened onto the side plane: shorter than this (of 1), dropped - it barely shows side-on. */
+const FLAT_MIN = 0.3;
 
 // ── its look ────────────────────────────────────────────────────────
 /** The eroding edge's burning band (of the noise's range), white-hot. */
@@ -268,6 +270,9 @@ class SpherePath {
 
 export class CrescentFx {
   constructor(private readonly scene: Scene, private readonly camera: Camera) {}
+  /** Every cut still drawn: each gone at once by killAll (a fight's end). */
+  private readonly live = new Set<() => void>();
+  killAll(): void { for (const end of [...this.live]) { try { end(); } catch { /* gone */ } } this.live.clear(); }
 
   /** A crescent cut, now. */
   cut(shot: CrescentShot): CrescentPlay {
@@ -362,6 +367,7 @@ export class CrescentFx {
     const end = () => {
       if (gone) return;
       gone = true;
+      this.live.delete(end);
       if (obs) scene.onBeforeRenderObservable.remove(obs);
       for (const { mesh, mat } of layers) { mat.dispose(); mesh.dispose(); }
       sparks.dispose(); shards.dispose(); embers.dispose();
@@ -384,6 +390,7 @@ export class CrescentFx {
       return p;
     };
 
+    this.live.add(end);
     const rowD: Vector3[] = [], rowN: Vector3[] = [], rowF: number[] = [];
     // (Anything going wrong in a frame — its attacker gone, say: all of it gone at once, never left half made.)
     const frame = () => { try { step(); } catch (e) { end(); throw e; } };
@@ -439,6 +446,14 @@ export class CrescentFx {
             let acc = 0, from = dirs.length - 1;
             while (from > 0 && acc + angleOf(dirs[from - 1], dirs[from]) <= keep) { acc += angleOf(dirs[from - 1], dirs[from]); from--; }
             dirs = dirs.slice(Math.max(0, Math.min(from, dirs.length - 2)));
+          }
+          // (Flattened onto the side plane FIRST - what the camera sees of its part's swing - and only the points that
+          // show there kept: a swing mostly across the body, toward the camera or away, has a tiny side-on part, and
+          // flattened after its turn a little drift back would be blown up into a whole cut behind it - the slash
+          // flipped round against its swipe.)
+          {
+            const flat = dirs.map((d) => new Vector3(d.x, d.y, 0)).filter((d) => d.length() >= FLAT_MIN).map((d) => d.normalize());
+            dirs = flat.length >= 2 ? flat : [new Vector3(facing, 0.4, 0).normalize(), new Vector3(facing, -0.4, 0).normalize()];
           }
           // Kept on its front half, the side facing its foe: the whole path turned about its side axis (square to its
           // front and to the vertical) — the least turn that puts all of it within FRONT of straight ahead (a path

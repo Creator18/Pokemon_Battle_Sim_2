@@ -1910,7 +1910,7 @@ export class RecipeFactory implements UnitFactory {
   private crescents: CrescentFx | null = null;
 
   /** Every beam, ball and ember still alive, gone at once - a fight's end, nothing of it left drawn. */
-  killEffects(): void { this.beams?.killAll(); }
+  killEffects(): void { this.beams?.killAll(); this.crescents?.killAll(); }
 
   /** Its meshes' true visibility (Unit.baseVis): what its hidings and fadings put it back to. */
   private trueVis(u: Unit): number[] {
@@ -3015,6 +3015,8 @@ export class RecipeFactory implements UnitFactory {
       const floor = u.hover <= 0.05 ? node.position.y : undefined;
       return { centre: centre.clone(), radius, axis: way.scale(-1), band: bandOf(move), floor, roll: lattice ? rolled() : undefined };
     }, tone, ink ? undefined : light, bands, ink, over, lattice, back);
+    // (Both gone with their wearer, never left standing where it fought.)
+    upright.alive = trailing.alive = () => this.units.get(node) === u && !node.isDisposed();
     return { release: () => Promise.all([upright.release(), trailing.release()]).then(() => undefined) };
   }
 

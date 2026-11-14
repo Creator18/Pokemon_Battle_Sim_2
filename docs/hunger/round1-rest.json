@@ -1,0 +1,17 @@
+{
+  "round": 1,
+  "note": "Last two series of round 1 (replayed after a reload; flight limit and the no-hover rule in force).",
+  "series": [
+    { "a": "d3-lucario", "b": "d2-gengar", "winner": "d2-gengar", "wins": [0, 2], "battles": [
+      { "s": "d3-lucario v d2-gengar: B KO 104.1s hp 0/0.11", "hits": { "B:Moongeist Beam": [6, 1236], "A:Bullet Punch": [31, 2511], "B:Sucker Punch": [11, 1342], "B:Shadow Claw": [6, 516] } },
+      { "s": "d2-gengar v d3-lucario: A KO 102.4s hp 0.05/0", "cleared": ["crescentEdge", "crescentBodyBack", "crescentGlow", "crescentBody"],
+        "hits": { "A:Moongeist Beam": [5, 1030], "B:Bullet Punch": [33, 2673], "A:Sucker Punch": [10, 1220], "A:Shadow Claw": [9, 774] } } ] },
+    { "a": "d8-greninja", "b": "d1-charizard", "winner": "d1-charizard", "wins": [0, 2], "battles": [
+      { "s": "d8-greninja v d1-charizard: B KO 67.3s hp 0/0.36", "cleared": ["crescentBodyBack", "crescentEdge", "crescentGlow", "crescentBody", "particles:qsDust", "particles:qsDust"],
+        "hits": { "B:Sky Attack": [15, 2507], "A:Sucker Punch": [9, 977], "B:Quick Attack": [8, 328], "A:Wave Crash": [4, 1070], "A:Wave Crash recoil": [4, 354] } },
+      { "s": "d1-charizard v d8-greninja: A KO 80s hp 0.04/0", "cleared": ["particles:qsDust", "particles:qsDust"],
+        "hits": { "B:Sucker Punch": [6, 1214], "A:Sky Attack": [13, 2204], "A:Quick Attack": [8, 328], "B:Wave Crash": [5, 1471], "B:Wave Crash recoil": [5, 485], "B:Hydro Cannon": [1, 354], "A:Fire Blast": [2, 194] } } ] }
+  ],
+  "brainErrors": "none",
+  "advanced": ["d10-jolteon", "d4-garchomp", "d5-gyarados", "d2-gengar", "d1-charizard"]
+}

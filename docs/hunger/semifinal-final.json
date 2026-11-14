@@ -1,0 +1,466 @@
+{
+ "semifinal": {
+  "a": "d4-garchomp",
+  "b": "d5-gyarados",
+  "wins": {
+   "d4-garchomp": 0,
+   "d5-gyarados": 2
+  },
+  "battles": [
+   {
+    "a": "d4-garchomp",
+    "b": "d5-gyarados",
+    "clearedBefore": [],
+    "kits": {
+     "a": {
+      "ranged": "Dragon Energy",
+      "close": "Dragon Rush",
+      "control": "Counter"
+     },
+     "b": {
+      "ranged": "Hydro Cannon",
+      "close": "Sky Attack",
+      "mobility": "Aqua Jet",
+      "control": "Detect"
+     }
+    },
+    "kitFixes": {
+     "a": [],
+     "b": []
+    },
+    "winner": "B",
+    "decided": "KO",
+    "t": 57.6,
+    "hp": {
+     "a": 0,
+     "b": 0.48
+    },
+    "hits": {
+     "B:Sky Attack": [
+      17,
+      3105
+     ],
+     "B:Aqua Jet": [
+      11,
+      715
+     ],
+     "A:Counter": [
+      1,
+      444
+     ],
+     "A:Dragon Energy": [
+      1,
+      162
+     ],
+     "A:Dragon Rush": [
+      7,
+      1217
+     ]
+    },
+    "statuses": [],
+    "brainErrors": {
+     "a": [],
+     "b": []
+    },
+    "events": [
+     "22.11 counter: Garchomp (you) on Gyarados (boss)'s Aqua Jet (129)",
+     "24.15 Gyarados (boss) Sky Attack → Garchomp (you) −182 (2161/3780)",
+     "24.9 Gyarados (boss) Aqua Jet → Garchomp (you) −65 (2096/3780)",
+     "26.49 Garchomp (you) Dragon Rush → Gyarados (boss) −176 (2401/3520)",
+     "27.86 Gyarados (boss) Sky Attack → Garchomp (you) −182 (1914/3780)",
+     "28.6 counter: Garchomp (you) on Gyarados (boss)'s Aqua Jet (129)",
+     "30.67 Gyarados (boss) Sky Attack → Garchomp (you) −182 (1732/3780)",
+     "31.42 Gyarados (boss) Aqua Jet → Garchomp (you) −65 (1667/3780)",
+     "32.99 Garchomp (you) Dragon Rush → Gyarados (boss) −178 (2223/3520)",
+     "34.33 Gyarados (boss) Sky Attack → Garchomp (you) −177 (1490/3780)",
+     "35.07 counter: Garchomp (you) on Gyarados (boss)'s Aqua Jet (129)",
+     "37.1 Gyarados (boss) Sky Attack → Garchomp (you) −180 (1310/3780)",
+     "37.83 Gyarados (boss) Aqua Jet → Garchomp (you) −65 (1245/3780)",
+     "39.51 Garchomp (you) Dragon Rush → Gyarados (boss) −181 (2042/3520)",
+     "40.86 Gyarados (boss) Sky Attack → Garchomp (you) −178 (1067/3780)",
+     "41.61 counter: Garchomp (you) on Gyarados (boss)'s Aqua Jet (129)",
+     "43.67 Gyarados (boss) Sky Attack → Garchomp (you) −182 (885/3780)",
+     "44.46 Gyarados (boss) Aqua Jet → Garchomp (you) −65 (820/3780)",
+     "46.06 Garchomp (you) Dragon Rush → Gyarados (boss) −181 (1861/3520)",
+     "47.37 Gyarados (boss) Sky Attack → Garchomp (you) −176 (644/3780)",
+     "48.15 counter: Garchomp (you) on Gyarados (boss)'s Aqua Jet (129)",
+     "50.2 Gyarados (boss) Sky Attack → Garchomp (you) −181 (463/3780)",
+     "50.96 Gyarados (boss) Aqua Jet → Garchomp (you) −65 (398/3780)",
+     "52.43 Garchomp (you) Dragon Rush → Gyarados (boss) −164 (1697/3520)",
+     "53.91 Gyarados (boss) Sky Attack → Garchomp (you) −191 (207/3780)",
+     "54.68 counter: Garchomp (you) on Gyarados (boss)'s Aqua Jet (129)",
+     "56.73 Gyarados (boss) Sky Attack → Garchomp (you) −182 (25/3780)",
+     "57.56 Gyarados (boss) Aqua Jet → Garchomp (you) −65 (0/3780)",
+     "57.56 Garchomp (you) fainted",
+     "57.59 you lose"
+    ]
+   },
+   {
+    "a": "d5-gyarados",
+    "b": "d4-garchomp",
+    "clearedBefore": [
+     "particles:qsDust",
+     "particles:qsDust",
+     "particles:qsDust"
+    ],
+    "kits": {
+     "a": {
+      "ranged": "Hydro Cannon",
+      "close": "Sky Attack",
+      "mobility": "Aqua Jet",
+      "control": "Detect"
+     },
+     "b": {
+      "ranged": "Dragon Energy",
+      "close": "Dragon Rush",
+      "control": "Counter"
+     }
+    },
+    "kitFixes": {
+     "a": [],
+     "b": []
+    },
+    "winner": "A",
+    "decided": "KO",
+    "t": 59.5,
+    "hp": {
+     "a": 0.34,
+     "b": 0
+    },
+    "hits": {
+     "A:Sky Attack": [
+      17,
+      3095
+     ],
+     "A:Aqua Jet": [
+      11,
+      715
+     ],
+     "B:Counter": [
+      1,
+      444
+     ],
+     "B:Dragon Energy": [
+      4,
+      648
+     ],
+     "B:Dragon Rush": [
+      7,
+      1238
+     ]
+    },
+    "statuses": [],
+    "brainErrors": {
+     "a": [],
+     "b": []
+    },
+    "events": [
+     "27.07 Garchomp (boss) Dragon Rush → Gyarados (you) −180 (2385/3520)",
+     "28.72 Garchomp (boss) Dragon Energy → Gyarados (you) −162 (2223/3520)",
+     "28.84 Gyarados (you) Sky Attack → Garchomp (boss) −181 (1923/3780)",
+     "29.59 counter: Garchomp (boss) on Gyarados (you)'s Aqua Jet (129)",
+     "31.71 Gyarados (you) Sky Attack → Garchomp (boss) −182 (1741/3780)",
+     "32.49 Gyarados (you) Aqua Jet → Garchomp (boss) −65 (1676/3780)",
+     "34.11 Garchomp (boss) Dragon Rush → Gyarados (you) −182 (2041/3520)",
+     "35.71 Garchomp (boss) Dragon Energy → Gyarados (you) −162 (1879/3520)",
+     "35.82 Gyarados (you) Sky Attack → Garchomp (boss) −178 (1498/3780)",
+     "36.57 counter: Garchomp (boss) on Gyarados (you)'s Aqua Jet (129)",
+     "38.65 Gyarados (you) Sky Attack → Garchomp (boss) −182 (1316/3780)",
+     "39.41 Gyarados (you) Aqua Jet → Garchomp (boss) −65 (1251/3780)",
+     "40.99 Garchomp (boss) Dragon Rush → Gyarados (you) −174 (1705/3520)",
+     "42.33 Gyarados (you) Sky Attack → Garchomp (boss) −179 (1072/3780)",
+     "43.08 counter: Garchomp (boss) on Gyarados (you)'s Aqua Jet (129)",
+     "45.06 Gyarados (you) Sky Attack → Garchomp (boss) −182 (890/3780)",
+     "45.79 Gyarados (you) Aqua Jet → Garchomp (boss) −65 (825/3780)",
+     "47.33 Garchomp (boss) Dragon Rush → Gyarados (you) −176 (1529/3520)",
+     "48.7 Gyarados (you) Sky Attack → Garchomp (boss) −180 (645/3780)",
+     "49.48 counter: Garchomp (boss) on Gyarados (you)'s Aqua Jet (129)",
+     "51.57 Gyarados (you) Sky Attack → Garchomp (boss) −182 (463/3780)",
+     "52.32 Gyarados (you) Aqua Jet → Garchomp (boss) −65 (398/3780)",
+     "53.9 Garchomp (boss) Dragon Rush → Gyarados (you) −177 (1352/3520)",
+     "55.54 Garchomp (boss) Dragon Energy → Gyarados (you) −162 (1190/3520)",
+     "55.66 Gyarados (you) Sky Attack → Garchomp (boss) −181 (217/3780)",
+     "56.4 counter: Garchomp (boss) on Gyarados (you)'s Aqua Jet (129)",
+     "58.5 Gyarados (you) Sky Attack → Garchomp (boss) −182 (35/3780)",
+     "59.25 Gyarados (you) Aqua Jet → Garchomp (boss) −65 (0/3780)",
+     "59.25 Garchomp (boss) fainted",
+     "59.28 you win"
+    ]
+   }
+  ],
+  "winner": "d5-gyarados"
+ },
+ "final": {
+  "a": "d5-gyarados",
+  "b": "d10-jolteon",
+  "wins": {
+   "d5-gyarados": 3,
+   "d10-jolteon": 0
+  },
+  "battles": [
+   {
+    "a": "d5-gyarados",
+    "b": "d10-jolteon",
+    "clearedBefore": [
+     "particles:qsDust",
+     "particles:qsDust"
+    ],
+    "kits": {
+     "a": {
+      "ranged": "Hydro Cannon",
+      "close": "Sky Attack",
+      "mobility": "Aqua Jet",
+      "control": "Detect"
+     },
+     "b": {
+      "ranged": "Electro Shot",
+      "close": "Giga Impact",
+      "mobility": "Extreme Speed",
+      "control": "Detect"
+     }
+    },
+    "kitFixes": {
+     "a": [],
+     "b": []
+    },
+    "winner": "A",
+    "decided": "KO",
+    "t": 79.1,
+    "hp": {
+     "a": 0.63,
+     "b": 0
+    },
+    "hits": {
+     "A:Aqua Jet": [
+      21,
+      1890
+     ],
+     "A:Sky Attack": [
+      9,
+      1102
+     ],
+     "B:Extreme Speed": [
+      20,
+      1200
+     ],
+     "B:Giga Impact": [
+      1,
+      101
+     ]
+    },
+    "statuses": [],
+    "brainErrors": {
+     "a": [],
+     "b": []
+    },
+    "events": [
+     "37.79 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2699/3520)",
+     "40.9 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2639/3520)",
+     "41 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1736/2920)",
+     "42.13 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1646/2920)",
+     "42.71 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2579/3520)",
+     "46.03 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1556/2920)",
+     "47.5 Gyarados (you) Sky Attack → Jolteon (boss) −116 (1440/2920)",
+     "47.94 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2519/3520)",
+     "48.25 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1350/2920)",
+     "49.09 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1260/2920)",
+     "51.79 Gyarados (you) Sky Attack → Jolteon (boss) −116 (1144/2920)",
+     "52.06 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2459/3520)",
+     "53.57 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1054/2920)",
+     "55.17 Gyarados (you) Sky Attack → Jolteon (boss) −130 (924/2920)",
+     "55.61 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2399/3520)",
+     "56 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (834/2920)",
+     "59.63 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (744/2920)",
+     "62.93 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (654/2920)",
+     "64.81 Gyarados (you) Sky Attack → Jolteon (boss) −135 (519/2920)",
+     "66.2 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (429/2920)",
+     "66.31 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2339/3520)",
+     "68.89 Gyarados (you) Sky Attack → Jolteon (boss) −118 (311/2920)",
+     "69.16 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2279/3520)",
+     "69.68 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (221/2920)",
+     "72.97 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (131/2920)",
+     "73.68 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2219/3520)",
+     "77.38 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (41/2920)",
+     "79 Gyarados (you) Sky Attack → Jolteon (boss) −113 (0/2920)",
+     "79 Jolteon (boss) fainted",
+     "79 you win"
+    ]
+   },
+   {
+    "a": "d10-jolteon",
+    "b": "d5-gyarados",
+    "clearedBefore": [],
+    "kits": {
+     "a": {
+      "ranged": "Electro Shot",
+      "close": "Giga Impact",
+      "mobility": "Extreme Speed",
+      "control": "Detect"
+     },
+     "b": {
+      "ranged": "Hydro Cannon",
+      "close": "Sky Attack",
+      "mobility": "Aqua Jet",
+      "control": "Detect"
+     }
+    },
+    "kitFixes": {
+     "a": [],
+     "b": []
+    },
+    "winner": "B",
+    "decided": "KO",
+    "t": 101.9,
+    "hp": {
+     "a": 0,
+     "b": 0.42
+    },
+    "hits": {
+     "B:Aqua Jet": [
+      19,
+      1710
+     ],
+     "A:Extreme Speed": [
+      28,
+      1680
+     ],
+     "A:Giga Impact": [
+      4,
+      378
+     ],
+     "B:Sky Attack": [
+      10,
+      1260
+     ]
+    },
+    "statuses": [],
+    "brainErrors": {
+     "a": [],
+     "b": []
+    },
+    "events": [
+     "60.78 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (2542/3520)",
+     "66.21 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (2482/3520)",
+     "66.21 Gyarados (boss) Aqua Jet → Jolteon (you) −90 (980/2920)",
+     "67.61 Jolteon (you) Giga Impact → Gyarados (boss) −97 (2385/3520)",
+     "68.38 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (2325/3520)",
+     "70.3 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (2265/3520)",
+     "73.07 Gyarados (boss) Sky Attack → Jolteon (you) −142 (838/2920)",
+     "74.1 Gyarados (boss) Aqua Jet → Jolteon (you) −90 (748/2920)",
+     "75.22 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (2205/3520)",
+     "76.21 Jolteon (you) Giga Impact → Gyarados (boss) −104 (2101/3520)",
+     "77.01 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (2041/3520)",
+     "79.1 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (1981/3520)",
+     "82.27 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (1921/3520)",
+     "82.3 Gyarados (boss) Aqua Jet → Jolteon (you) −90 (658/2920)",
+     "84.48 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (1861/3520)",
+     "85.82 Jolteon (you) Giga Impact → Gyarados (boss) −99 (1762/3520)",
+     "86.56 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (1702/3520)",
+     "88.72 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (1642/3520)",
+     "92.06 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (1582/3520)",
+     "92.13 Gyarados (boss) Aqua Jet → Jolteon (you) −90 (568/2920)",
+     "93.28 Gyarados (boss) Sky Attack → Jolteon (you) −108 (460/2920)",
+     "95.76 Gyarados (boss) Sky Attack → Jolteon (you) −122 (338/2920)",
+     "96.19 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (1522/3520)",
+     "96.5 Gyarados (boss) Aqua Jet → Jolteon (you) −90 (248/2920)",
+     "97.35 Gyarados (boss) Aqua Jet → Jolteon (you) −90 (158/2920)",
+     "100.05 Gyarados (boss) Sky Attack → Jolteon (you) −118 (40/2920)",
+     "100.27 Jolteon (you) Extreme Speed → Gyarados (boss) −60 (1462/3520)",
+     "101.89 Gyarados (boss) Aqua Jet → Jolteon (you) −90 (0/2920)",
+     "101.89 Jolteon (you) fainted",
+     "101.92 you lose"
+    ]
+   },
+   {
+    "a": "d5-gyarados",
+    "b": "d10-jolteon",
+    "clearedBefore": [
+     "particles:qsDust",
+     "particles:qsDust"
+    ],
+    "kits": {
+     "a": {
+      "ranged": "Hydro Cannon",
+      "close": "Sky Attack",
+      "mobility": "Aqua Jet",
+      "control": "Detect"
+     },
+     "b": {
+      "ranged": "Electro Shot",
+      "close": "Giga Impact",
+      "mobility": "Extreme Speed",
+      "control": "Detect"
+     }
+    },
+    "kitFixes": {
+     "a": [],
+     "b": []
+    },
+    "winner": "A",
+    "decided": "KO",
+    "t": 77.1,
+    "hp": {
+     "a": 0.73,
+     "b": 0
+    },
+    "hits": {
+     "A:Aqua Jet": [
+      19,
+      1710
+     ],
+     "A:Sky Attack": [
+      10,
+      1298
+     ],
+     "B:Extreme Speed": [
+      14,
+      840
+     ],
+     "B:Giga Impact": [
+      1,
+      104
+     ]
+    },
+    "statuses": [],
+    "brainErrors": {
+     "a": [],
+     "b": []
+    },
+    "events": [
+     "25.77 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1611/2920)",
+     "29.4 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1521/2920)",
+     "30.12 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (3220/3520)",
+     "35.86 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1431/2920)",
+     "36.58 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (3160/3520)",
+     "41.15 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1341/2920)",
+     "42.6 Gyarados (you) Sky Attack → Jolteon (boss) −120 (1221/2920)",
+     "43.02 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (3100/3520)",
+     "43.36 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1131/2920)",
+     "44.4 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (1041/2920)",
+     "46.75 Gyarados (you) Sky Attack → Jolteon (boss) −139 (902/2920)",
+     "49.58 Gyarados (you) Sky Attack → Jolteon (boss) −124 (778/2920)",
+     "49.95 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (3040/3520)",
+     "51.01 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2980/3520)",
+     "52.86 Gyarados (you) Sky Attack → Jolteon (boss) −142 (636/2920)",
+     "53.89 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (546/2920)",
+     "59.09 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (456/2920)",
+     "59.78 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2920/3520)",
+     "60.84 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2860/3520)",
+     "64.07 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (366/2920)",
+     "67 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (276/2920)",
+     "68.62 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2800/3520)",
+     "69.59 Jolteon (boss) Giga Impact → Gyarados (you) −104 (2696/3520)",
+     "70.36 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2636/3520)",
+     "72.36 Jolteon (boss) Extreme Speed → Gyarados (you) −60 (2576/3520)",
+     "73.98 Gyarados (you) Sky Attack → Jolteon (boss) −142 (134/2920)",
+     "76.29 Gyarados (you) Sky Attack → Jolteon (boss) −132 (2/2920)",
+     "77.03 Gyarados (you) Aqua Jet → Jolteon (boss) −90 (0/2920)",
+     "77.03 Jolteon (boss) fainted",
+     "77.06 you win"
+    ]
+   }
+  ],
+  "winner": "d5-gyarados"
+ },
+ "champion": "d5-gyarados"
+}

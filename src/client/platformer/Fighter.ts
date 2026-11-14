@@ -168,6 +168,13 @@ const AIR_JUMP = 0.85;
 export const FLY_CAP = 6;
 /** Grounded (out of the sky — knocked down, or landed): how long before it can take off again (s), but for a mobility move aimed up. */
 export const FLY_RELOCK = 3;
+/**
+ * How long a flier may stay up (s of flight in a row, under FLY_CAP as ever): free in the air meanwhile, then out of the
+ * sky - it falls, and can't take off again till FLY_RELOCK s after it lands (its time back in full on landing).
+ */
+export const FLY_TIME = 5;
+/** Out of flight: its jump-down's start played this long (s) before its fall's loop - down out of the sky, not just dropped. */
+const DROP_START = 0.35;
 /** Struck in flight: its chance to be knocked out of the sky — FALL_LOW right by the ground, down to FALL_HIGH at FLY_CAP up and above. */
 const FALL_LOW = 0.9, FALL_HIGH = 0.2;
 /** Its aim up or down (radians from level, at full aim). */
@@ -330,6 +337,8 @@ const SMOKE_REACH = 6;
  *  the body, facing what it strikes. */
 const SLASH_LOOK: Record<string, { width: number; arc: number; push?: number }> = { Scratch: { width: 0.55, arc: 0.7, push: 0.75 } };
 const slashType = (move: string): string | null => CLOSE_MOVES[move] ?? clawFor(move)?.element ?? null;
+/** A slash or a claw (its close move cut as a crescent). */
+export const isSlashMove = (move?: string | null): boolean => !!move && !!slashType(move);
 /** A plain contact blow (Close Combat, Thrash, Outrage, Iron Tail, Fire Fang…): a flurry, more and faster blows the stronger. */
 export const isFlurry = (move?: string | null): boolean => {
   const m = move ? getMove(move) : null;
@@ -472,6 +481,12 @@ export class Fighter {
   private airJumped = false;
   /** Can take off again from this (its own clock): out of the sky, FLY_RELOCK s after it lands (Infinity till it has). */
   flyReadyAt = 0;
+  /** How long it has been flying this time up (s): out of the sky at FLY_TIME. */
+  flownFor = 0;
+  /** Out of flight just now: its jump-down's start playing till this (its own clock). */
+  private dropUntil = -1;
+  /** Its flight left this time up (s). */
+  get flightLeft(): number { return Math.max(0, FLY_TIME - this.flownFor); }
   private dashT = 0; private dashCool = 0; private ghostT = 0; private airDash = true; private quickCool = 0;
   private reach: Reach | null = null; private measured = 0;
   /** Its beam out now (charging or pouring), if any. */
@@ -631,7 +646,7 @@ export class Fighter {
     this.beam?.play.cancel?.(); this.beam = null;
     this.dropBalls(true); this.stopRam(); this.confusedUntil = -1;
     this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null; this.aiming = null;
-    this.counterUntil = -1; this.lagUntil = 0; this.flyReadyAt = 0;
+    this.counterUntil = -1; this.lagUntil = 0; this.flyReadyAt = 0; this.flownFor = 0;
     this.readyAt.clear(); this.coolLen.clear(); this.heat.clear(); this.run = null; this.agilityUntil = -1;
   }
 
@@ -800,6 +815,11 @@ export class Fighter {
     if (it.jumpPressed && !this.aiming) this.sinceJumpPress = 0;
     this.jumpHeld = it.jumpHeld && !this.aiming;
     this.sinceGround = this.grounded ? 0 : this.sinceGround + dt;
+    // (Its flight's time: up too long, out of the sky - falling, not up again till FLY_RELOCK s after it lands.)
+    if (this.flying) {
+      this.flownFor += dt;
+      if (this.flownFor >= FLY_TIME) { this.flying = false; this.flyReadyAt = Infinity; this.dropUntil = this.time + DROP_START; this.arenaRef?.onStatus?.(this, 'out of flight', 0); }
+    } else if (this.grounded) this.flownFor = 0;
     this.sinceJumpPress += dt;
     if (this.knockT > 0) {
       // Thrown back: carried by the throw, dying away; it falls (flying, it just drifts).
@@ -1680,7 +1700,7 @@ export class Fighter {
     void this.factory.playQuickStep(this.node, at, land, strike, type, !!struck).then(() => {
       if (coat) void (struck && coat.burst ? coat.burst() : coat.release());
       if (struck && !struck.down) struck.takeHit(this, move, () => this.factory.playHitReact(struck.node), arena);
-      if (this.canFly && this.aim > 0 && this.y > 1e-3) this.flying = true;
+      if (this.canFly && this.aim > 0 && this.y > 1e-3 && this.flownFor < FLY_TIME && this.flyReadyAt !== Infinity) this.flying = true;
       this.quick = false; this.quickCool = QUICK_COOL; this.using = ''; this.finishRun(k);
       setTimeout(() => { if (!this.firing && !this.quick) this.clip = ''; }, 350);
     });
@@ -1935,7 +1955,7 @@ export class Fighter {
       this.face(faceThere, true);
       this.grounded = this.y <= 1e-3;
       // (Aimed up, a flier is carried into the sky — even out of it for now: the way up past its wait.)
-      if (!this.grounded && this.canFly && this.aim > 0) this.flying = true;
+      if (!this.grounded && this.canFly && this.aim > 0 && this.flownFor < FLY_TIME && this.flyReadyAt !== Infinity) this.flying = true;
       this.quick = false; this.quickCool = o.cool ?? TELEPORT_COOL; this.using = ''; this.finishRun(k);
       // (Its resting clip, as the teleport eased it in — named so, not played again over it with a snap.)
       this.clip = this.restingClip();
@@ -2415,7 +2435,7 @@ export class Fighter {
   private animate(): void {
     const want = this.flying ? (Math.abs(this.vx) > 0.6 ? 'airRun' : 'airIdle')
       : this.dashT > 0 ? 'zipPose'
-        : !this.grounded ? (this.vy > 0 ? 'jumpUpLoop' : 'jumpDownLoop')
+        : !this.grounded ? (this.time < this.dropUntil ? 'jumpDownStart' : this.vy > 0 ? 'jumpUpLoop' : 'jumpDownLoop')
           : this.landing > 0 ? 'land' : Math.abs(this.vx) > 0.6 ? 'run' : 'idle';
     if (want === this.clip) return;
     const player = this.factory.playerOf(this.node);
@@ -2425,6 +2445,6 @@ export class Fighter {
     const name = zip ?? (player.has(want) ? want : want === 'airRun' && player.has('airWalk') ? 'airWalk' : want.startsWith('air') && player.has('airIdle') ? 'airIdle'
       : want === 'land' ? 'idle' : player.has('idle') ? 'idle' : want);
     this.clip = want;
-    void player.play(name, { fade: want === 'land' ? 0.06 : 0.12, loop: want !== 'land' });
+    void player.play(name, { fade: want === 'land' ? 0.06 : 0.12, loop: want !== 'land' && want !== 'jumpDownStart' });
   }
 }

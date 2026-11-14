@@ -1,0 +1,13 @@
+{
+  "round": 1,
+  "note": "First three series of round 1 (bestOf 3, limit 150 s, speed 3). The page reloaded during Lucario v Gengar; that series is replayed.",
+  "series": [
+    { "a": "d10-jolteon", "b": "d6-alakazam", "winner": "d10-jolteon", "wins": [2, 0],
+      "battles": ["d10-jolteon v d6-alakazam: A KO 89.9s hp 0.34/0", "d6-alakazam v d10-jolteon: B KO 61.3s hp 0/0.65"] },
+    { "a": "d4-garchomp", "b": "d9-tyranitar", "winner": "d4-garchomp", "wins": [2, 0],
+      "battles": ["d4-garchomp v d9-tyranitar: A KO 80.8s hp 0.73/0", "d9-tyranitar v d4-garchomp: B KO 69.5s hp 0/0.71"] },
+    { "a": "d7-metagross", "b": "d5-gyarados", "winner": "d5-gyarados", "wins": [1, 2],
+      "battles": ["d7-metagross v d5-gyarados: A KO 114.2s hp 0.14/0", "d5-gyarados v d7-metagross: A KO 126.8s hp 0.02/0", "d7-metagross v d5-gyarados: B KO 128.2s hp 0/0.05"] }
+  ],
+  "strayCleared": "qsDust particles (self-clearing, in flight) and fireSphere aura meshes (a leak, fixed after round 1)"
+}

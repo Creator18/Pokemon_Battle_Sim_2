@@ -4,6 +4,9 @@ import { recipeAssets } from './server/recipeAssets.mjs';
 export default defineConfig({
   server: {
     port: 3000,
+    // (docs/ — demos, tournament harnesses, bot brains — is fetched fresh by the page, never imported: a change there
+    // must not reload the page mid-tournament.)
+    watch: { ignored: ['**/docs/**'] },
   },
   build: {
     target: 'es2020',

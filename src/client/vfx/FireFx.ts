@@ -464,7 +464,11 @@ export class FireSphere {
     this.update();
   }
 
+  /** Its wearer still there (set by its maker): once not - taken off the field mid-move, its fight over - gone at once. */
+  alive?: () => boolean;
+
   private update(): void {
+    if (this.alive && !this.alive()) { this.stop(); this.gone(); this.alive = undefined; return; }
     const dt = Math.min(0.05, this.scene.getEngine().getDeltaTime() / 1000);
     this.power = this.letGo ? Math.max(0, this.power - dt / FADE) : Math.min(1, this.power + dt / FADE);
     const f = this.follow();

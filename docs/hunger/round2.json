@@ -1,0 +1,351 @@
+{
+ "round": 2,
+ "bye": "d4-garchomp",
+ "series": [
+  {
+   "a": "d5-gyarados",
+   "b": "d2-gengar",
+   "wins": {
+    "d5-gyarados": 2,
+    "d2-gengar": 0
+   },
+   "battles": [
+    {
+     "a": "d5-gyarados",
+     "b": "d2-gengar",
+     "clearedBefore": [],
+     "kits": {
+      "a": {
+       "ranged": "Hydro Cannon",
+       "close": "Sky Attack",
+       "mobility": "Aqua Jet",
+       "control": "Detect"
+      },
+      "b": {
+       "ranged": "Moongeist Beam",
+       "close": "Shadow Claw",
+       "control": "Sucker Punch"
+      }
+     },
+     "kitFixes": {
+      "a": [],
+      "b": []
+     },
+     "winner": "A",
+     "decided": "KO",
+     "t": 27.6,
+     "hp": {
+      "a": 0.83,
+      "b": 0
+     },
+     "hits": {
+      "B:Moongeist Beam": [
+       3,
+       474
+      ],
+      "A:Sky Attack": [
+       9,
+       2520
+      ],
+      "B:Sucker Punch": [
+       1,
+       135
+      ],
+      "A:Aqua Jet": [
+       4,
+       360
+      ]
+     },
+     "statuses": [],
+     "brainErrors": {
+      "a": [],
+      "b": []
+     },
+     "events": [
+      "0 fight!",
+      "1.64 Gengar (boss) Moongeist Beam → Gyarados (you) −158 (3362/3520)",
+      "1.95 Gyarados (you) Sky Attack → Gengar (boss) −299 (2521/2820)",
+      "2.68 sucker punch: Gengar (boss) on Gyarados (you)'s Aqua Jet (135)",
+      "5.56 Gyarados (you) Sky Attack → Gengar (boss) −305 (2216/2820)",
+      "6.29 sucker punch: Gengar (boss) on Gyarados (you)'s Aqua Jet (135)",
+      "7.27 Gengar (boss) Sucker Punch → Gyarados (you) −135 (3227/3520)",
+      "8.44 Gyarados (you) Sky Attack → Gengar (boss) −215 (2001/2820)",
+      "9.18 Gyarados (you) Aqua Jet → Gengar (boss) −90 (1911/2820)",
+      "11.17 Gyarados (you) Sky Attack → Gengar (boss) −286 (1625/2820)",
+      "11.91 sucker punch: Gengar (boss) on Gyarados (you)'s Aqua Jet (135)",
+      "14.57 Gyarados (you) Sky Attack → Gengar (boss) −305 (1320/2820)",
+      "15.32 Gyarados (you) Aqua Jet → Gengar (boss) −90 (1230/2820)",
+      "17.25 Gengar (boss) Moongeist Beam → Gyarados (you) −158 (3069/3520)",
+      "17.33 Gyarados (you) Sky Attack → Gengar (boss) −272 (958/2820)",
+      "18.07 sucker punch: Gengar (boss) on Gyarados (you)'s Aqua Jet (135)",
+      "21.02 Gyarados (you) Sky Attack → Gengar (boss) −306 (652/2820)",
+      "21.75 Gyarados (you) Aqua Jet → Gengar (boss) −90 (562/2820)",
+      "23.68 Gengar (boss) Moongeist Beam → Gyarados (you) −158 (2911/3520)",
+      "23.72 Gyarados (you) Sky Attack → Gengar (boss) −267 (295/2820)",
+      "24.49 sucker punch: Gengar (boss) on Gyarados (you)'s Aqua Jet (135)",
+      "26.63 Gyarados (you) Sky Attack → Gengar (boss) −265 (30/2820)",
+      "27.41 Gyarados (you) Aqua Jet → Gengar (boss) −90 (0/2820)",
+      "27.41 Gengar (boss) fainted",
+      "27.44 you win"
+     ]
+    },
+    {
+     "a": "d2-gengar",
+     "b": "d5-gyarados",
+     "clearedBefore": [
+      "particles:qsDust",
+      "particles:qsDust"
+     ],
+     "kits": {
+      "a": {
+       "ranged": "Moongeist Beam",
+       "close": "Shadow Claw",
+       "control": "Sucker Punch"
+      },
+      "b": {
+       "ranged": "Hydro Cannon",
+       "close": "Sky Attack",
+       "mobility": "Aqua Jet",
+       "control": "Detect"
+      }
+     },
+     "kitFixes": {
+      "a": [],
+      "b": []
+     },
+     "winner": "B",
+     "decided": "KO",
+     "t": 36.2,
+     "hp": {
+      "a": 0,
+      "b": 0.74
+     },
+     "hits": {
+      "A:Moongeist Beam": [
+       5,
+       790
+      ],
+      "B:Sky Attack": [
+       9,
+       2455
+      ],
+      "A:Sucker Punch": [
+       1,
+       135
+      ],
+      "B:Aqua Jet": [
+       5,
+       450
+      ]
+     },
+     "statuses": [],
+     "brainErrors": {
+      "a": [],
+      "b": []
+     },
+     "events": [
+      "0 fight!",
+      "1.65 Gengar (you) Moongeist Beam → Gyarados (boss) −158 (3362/3520)",
+      "1.95 Gyarados (boss) Sky Attack → Gengar (you) −296 (2524/2820)",
+      "2.72 sucker punch: Gengar (you) on Gyarados (boss)'s Aqua Jet (135)",
+      "6.34 sucker punch: Gengar (you) on Gyarados (boss)'s Aqua Jet (135)",
+      "7.39 Gengar (you) Sucker Punch → Gyarados (boss) −135 (3227/3520)",
+      "8.6 Gyarados (boss) Sky Attack → Gengar (you) −215 (2309/2820)",
+      "9.33 Gyarados (boss) Aqua Jet → Gengar (you) −90 (2219/2820)",
+      "11.27 Gyarados (boss) Sky Attack → Gengar (you) −281 (1938/2820)",
+      "12.01 sucker punch: Gengar (you) on Gyarados (boss)'s Aqua Jet (135)",
+      "15.66 Gyarados (boss) Aqua Jet → Gengar (you) −90 (1848/2820)",
+      "17.58 Gengar (you) Moongeist Beam → Gyarados (boss) −158 (3069/3520)",
+      "17.63 Gyarados (boss) Sky Attack → Gengar (you) −270 (1578/2820)",
+      "18.36 sucker punch: Gengar (you) on Gyarados (boss)'s Aqua Jet (135)",
+      "21.98 Gyarados (boss) Aqua Jet → Gengar (you) −90 (1488/2820)",
+      "23.95 Gengar (you) Moongeist Beam → Gyarados (boss) −158 (2911/3520)",
+      "23.98 Gyarados (boss) Sky Attack → Gengar (you) −275 (1213/2820)",
+      "24.75 sucker punch: Gengar (you) on Gyarados (boss)'s Aqua Jet (135)",
+      "26.93 Gyarados (boss) Sky Attack → Gengar (you) −269 (944/2820)",
+      "27.7 Gyarados (boss) Aqua Jet → Gengar (you) −90 (854/2820)",
+      "29.69 Gengar (you) Moongeist Beam → Gyarados (boss) −158 (2753/3520)",
+      "29.76 Gyarados (boss) Sky Attack → Gengar (you) −276 (578/2820)",
+      "30.55 sucker punch: Gengar (you) on Gyarados (boss)'s Aqua Jet (135)",
+      "33.38 Gyarados (boss) Sky Attack → Gengar (you) −303 (275/2820)",
+      "34.14 Gyarados (boss) Aqua Jet → Gengar (you) −90 (185/2820)",
+      "36.08 Gengar (you) Moongeist Beam → Gyarados (boss) −158 (2595/3520)",
+      "36.12 Gyarados (boss) Sky Attack → Gengar (you) −270 (0/2820)",
+      "36.12 Gengar (you) fainted",
+      "36.12 you lose"
+     ]
+    }
+   ],
+   "winner": "d5-gyarados"
+  },
+  {
+   "a": "d10-jolteon",
+   "b": "d1-charizard",
+   "wins": {
+    "d10-jolteon": 2,
+    "d1-charizard": 0
+   },
+   "battles": [
+    {
+     "a": "d10-jolteon",
+     "b": "d1-charizard",
+     "clearedBefore": [
+      "particles:qsDust",
+      "particles:qsDust"
+     ],
+     "kits": {
+      "a": {
+       "ranged": "Electro Shot",
+       "close": "Giga Impact",
+       "mobility": "Zippy Zap",
+       "control": "Detect"
+      },
+      "b": {
+       "ranged": "Fire Blast",
+       "close": "Flare Blitz",
+       "mobility": "Quick Attack",
+       "control": "Detect"
+      }
+     },
+     "kitFixes": {
+      "a": [],
+      "b": []
+     },
+     "winner": "A",
+     "decided": "KO",
+     "t": 31,
+     "hp": {
+      "a": 0.92,
+      "b": 0
+     },
+     "hits": {
+      "A:Electro Shot": [
+       3,
+       2387
+      ],
+      "A:Zippy Zap": [
+       4,
+       720
+      ],
+      "B:Flare Blitz": [
+       1,
+       189
+      ],
+      "B:Flare Blitz recoil": [
+       1,
+       62
+      ],
+      "B:Quick Attack": [
+       1,
+       44
+      ],
+      "A:Giga Impact": [
+       1,
+       109
+      ]
+     },
+     "statuses": [],
+     "brainErrors": {
+      "a": [],
+      "b": []
+     },
+     "events": [
+      "0 fight!",
+      "0.35 clash: Charizard (boss) Fire Blast × Jolteon (you) Electro Shot at 0.52",
+      "4.58 clash over → Jolteon (you) wins (stops 967 / 973, outright)",
+      "4.58 Jolteon (you) Electro Shot → Charizard (boss) −799 (2381/3180)",
+      "10.31 clash: Charizard (boss) Fire Blast × Jolteon (you) Electro Shot at 0.5",
+      "14.23 clash over → Jolteon (you) wins (stops 999 / 962, outright)",
+      "14.23 Jolteon (you) Electro Shot → Charizard (boss) −795 (1586/3180)",
+      "16.51 Jolteon (you) Zippy Zap → Charizard (boss) −180 (1406/3180)",
+      "18.08 Jolteon (you) Zippy Zap → Charizard (boss) −180 (1226/3180)",
+      "19.12 clash: Charizard (boss) Fire Blast × Jolteon (you) Electro Shot at 0.5",
+      "23.12 clash over → Jolteon (you) wins (stops 968 / 957, outright)",
+      "23.12 Jolteon (you) Electro Shot → Charizard (boss) −793 (433/3180)",
+      "25.57 Charizard (boss) Flare Blitz → Jolteon (you) −189 (2731/2920)",
+      "25.57 Charizard (boss) Flare Blitz recoil → Charizard (boss) −62 (371/3180)",
+      "26.34 Charizard (boss) Quick Attack → Jolteon (you) −44 (2687/2920)",
+      "27.69 Jolteon (you) Zippy Zap → Charizard (boss) −180 (191/3180)",
+      "29.31 Jolteon (you) Zippy Zap → Charizard (boss) −180 (11/3180)",
+      "30.82 Jolteon (you) Giga Impact → Charizard (boss) −109 (0/3180)",
+      "30.82 Charizard (boss) fainted",
+      "30.82 you win"
+     ]
+    },
+    {
+     "a": "d1-charizard",
+     "b": "d10-jolteon",
+     "clearedBefore": [
+      "particles:qsDust",
+      "particles:qsDust"
+     ],
+     "kits": {
+      "a": {
+       "ranged": "Fire Blast",
+       "close": "Flare Blitz",
+       "mobility": "Quick Attack",
+       "control": "Detect"
+      },
+      "b": {
+       "ranged": "Electro Shot",
+       "close": "Giga Impact",
+       "mobility": "Zippy Zap",
+       "control": "Detect"
+      }
+     },
+     "kitFixes": {
+      "a": [],
+      "b": []
+     },
+     "winner": "B",
+     "decided": "KO",
+     "t": 35.8,
+     "hp": {
+      "a": 0,
+      "b": 1
+     },
+     "hits": {
+      "B:Electro Shot": [
+       3,
+       2413
+      ],
+      "B:Zippy Zap": [
+       5,
+       900
+      ],
+      "B:Giga Impact": [
+       1,
+       105
+      ]
+     },
+     "statuses": [],
+     "brainErrors": {
+      "a": [],
+      "b": []
+     },
+     "events": [
+      "0 fight!",
+      "0.3 clash: Charizard (you) Fire Blast × Jolteon (boss) Electro Shot at 0.5",
+      "5.07 clash over → Jolteon (boss) wins (stops 951 / 986, outright)",
+      "5.07 Jolteon (boss) Electro Shot → Charizard (you) −804 (2376/3180)",
+      "11.13 clash: Charizard (you) Fire Blast × Jolteon (boss) Electro Shot at 0.5",
+      "15.7 clash over → Jolteon (boss) wins (stops 960 / 993, outright)",
+      "15.7 Jolteon (boss) Electro Shot → Charizard (you) −807 (1569/3180)",
+      "19.68 Jolteon (boss) Zippy Zap → Charizard (you) −180 (1389/3180)",
+      "21.24 Jolteon (boss) Zippy Zap → Charizard (you) −180 (1209/3180)",
+      "22.67 Jolteon (boss) Giga Impact → Charizard (you) −105 (1104/3180)",
+      "23.43 Jolteon (boss) Zippy Zap → Charizard (you) −180 (924/3180)",
+      "28.18 Jolteon (boss) Zippy Zap → Charizard (you) −180 (744/3180)",
+      "30.24 Jolteon (boss) Zippy Zap → Charizard (you) −180 (564/3180)",
+      "31.02 clash: Charizard (you) Fire Blast × Jolteon (boss) Electro Shot at 0.5",
+      "35.71 clash over → Jolteon (boss) wins (stops 991 / 980, outright)",
+      "35.71 Jolteon (boss) Electro Shot → Charizard (you) −802 (0/3180)",
+      "35.71 Charizard (you) fainted",
+      "35.74 you lose"
+     ]
+    }
+   ],
+   "winner": "d10-jolteon"
+  }
+ ]
+}
