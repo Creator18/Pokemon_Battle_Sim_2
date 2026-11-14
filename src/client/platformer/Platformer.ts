@@ -18,7 +18,7 @@ import { pokeballMesh } from '../metroidverse/palletTown.ts';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3, Color4 } from '@babylonjs/core/Maths/math.color';
-import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { Vector3, Matrix } from '@babylonjs/core/Maths/math.vector';
 import { Ray } from '@babylonjs/core/Culling/ray';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
@@ -53,6 +53,11 @@ export const FLOORS = /earth|face|step|path|lawn|floor|beach|tier|seam|grass|gro
 const ENCOUNTER_LINGER = 1.6;
 const SHAKE_MAX = 0.45, SHAKE_DECAY = 1.6;
 /** The camera: how far off the plane, how high above the body, how far it leads the way it faces, how quickly it follows. */
+/** A trajectory line's dots: how big (world units), how far apart, how many at most. */
+const AIM_DOT = 0.13, AIM_GAP = 0.34, AIM_DOTS = 60;
+/** How far out from its mouth (× its height) its trajectory line begins: clear of its own body. */
+const AIM_CLEAR = 0.45;
+const TMP_M = new Matrix();
 const CAM_DIST = 15, CAM_UP = 2.2, CAM_LEAD = 2.5, CAM_EASE = 5;
 /** A Pokémon left hidden or see-through longer than this (s) - longer than any blink, teleport or vanish - is shown again. */
 const STUCK_HIDE = 1.2;
@@ -394,10 +399,48 @@ export class Platformer {
       want: (has('d', 'arrowright') ? 1 : 0) - (has('a', 'arrowleft') ? 1 : 0),
       jumpHeld: has(' '), jumpPressed: hit(' '), sink: false,
       aim: (has('w', 'arrowup') ? 1 : 0) - (has('s', 'arrowdown') ? 1 : 0),
-      ranged: hit('u'), close: hit('i'), mobility: hit('j'), control: hit('k'), dash: hit('l'),
+      ranged: hit('u'), rangedHeld: has('u'), close: hit('i'), mobility: hit('j'), control: hit('k'), dash: hit('l'),
     };
     this.pressed.clear();
     return i;
+  }
+
+  /** Each fighter's trajectory line while it takes aim (Fighter.aimLine): dashed, from its mouth to where it would stop. */
+  private aimLines = new Map<Fighter, Mesh>();
+  private drawAimLines(): void {
+    for (const f of this.fighters) {
+      const line = f.aimLine(this.arena);
+      let m = this.aimLines.get(f);
+      if (!line) { if (m) m.isVisible = false; continue; }
+      if (!m) {
+        m = MeshBuilder.CreateSphere('aimDot', { diameter: AIM_DOT, segments: 6 }, this.scene);
+        const mat = new StandardMaterial('aimDotMat', this.scene);
+        mat.disableLighting = true;
+        mat.emissiveColor = f === this.player ? new Color3(1, 1, 1) : new Color3(1, 0.5, 0.4);
+        mat.alpha = 0.9;
+        m.material = mat;
+        m.isPickable = false; m.alwaysSelectAsActiveMesh = true;
+        m.thinInstanceSetBuffer('matrix', new Float32Array(AIM_DOTS * 16), 16, false);
+        this.aimLines.set(f, m);
+        this.meshes.push(m);
+      }
+      // (Dots AIM_GAP apart from its mouth to where it would stop, a little bigger at its end.)
+      // (Begun AIM_CLEAR × its height out from its mouth: clear of its own body.)
+      const [mx, my] = line.from, [x1, y1] = line.to;
+      const full = Math.hypot(x1 - mx, y1 - my), off = Math.min(full, f.H * AIM_CLEAR);
+      const x0 = full > 1e-6 ? mx + ((x1 - mx) / full) * off : mx, y0 = full > 1e-6 ? my + ((y1 - my) / full) * off : my;
+      if (full - off < AIM_GAP * 0.5) { m.isVisible = false; continue; }
+      const len = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.min(AIM_DOTS, Math.floor(len / AIM_GAP) + 1));
+      const buf = new Float32Array(n * 16);
+      for (let k = 0; k < n; k++) {
+        const t = n === 1 ? 1 : k / (n - 1), sc = k === n - 1 ? 1.8 : 1;
+        Matrix.ScalingToRef(sc, sc, sc, TMP_M);
+        TMP_M.setTranslationFromFloats(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, 0);
+        TMP_M.copyToArray(buf, k * 16);
+      }
+      m.thinInstanceSetBuffer('matrix', buf, 16, false);
+      m.isVisible = true;
+    }
   }
 
   // ── a frame ──────────────────────────────
@@ -740,6 +783,7 @@ export class Platformer {
       const intent = brain ? brain() : f === this.boss && this.ai ? (over ? IDLE : this.ai.think()) : { ...IDLE, face: Math.sign(this.player.x - f.x) || f.facing };
       f.step(dt, intent, this.arena);
     }
+    this.drawAimLines();
     for (const f of this.fighters) {
       if (!f.fellOut(KILL_Y)) continue;
       if (f === this.player) f.place(this.start.x, this.start.y, 1);

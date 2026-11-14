@@ -59,7 +59,7 @@ function readyCamera(camera: Camera): void {
 /** The controls, as key caps in a column bottom right (the moves are on the move bar, with their keys). */
 function helpLine(_moves: MoveKit, _withBar = true): HTMLDivElement {
   document.querySelector('[data-pf-help]')?.remove();
-  return new ControlsLegend([[['A', 'D'], 'run'], [['Space'], 'jump / fly'], [['W', 'S'], 'aim'], [['R'], 'restart']]).el;
+  return new ControlsLegend([[['A', 'D'], 'run'], [['Space'], 'jump / fly'], [['U'], 'hold to aim, let go to fire'], [['W', 'S'], 'swing the aim'], [['R'], 'restart']]).el;
 }
 
 /** The boss battlefield: the League stadium (or the colosseum, or the 3D grass stadium), you against a boss. */

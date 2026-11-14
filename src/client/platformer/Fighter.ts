@@ -39,8 +39,8 @@
  *             done, its landing cutting the striker's attack off as any blow does; nothing coming: left open COUNTER_WHIFF s. Then not
  *             again for COUNTER_COOL s.
  * Struck, it is held (no moving, no moves) for as long as its flinch lasts — and a beam it was charging or pouring is cut
- * off — pushed back from its striker (PUSH_SPEED), and can't be struck again till HIT_GRACE s after its flinch ends
- * (blinking meanwhile): no blow lands on a fighter twice in a row — no stun-locks; out of HP it faints — and a practice target (`respawn`) stands again after RESPAWN s. A blow's damage: its move's
+ * off, an aim it was taking dropped — pushed back from its striker (PUSH_SPEED). No grace after: hits chain (the moves'
+ * cooldowns, ATTACK_COOL longer for attacks, keep that in check); out of HP it faints — and a practice target (`respawn`) stands again after RESPAWN s. A blow's damage: its move's
  * the main series' (damageTo): its user's and its target's real stats at LEVEL (from their base stats — perfect IVs,
  * their EVs, a neutral nature), ⌊⌊22 × power × A / D⌋ / 50⌋ + 2, × the same-type bonus (STAB) × its type's effectiveness.
  *
@@ -113,6 +113,11 @@ export function oneMobility(kit: MoveKit): MoveKit {
 export interface Intent {
   want: number; jumpHeld: boolean; jumpPressed: boolean; sink: boolean; aim: number;
   ranged: boolean; close: boolean; mobility: boolean; control: boolean;
+  /**
+   * Its ranged key still held (the player's): set, it aims till it is let go - W / S (aim) swinging the line. Unset (the
+   * bots'): its line swings to `aim` and it fires once there (AIM_MIN at the soonest).
+   */
+  rangedHeld?: boolean;
   /**
    * Its dash (anyone's, whatever its moves): the way it is held (`want`) — a dash; held neither way, a back dash (gone
    * backwards in speed lines, still facing forwards). Under Agility, both zippy dashes, further.
@@ -412,7 +417,17 @@ export interface ClashMeter {
   outcome(): number | null; outright(): boolean;
 }
 /** Struck: pushed back this fast (world units/s), for this long (s); unhurtable this long after its flinch ends (s). */
-const PUSH_SPEED = 7, PUSH_TIME = 0.18, HIT_GRACE = 0.5;
+const PUSH_SPEED = 7, PUSH_TIME = 0.18;
+/** A ranged blow taken mid contact move (it keeps going): the flash it shows instead of a flinch. */
+const HIT_FLASH: [number, number, number] = [1, 0.35, 0.3];
+/** Every attacking move's cooldown × this (no grace after a hit now: chains kept in check by the cooldowns instead). */
+const ATTACK_COOL = 1.6;
+/**
+ * Aiming a ranged move: pressed, its trajectory line shows (level), W / S swing it up / down at AIM_RATE (aim units a
+ * second, ±1 the most), and it fires as the key is let go - never sooner than AIM_MIN s after the press (time a foe
+ * can close in on), and of itself after AIM_HOLD_MAX s held. Rooted meanwhile (it may still turn round).
+ */
+export const AIM_MIN = 0.25, AIM_RATE = 2.2, AIM_HOLD_MAX = 3;
 /** Knocked back: how fast it is thrown (world units/s), how high, how long it is out of its own control (s), how quickly the throw dies away (per s). */
 const KNOCK_SPEED = 11, KNOCK_UP = 5, KNOCK_TIME = 0.45, KNOCK_DRAG = 3;
 /** A practice target: how long it lies fainted before it stands again (s). */
@@ -493,8 +508,10 @@ export class Fighter {
   private knockT = 0;
   /** Caught unawares (a strike from behind on it, till its blow lands): it can't turn round to face its striker. */
   turnLocks = 0;
-  /** Unhurtable till this (its own clock; Infinity while it flinches — then HIT_GRACE more). */
+  /** Unhurtable till this (its own clock) - nothing sets it now: no grace after a hit. */
   private graceUntil = 0;
+  /** Taking aim with its ranged move: since when (its own clock), its line's aim now, and whether it is held (the player's). */
+  aiming: { since: number; aim: number; held: boolean } | null = null;
   /** Sucker Punch braced: till when (its own clock). Left open after a whiff: till when. The arena it is in (for its tells). */
   private counterUntil = -1; private lagUntil = 0; private arenaRef: Arena | null = null;
   /** The move it is telling (about to make), and how many times its attack has been cut off by a counter. */
@@ -586,7 +603,7 @@ export class Fighter {
   }
 
   /** Busy: in a move, mid step, held, or down — it takes no new move. */
-  get busy(): boolean { return this.firing || this.quick || !!this.ramming || this.stunned || this.down || this.dashT > 0 || this.time < this.lagUntil; }
+  get busy(): boolean { return !!this.aiming || this.firing || this.quick || !!this.ramming || this.stunned || this.down || this.dashT > 0 || this.time < this.lagUntil; }
   /** Braced to counter. */
   get countering(): boolean { return this.counterUntil >= 0; }
   /** Where its mouth is (its beams' height). */
@@ -613,7 +630,7 @@ export class Fighter {
     if (this.down) { this.down = false; this.factory.revive(this.node); }
     this.beam?.play.cancel?.(); this.beam = null;
     this.dropBalls(true); this.stopRam(); this.confusedUntil = -1;
-    this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null;
+    this.stunned = false; this.firing = false; this.quick = false; this.clip = ''; this.turnLocks = 0; this.graceUntil = 0; this.clashing = null; this.aiming = null;
     this.counterUntil = -1; this.lagUntil = 0; this.flyReadyAt = 0;
     this.readyAt.clear(); this.coolLen.clear(); this.heat.clear(); this.run = null; this.agilityUntil = -1;
   }
@@ -638,7 +655,9 @@ export class Fighter {
     // (A brace gone off: by the power of the move it turned back.)
     const bp = getMove(BRACES.has(move) && this.braceAgainst ? this.braceAgainst : move)?.basePower ?? 0;
     const powerK = bp > 0 ? clamp(Math.sqrt(bp / POWER_REF), POWER_K) : 1;
-    return base * speedK * powerK * (1 + ABUSE_STEP * this.heatOf(move));
+    // (An attack: ATTACK_COOL longer.)
+    const attack = !BRACES.has(move) && (getMove(move)?.basePower ?? 0) > 0 ? ATTACK_COOL : 1;
+    return base * speedK * powerK * attack * (1 + ABUSE_STEP * this.heatOf(move));
   }
   /** A move begun that will cool down once it has gone as it should. */
   private startRun(move: string): number { const k = ++this.runSeq; this.run = { move, k }; return k; }
@@ -744,14 +763,24 @@ export class Fighter {
     const it = this.confused ? { ...told, want: -told.want, aim: -told.aim, face: told.face ? -told.face : told.face } : told;
     // Its aim: where it looks, and where its moves go (held through a move: it set its line as it began).
     // (Its beam pouring, or held in a clash: its gaze kept on the beam's line, wherever the aim key goes since.)
-    if (!this.down) { this.aim = it.aim; this.factory.setGaze(this.node, this.firing && this.lineGaze !== null ? this.lineGaze : this.aim * AIM_ANGLE); }
+    if (!this.down) { if (this.aiming) this.steerAim(dt, it); else this.aim = it.aim; this.factory.setGaze(this.node, this.firing && this.lineGaze !== null ? this.lineGaze : this.aim * AIM_ANGLE); }
     // Its beam's line, while it pours, a hit zone: a foe moving into it is struck there and then.
     this.sweepBeam(arena);
     // In a clash: its ranged key stops its needle.
     if (this.clashing && intent.ranged && !this.down) this.clashing.press();
+    // Its aim taken: let go (or, a bot's, its line there), and no sooner than AIM_MIN - fired.
+    if (this.aiming) {
+      const a = this.aiming, t = this.time - a.since;
+      const letGo = a.held ? !intent.rangedHeld : Math.abs(it.aim - a.aim) < 1e-3;
+      if (this.stunned || this.down) this.aiming = null;
+      else if ((letGo && t >= AIM_MIN) || t >= AIM_HOLD_MAX) {
+        this.aiming = null;
+        if (this.ready(this.moves.ranged)) this.fire(arena);
+      }
+    }
     // Its moves, pressed this frame.
     if (!this.busy) {
-      if (it.ranged && this.ready(this.moves.ranged)) this.fire(arena);
+      if (it.ranged && this.ready(this.moves.ranged)) this.aiming = { since: this.time, aim: 0, held: intent.rangedHeld !== undefined };
       else if (it.close && this.ready(this.moves.close)) this.slash(arena);
       else if (it.mobility && isQuickStrike(this.moves.mobility)) this.quickAttack(arena, this.moves.mobility!);
       else if (it.control && this.moves.control === 'Growl' && this.ready('Growl')) this.growl(arena);
@@ -768,8 +797,8 @@ export class Fighter {
     // (Turned only once it fits: turning by another would swing its tail into it — it steps away first, then turns.)
     const turnTo = want || it.face || 0;
     if (turnTo && !this.firing && !held && !this.turnLocks && this.time >= this.unawareUntil && (turnTo === this.facing || this.canTurn(turnTo, arena))) this.face(turnTo);
-    if (it.jumpPressed) this.sinceJumpPress = 0;
-    this.jumpHeld = it.jumpHeld;
+    if (it.jumpPressed && !this.aiming) this.sinceJumpPress = 0;
+    this.jumpHeld = it.jumpHeld && !this.aiming;
     this.sinceGround = this.grounded ? 0 : this.sinceGround + dt;
     this.sinceJumpPress += dt;
     if (this.knockT > 0) {
@@ -778,8 +807,8 @@ export class Fighter {
       this.vx *= Math.exp(-dt * KNOCK_DRAG);
       if (this.flying) this.vy *= Math.exp(-dt * KNOCK_DRAG);
       else this.vy = Math.max(-FALL_MAX, this.vy - GRAVITY * dt);
-    } else if (this.firing || held) {
-      // In a move, or held: it holds its ground (flying, it hovers; else it still falls).
+    } else if (this.firing || held || this.aiming) {
+      // In a move, aiming, or held: it holds its ground (flying, it hovers; else it still falls).
       this.vx = 0;
       if (this.flying) this.vy = 0;
       else this.vy = Math.max(-FALL_MAX, this.vy - GRAVITY * dt);
@@ -885,6 +914,32 @@ export class Fighter {
   fellOut(killY: number): boolean { return this.node.position.y < killY; }
 
   // ── its moves ──────────────────────────────
+  /** In a contact move now: ramming, a flurry or slash (its close move) under way, a priority dash or a strike from behind. */
+  inContactMove(): boolean {
+    if (this.ramming) return true;
+    const u = this.using;
+    if (!u) return false;
+    if (this.quick) return isQuickStrike(u) || !!BEHIND_STRIKES[u];
+    return this.firing && u === this.moves.close && u !== 'Earthquake';
+  }
+
+  /** Its line swung, aiming: the player's by W / S (aim), a bot's toward the aim it wants - AIM_RATE a second either way. */
+  private steerAim(dt: number, it: Intent): void {
+    const a = this.aiming!, step = AIM_RATE * dt;
+    a.aim = a.held ? Math.max(-1, Math.min(1, a.aim + it.aim * step)) : a.aim + Math.max(-step, Math.min(step, it.aim - a.aim));
+    this.aim = a.aim;
+  }
+
+  /** Its trajectory line, aiming: from its mouth along its aim, to where it would stop (a foe, the ground, a pillar, its reach). */
+  aimLine(arena: Arena): { from: [number, number]; to: [number, number] } | null {
+    if (!this.aiming || this.down) return null;
+    const from = this.mouth(), dir = this.aimDir(), range = this.beamRange;
+    let d = Fighter.nearer(Fighter.pillarAlong(arena, from, dir, range), Fighter.groundAlong(arena, from, dir, range)) ?? range;
+    const hit = this.beamTarget(arena, range);
+    if (hit && hit.d < d) d = hit.d;
+    return { from, to: [from[0] + dir[0] * d, from[1] + dir[1] * d] };
+  }
+
   /** The way its aim points (unit, x then y): the way it faces, tilted up or down. */
   aimDir(aim = this.aim): [number, number] {
     const a = aim * AIM_ANGLE;
@@ -1105,7 +1160,7 @@ export class Fighter {
   }
 
   /** Pushed back from `by` (a blow): a short shove away from it, along the ground or the air it is in. */
-  private pushFrom(by: Fighter): void {
+  pushFrom(by: Fighter): void {
     const dir = Math.sign(this.x - by.x) || -this.facing;
     this.knockT = PUSH_TIME;
     this.vx = dir * PUSH_SPEED;
@@ -2105,8 +2160,8 @@ export class Fighter {
 
   /**
    * Its close move a plain contact blow (Close Combat, Thrash, Outrage…): a flurry where it stands, more and faster
-   * blows the stronger it is, its damage shared out over them (each on a foe still in reach; after the first, through
-   * its grace). Thrash and Outrage leave it confused (CONFUSE_TIME s).
+   * blows the stronger it is - but its look only: its whole damage lands at once, on the first blow that finds the foe
+   * in reach. Thrash and Outrage leave it confused (CONFUSE_TIME s).
    */
   private flurry(arena: Arena): void {
     const name = this.moves.close!;
@@ -2123,15 +2178,26 @@ export class Fighter {
     this.begin(name);
     if (this.announceAttack(arena)) { this.dropAttack(); return; }
     const k = this.startRun(name);
-    let landed = 0;
+    // (The flurry is its look only: the move's whole damage lands at once, on the first blow that finds the foe in reach;
+    // the rest of the blows are the animation.)
+    // (Caught by it, the foe takes every blow: held in its flinch till the flurry is over, each blow struck home on it
+    // - its hit reaction again - and pushed back only by the last.)
+    let landed = false;
+    let over!: () => void;
+    const flurryOver = new Promise<void>((r) => { over = r; });
     const blow = (i: number, of: number) => {
-      if (this.down || this.using !== name || !near || !inReach(near)) return;
-      if (landed === 0 && near.invulnerable) return;
-      const share = Math.max(1, Math.round(this.damageTo(name, near) / of));
-      if (near.takeHit(this, name, () => this.factory.playHitReact(near.node), arena, share, landed > 0, i === of - 1)) landed++;
-      void i;
+      if (!near) return;
+      if (landed) {
+        if (near.down) return;
+        void this.factory.playHitReact(near.node);
+        if (i === of - 1) near.pushFrom(this);
+        return;
+      }
+      if (this.down || this.using !== name || !inReach(near)) return;
+      landed = near.takeHit(this, name, () => { void this.factory.playHitReact(near.node); return flurryOver; }, arena, undefined, false, of === 1);
     };
     const play = this.factory.playFlurry ? this.factory.playFlurry(this.node, at, getMove(name)?.basePower ?? 60, blow) : Promise.resolve();
+    void play.then(() => over(), () => over());
     void play.then(() => {
       if (this.using !== name) return;
       this.finishRun(k); this.end();
@@ -2167,11 +2233,19 @@ export class Fighter {
     // (Immune — its type unaffected by the move's: no damage, no flinch, no push; only told so.)
     const damage = damageOverride ?? hurt(by.damageTo(move, this));
     if (damage <= 0) { arena.onHit?.(by, this, move, 0); return false; }
+    // (Struck by a ranged move mid contact move - a ram, a flurry, a slash, a priority dash, a strike from behind: it keeps
+    // going, hurt all the same - a flash, no flinch, no push, nothing cut off. Its last HP: it falls as any blow fells it.)
+    if (by.moves.ranged === move && this.inContactMove() && this.hp - damage > 0) {
+      this.hp -= damage;
+      arena.onHit?.(by, this, move, damage);
+      this.factory.tell(this.node, HIT_FLASH, 0.12);
+      return true;
+    }
     const over = typeof flinch === 'function' ? flinch() : flinch;
     this.shaken(arena);
-    // (Unhurtable till its flinch is over and HIT_GRACE after, blinking; pushed back from its striker.)
-    this.graceUntil = Infinity;
-    void over.then(() => { this.graceUntil = this.time + HIT_GRACE; if (!this.down) this.factory.blink(this.node, HIT_GRACE); });
+    // (No grace after: struck again, it is hurt again. Pushed back from its striker; an aim it was taking dropped.)
+    void through;
+    this.aiming = null;
     if (push) this.pushFrom(by);
     // (Struck while braced: the brace is broken — out of it, as if it had run out.)
     // (Its move under way cut off by the blow: no cooldown for it — nor for a brace broken so.)
